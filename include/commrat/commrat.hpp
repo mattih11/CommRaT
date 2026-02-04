@@ -4,7 +4,7 @@
 #include "commrat/messages.hpp"
 #include "commrat/message_registry.hpp"
 #include "commrat/tims_wrapper.hpp"
-#include "commrat/message_service.hpp"
+#include "commrat/mailbox.hpp"
 
 /**
  * @namespace commrat

@@ -2,6 +2,14 @@
 build/
 cmake-build-*/
 
+# Dependencies (symlinks to external repos)
+SeRTial
+tims
+rack
+
+# Work-in-progress documentation
+docs/work/
+
 # IDE files
 .vscode/
 .idea/

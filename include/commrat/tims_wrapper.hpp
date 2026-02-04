@@ -114,9 +114,10 @@ public:
     uint64_t get_messages_sent() const { return messages_sent_.load(); }
     uint64_t get_messages_received() const { return messages_received_.load(); }
     
-    // Public method to receive raw bytes (for MessageService)
-    ssize_t receive_raw_bytes(void* buffer, size_t buffer_size, std::chrono::milliseconds timeout) {
-        return receive_raw(buffer, buffer_size, timeout);
+    // Modern C++ interface using std::span<std::byte>
+    // Casting to void* happens here at the TiMS boundary
+    ssize_t receive_raw_bytes(std::span<std::byte> buffer, std::chrono::milliseconds timeout) {
+        return receive_raw(buffer.data(), buffer.size(), timeout);
     }
     
 private:

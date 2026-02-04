@@ -21,7 +21,6 @@ include_directories(
 # Library target
 add_library(commrat STATIC
     src/tims_wrapper.cpp
-    src/message_service.cpp
 )
 
 target_include_directories(commrat PUBLIC
@@ -39,30 +38,22 @@ target_link_libraries(commrat PUBLIC
 )
 
 # Example applications
-add_executable(example_sender examples/sender.cpp)
-target_link_libraries(example_sender PRIVATE commrat)
-
-add_executable(example_receiver examples/receiver.cpp)
-target_link_libraries(example_receiver PRIVATE commrat)
-
 add_executable(example_simple_usage examples/simple_usage.cpp)
 target_link_libraries(example_simple_usage PRIVATE commrat)
 
 add_executable(example_registry_demo examples/registry_demo.cpp)
 target_link_libraries(example_registry_demo PRIVATE commrat)
 
-add_executable(example_custom_messages examples/custom_messages.cpp)
-target_link_libraries(example_custom_messages PRIVATE commrat)
+# Mailbox example
+add_executable(example_mailbox examples/mailbox_example.cpp)
+target_link_libraries(example_mailbox PRIVATE commrat)
 
-# Test executables
-add_executable(test_sender test/test_sender.cpp)
-target_link_libraries(test_sender PRIVATE commrat)
-
-add_executable(test_receiver test/test_receiver.cpp)
-target_link_libraries(test_receiver PRIVATE commrat)
+# Nonblocking test
+add_executable(test_nonblocking examples/test_nonblocking.cpp)
+target_link_libraries(test_nonblocking PRIVATE commrat)
 
 # Install targets
-install(TARGETS commrat example_sender example_receiver example_simple_usage example_registry_demo
+install(TARGETS commrat example_simple_usage example_registry_demo example_mailbox test_nonblocking
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )

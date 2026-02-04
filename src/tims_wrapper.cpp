@@ -121,7 +121,13 @@ ssize_t TimsWrapper::receive_raw(void* buffer, size_t buffer_size,
     }
     
     // Convert timeout to nanoseconds for TIMS
-    int64_t timeout_ns = timeout.count() * 1000000;  // ms to ns
+    // Special case: -1ms means non-blocking (TIMS_NONBLOCK = -1ns)
+    int64_t timeout_ns;
+    if (timeout.count() == -1) {
+        timeout_ns = -1;  // TIMS_NONBLOCK
+    } else {
+        timeout_ns = timeout.count() * 1000000;  // ms to ns
+    }
     
     tims_msg_head head;
     ssize_t bytes_received = tims_recvmsg_timed(

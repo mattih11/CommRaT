@@ -50,6 +50,12 @@ private:
     // Helper to check if a type is in the registry
     template<typename T>
     static constexpr bool is_registered_v = (std::is_same_v<T, MessageTypes> || ...);
+
+public:
+    // Maximum message size across all registered types (for buffer allocation)
+    static constexpr size_t max_message_size = std::max({sertial::Message<MessageTypes>::max_buffer_size...});
+
+private:
     
     // Helper to get index of type in tuple
     template<typename T, size_t Index = 0>
@@ -162,15 +168,6 @@ public:
         return deserialize_message<T>(data);
     }
     
-    /**
-     * @brief Deserialize a message with known type at compile time (buffer overload)
-     */
-    template<typename T>
-        requires is_registered_v<T>
-    static auto deserialize(const uint8_t* data, size_t size) {
-        return deserialize_message<T>(data, size);
-    }
-    
     // ========================================================================
     // Runtime Dispatch (Visitor Pattern)
     // ========================================================================
@@ -196,17 +193,6 @@ public:
     template<typename Visitor>
     static bool visit(MessageType msg_type, std::span<const std::byte> data, Visitor&& visitor) {
         return visit_impl<0>(msg_type, data, std::forward<Visitor>(visitor));
-    }
-    
-    /**
-     * @brief Visit a message by its MessageType enum (buffer overload)
-     */
-    template<typename Visitor>
-    static bool visit(MessageType msg_type, const uint8_t* data, size_t size, Visitor&& visitor) {
-        auto byte_span = std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(data), size
-        );
-        return visit(msg_type, byte_span, std::forward<Visitor>(visitor));
     }
     
     /**

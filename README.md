@@ -4,19 +4,20 @@
 
 # CommRaT - Modern C++ Real-Time Communication Framework
 
-A modern C++20 communication framework that combines **RACK's TiMS IPC** message service with **SeRTial's** zero-allocation serialization, providing compile-time safe, real-time capable messaging with templated message types and a powerful message registry for efficient type dispatch.
+A modern C++20 communication framework that combines **RACK's TiMS IPC** message service with **SeRTial's** zero-allocation serialization, providing compile-time safe, real-time capable messaging with templated message types and a powerful mailbox interface for efficient type dispatch.
 
 ## Features
 
-- **Modern C++20**: Full template metaprogramming with concepts and type safety
-- **Zero-Allocation Serialization**: Stack-allocated buffers via SeRTial with compile-time size computation
+- **Modern C++20**: Full template metaprogramming with concepts, `std::span`, and type safety
+- **Zero-Allocation Serialization**: Stack-allocated `std::byte` buffers via SeRTial with compile-time size computation
 - **Compile-Time Type Safety**: Templated message types with static validation
+- **Mailbox API**: Modern C++20 RAII-based mailbox with blocking/non-blocking/timeout receive patterns
 - **Message Registry**: Compile-time type registry for zero-overhead message dispatch
-- **Runtime Visitor Pattern**: Efficient runtime dispatch without virtual functions
-- **SeRTial Integration**: Automatic serialization using `fixed_vector` and `fixed_string` containers
-- **TiMS IPC Backend**: Socket-based real-time messaging from RACK
+- **Runtime Visitor Pattern**: Efficient runtime dispatch without virtual functions (receive_any)
+- **SeRTial Integration**: Automatic serialization using `fixed_vector`, `fixed_string`, and `buffer_type`
+- **TiMS IPC Backend**: Socket-based real-time messaging from RACK (casting at C API boundary only)
 - **RT-Capable**: No dynamic allocation in message paths, deterministic behavior
-- **User-Friendly API**: Define custom payloads, get type-safe messages automatically
+- **Clean Interfaces**: `std::span<std::byte>` throughout, pointer+size only at TiMS boundary
 
 ## Quick Start
 
@@ -45,27 +46,79 @@ make -j$(nproc)
 int main() {
     using namespace commrat;
     
-    // Create a status message
+    // Define message registry (compile-time)
+    using MyRegistry = MessageRegistry<StatusMessage, CommandMessage>;
+    
+    // Create mailbox
+    TimsConfig config{
+        .mailbox_name = "my_mailbox",
+        .mailbox_id = 100,
+        .max_msg_size = MyRegistry::max_message_size,
+        .priority = 10
+    };
+    
+    Mailbox<MyRegistry> mailbox(config);
+    mailbox.start();
+    
+    // Send a message
     StatusMessage status;
     status.payload.status_code = 200;
     status.payload.cpu_load = 0.65f;
     status.payload.description = "System OK";
     
-    // Serialize - type ID automatically set from template parameter
-    auto result = serialize(status);
+    mailbox.send(status, 200); // Send to mailbox ID 200
     
-    // Deserialize with compile-time type knowledge
-    auto msg = deserialize<StatusMessage>(
-        std::span{result.buffer.data(), result.size}
+    // Receive with timeout
+    auto result = mailbox.receive_for<StatusMessage>(
+        std::chrono::milliseconds(1000)
     );
     
-    if (msg) {
-        std::cout << "Status: " << msg->payload.status_code << "\n";
+    if (result) {
+        std::cout << "Status: " << result->message.payload.status_code << "\n";
     }
 }
 ```
 
 ## Architecture
+
+### Mailbox-Based Communication
+
+The core abstraction is the type-safe `Mailbox` template:
+
+```cpp
+// Define your message types
+using MyMailbox = Mailbox<
+    StatusMessage,
+    CommandMessage,
+    SensorMessage
+>;
+
+// Create and start
+TimsConfig config = /* ... */;
+MyMailbox mailbox(config);
+mailbox.start();
+
+// Type-safe send
+CommandMessage cmd;
+mailbox.send(cmd, dest_id);
+
+// Blocking receive
+auto msg = mailbox.receive<StatusMessage>();
+
+// Non-blocking receive
+auto msg = mailbox.try_receive<CommandMessage>(
+    std::chrono::milliseconds(0)
+);
+
+// Receive any registered type (visitor pattern)
+mailbox.receive_any([](auto&& received_msg) {
+    using MsgType = std::decay_t<decltype(received_msg.message)>;
+    // Handle message based on type
+    if constexpr (std::is_same_v<MsgType, StatusMessage>) {
+        std::cout << "Status: " << received_msg.message.payload.status_code;
+    }
+});
+```
 
 ### Templated Message System
 
@@ -122,63 +175,105 @@ auto result = serialize(msg);  // msg.header.msg_type automatically set
 - Type-to-ID mapping via `message_type_for` trait
 - Compile-time validation - won't compile if trait is missing
 - Zero runtime overhead
+- RAII lifecycle management with `Mailbox`
+- Modern C++20 interfaces: `std::span<std::byte>`, concepts, type traits
+- Buffer sizes from `MessageRegistry::max_message_size` (no hardcoded values)
 
-## Running the Tests
+## Running Examples and Tests
 
-The test applications demonstrate complete message exchange with proper type identification:
+### Registry Demo
 
-### Terminal 1: Start Receiver
-
-```bash
-cd build
-./test_receiver 200
-```
-
-### Terminal 2: Send Messages
-
-```bash
-cd build
-./test_sender 200
-```
-
-### Example Output
-
-```
-[StatusMessage] Received:
-  Timestamp: 113852048385
-  Seq: 0
-  Status code: 100
-  CPU load: 45%
-  Memory: 30%
-  Description: Test status message #0
-
-[CommandMessage] Received:
-  Timestamp: 113852548546
-  Seq: 1
-  Command ID: 1000
-  Target ID: 5
-  Parameters (3): 0, 0, 0
-```
-
-### Run Simple Usage Example
-
-```bash
-cd build
-./example_simple_usage
-```
-
-This demonstrates the clean user-facing API with automatic type-to-ID mapping.
-
-### Run Registry Demo
+Demonstrates compile-time message registry and runtime dispatch:
 
 ```bash
 cd build
 ./example_registry_demo
 ```
 
-This shows the internal registry implementation (for advanced users only).
+Shows:
+- Default registry with 6 built-in message types
+- Runtime dispatch with visitor pattern
+- Custom registry creation
+- Compile-time type information and max buffer sizes
 
-See full examples and API documentation in the `examples/` directory.
+### Mailbox Example
+
+Complete sender/receiver demo with type-safe mailbox:
+
+```bash
+cd build
+./example_mailbox
+```
+
+Demonstrates:
+- Simple bidirectional communication
+- Visitor pattern (receive_any with different types)
+- Non-blocking and timeout receive
+- Type safety with restricted registries
+- Standard mailbox usage
+
+### Non-Blocking Test
+
+Validates non-blocking receive behavior:
+
+```bash
+cd build
+./test_nonblocking
+```
+
+Verifies:
+- Non-blocking receive is truly non-blocking (0ms for 10 calls)
+- Timeout receive properly times out (~1000ms due to TiMS quirk)
+
+### Simple Usage
+
+Basic serialization/deserialization example:
+
+```bash
+cd build
+./example_simple_usage
+```
+
+### Simple Usage
+
+Basic serialization/deserialization example:
+
+```bash
+cd build
+./example_simple_usage
+```
+
+Shows:
+- Serialize/deserialize with automatic type IDs
+- Multiple message types
+- Compile-time type information
+- Type traits validation
+
+## API Overview
+
+### Core Components
+
+1. **Mailbox<MessageTypes...>**: Type-safe mailbox with RAII lifecycle
+   - `start()` / `stop()`: Lifecycle management
+   - `send<T>(msg, dest_id)`: Type-safe send
+   - `receive<T>()`: Blocking receive
+   - `try_receive<T>(timeout)`: Non-blocking receive
+   - `receive_for<T>(timeout)`: Timeout receive
+   - `receive_any(visitor)`: Visitor pattern for runtime dispatch
+   - `clean()`: Clear pending messages
+
+2. **MessageRegistry<MessageTypes...>**: Compile-time type registry
+   - `serialize<T>(msg)`: Type-safe serialization
+   - `deserialize<T>(data)`: Type-safe deserialization
+   - `visit(msg_type, data, visitor)`: Runtime dispatch
+   - `max_message_size`: Maximum buffer size for all types
+
+3. **TimsWrapper**: Low-level TiMS IPC wrapper
+   - Modern C++ interface with `std::span<std::byte>`
+   - Casting to void* only at TiMS C API boundary
+   - RAII resource management
+
+See full examples and API documentation in the `examples/` directory and `docs/MAILBOX_DESIGN.md`.
 
 ## License
 
@@ -186,5 +281,5 @@ See LICENSE file for details.
 
 ## References
 
-- [RACK Project](http://rack.sourceforge.net/)
-- SeRTial Library - Reflective C++ serialization
+- [RACK Project](https://github.com/smolorz/RACK) - Robotics Application Construction Kit
+- [SeRTial Library](https://github.com/mattih11/SeRTial) - Reflective C++ serialization
