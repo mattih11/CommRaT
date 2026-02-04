@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/CommRaT.svg" alt="CommRaT Logo" width="400"/>
+  <img src="docs/CommRaT.png" alt="CommRaT Logo" width="400"/>
 </div>
 
 # CommRaT - Modern C++ Real-Time Communication Framework
