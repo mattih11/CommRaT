@@ -11,7 +11,8 @@
 
 #### 1. **Compile-Time Message System**
 - ✅ `MessageRegistry<MessageDefs...>` - Variadic template, all types known at compile time
-- ✅ `MessageDefinition<PayloadT, Prefix, SubPrefix, LocalID>` - Compile-time ID calculation
+- ✅ `Message::Data<T>`, `Message::Command<T>`, `Message::Event<T>` - Clean namespace syntax (wraps MessageDefinition internally)
+- ✅ `MessageDefinition<PayloadT, Prefix, SubPrefix, LocalID>` - Internal compile-time ID calculation
 - ✅ Zero runtime allocation for message dispatch (visitor pattern with compile-time type expansion)
 - ✅ Automatic buffer size calculation: `max_message_size` computed via fold expressions
 - ✅ Type-safe serialization via SeRTial (compile-time size validation)

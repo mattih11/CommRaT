@@ -42,24 +42,25 @@ struct PoseData {
 };
 
 // ============================================================================
-// Message Registry (System messages included automatically)
+// Message Registry with Automatic Module/Mailbox Aliases
 // ============================================================================
 
-using ExampleRegistry = commrat::CombinedRegistry<
-    commrat::MessageDefinition<StatusData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<CounterData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<TemperatureData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<PoseData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>
+using ExampleApp = commrat::Registry<
+    commrat::Message::Data<StatusData>,
+    commrat::Message::Data<CounterData>,
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<PoseData>
 >;
 
-// ============================================================================
-// Type Aliases for Clean Interface
-// ============================================================================
+// Module and Mailbox are automatically available!
+// Just use: ExampleApp::Module<OutputData, InputMode>
+//       or: ExampleApp::Mailbox
 
+// Convenient re-exports in this namespace
 template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-using Module = commrat::Module<ExampleRegistry, OutputDataT, InputModeT, CommandTypes...>;
+using Module = ExampleApp::Module<OutputDataT, InputModeT, CommandTypes...>;
 
-using Mailbox = commrat::RegistryMailbox<ExampleRegistry>;
+using Mailbox = ExampleApp::Mailbox;
 
 // Re-export for convenience
 using commrat::PeriodicInput;

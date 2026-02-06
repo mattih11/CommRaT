@@ -74,25 +74,14 @@ struct StatusData {
     uint64_t uptime_ms{0};
 };
 
-// Step 2.2: Create message registry with your types
+// Step 2.2: Create message registry using simple aliases
 // CombinedRegistry automatically includes system messages (subscription protocol)
 using AppRegistry = commrat::CombinedRegistry<
-    // Your messages use AUTO_ID for automatic ID assignment
-    commrat::MessageDefinition<
-        TemperatureData, 
-        commrat::MessagePrefix::UserDefined, 
-        commrat::UserSubPrefix::Data,
-        commrat::AUTO_ID  // Automatically assigned: 0x01000001
-    >,
-    commrat::MessageDefinition<
-        StatusData,
-        commrat::MessagePrefix::UserDefined,
-        commrat::UserSubPrefix::Data,
-        commrat::AUTO_ID  // Automatically assigned: 0x01000002
-    >
+    commrat::Message::Data<TemperatureData>,  // Automatically gets prefix/subprefix/AUTO_ID
+    commrat::Message::Data<StatusData>        // Clean and simple!
 >;
 
-// Step 2.3: Create a clean module alias (hides registry complexity)
+// Optional: Create a shorter Module alias for your app
 template<typename OutputData, typename InputMode, typename... CommandTypes>
 using Module = commrat::Module<AppRegistry, OutputData, InputMode, CommandTypes...>;
 ```
@@ -100,7 +89,7 @@ using Module = commrat::Module<AppRegistry, OutputData, InputMode, CommandTypes.
 **That's it for messages!** You've:
 - ✅ Defined your data types (plain structs)
 - ✅ Registered them with AUTO_ID
-- ✅ Created a convenient Module alias
+- ✅ (Optional) Created a Module alias for convenience
 
 The Module base class handles all mailbox management internally - you never need to touch mailboxes directly!
 
@@ -266,13 +255,10 @@ struct CalibrateCommand {
     float reference_temp{25.0f};
 };
 
-// Add to registry
-using AppRegistry = commrat::CombinedRegistry<
-    commrat::MessageDefinition<TemperatureData, ...>,
-    commrat::MessageDefinition<CalibrateCommand, 
-        commrat::MessagePrefix::UserDefined,
-        commrat::UserSubPrefix::Commands,
-        commrat::AUTO_ID>
+// Add to registry using Message::Command<>
+using ExtendedRegistry = commrat::CombinedRegistry<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Command<CalibrateCommand>
 >;
 
 // Update module signature
@@ -337,17 +323,17 @@ tims_router
 
 ### Compilation errors with AUTO_ID
 
-**Problem**: Multiple messages with same prefix/subprefix
+**Problem**: Understanding message ID assignment
 
-**Solution**: CommRaT auto-increments within the same prefix/subprefix. Ensure you don't manually specify overlapping IDs:
+**Solution**: CommRaT auto-increments within the same category. The simple aliases handle this automatically:
 ```cpp
-// ✅ GOOD: Let AUTO_ID handle it
-MessageDefinition<DataA, Prefix, SubPrefix, AUTO_ID>  // Gets 0x01
-MessageDefinition<DataB, Prefix, SubPrefix, AUTO_ID>  // Gets 0x02
+// ✅ GOOD: Using simple aliases - IDs assigned automatically
+Message::Data<SensorA>    // Gets ID 0x01000001
+Message::Data<SensorB>    // Gets ID 0x01000002
+Message::Command<ResetCmd>    // Gets ID 0x01010001 (different subprefix)
 
-// ❌ BAD: Manual IDs that collide
-MessageDefinition<DataA, Prefix, SubPrefix, 1>
-MessageDefinition<DataB, Prefix, SubPrefix, 1>  // Compile error!
+// Advanced: Manual IDs if you need specific values
+Message::Data<SpecialData, MessagePrefix::UserDefined, 42>  // Gets ID 0x0100002A
 ```
 
 ---
@@ -357,7 +343,7 @@ MessageDefinition<DataB, Prefix, SubPrefix, 1>  // Compile error!
 **Creating a CommRaT application requires just 3 steps:**
 
 1. **Set up project** - CMake with `find_package(CommRaT)`
-2. **Define messages** - Plain structs + MessageDefinition with AUTO_ID
+2. **Define messages** - Plain structs + `Message::Data<T>` / `Message::Command<T>`
 3. **Create modules** - Inherit from `Module<Output, InputMode, Commands...>`
 
 **Everything else is automatic:**

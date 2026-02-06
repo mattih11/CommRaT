@@ -137,9 +137,9 @@ using MyRegistry = MessageRegistry<
     // System messages (subscription protocol)
     MessageDefinition<SubscribeRequestPayload, ...>,
     MessageDefinition<SubscribeReplyPayload, ...>,
-    // User messages
-    MessageDefinition<SensorData, MessagePrefix::UserDefined, UserSubPrefix::Data, 0>,
-    MessageDefinition<CommandData, MessagePrefix::UserDefined, UserSubPrefix::Commands, 1>
+    // User messages (simplified Message:: syntax)
+    Message::Data<SensorData>,
+    Message::Command<CommandData>
 >;
 ```
 

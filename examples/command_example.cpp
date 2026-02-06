@@ -5,6 +5,7 @@
 
 #include "messages/messages.hpp"
 #include <iostream>
+#include <thread>
 #include <cmath>
 
 using namespace user_app;
@@ -29,10 +30,10 @@ struct SetModeCmd {
 namespace user_app {
     // Extended registry with commands
     using ExtendedRegistry = commrat::CombinedRegistry<
-        commrat::MessageDefinition<TemperatureData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-        commrat::MessageDefinition<ResetCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands>,
-        commrat::MessageDefinition<CalibrateCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands>,
-        commrat::MessageDefinition<SetModeCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands>
+        commrat::Message::Data<TemperatureData>,
+        commrat::Message::Command<ResetCmd>,
+        commrat::Message::Command<CalibrateCmd>,
+        commrat::Message::Command<SetModeCmd>
     >;
     
     // Module alias with extended registry
@@ -141,7 +142,7 @@ int main() {
         .mailbox_name = "ControlMailbox"
     };
     
-    commrat::RegistryMailbox<ExtendedRegistry> control(control_config);
+    commrat::RegistryMailbox<user_app::ExtendedRegistry> control(control_config);
     control.start();
     
     std::cout << "\n=== Sending Commands ===\n\n";

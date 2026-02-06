@@ -4,6 +4,15 @@
 #include "message_registry.hpp"
 #include "subscription_messages.hpp"
 
+// Forward declaration for Module (breaks circular dependency)
+namespace commrat {
+    template<typename Registry, typename OutputDataT, typename InputModeT, typename... CommandTypes>
+    class Module;
+    
+    template<typename Registry>
+    class RegistryMailbox;
+}
+
 namespace commrat {
 
 // ============================================================================
@@ -24,14 +33,54 @@ using SystemRegistry = MessageRegistry<
 >;
 
 // ============================================================================
-// Registry Combiner - Merge System + User Messages
+// Registry Builder - Creates Registry with Convenience Aliases
+// ============================================================================
+
+/**
+ * @brief Build a complete registry with automatic Module and Mailbox aliases
+ * 
+ * This class wraps MessageRegistry and provides convenient type aliases
+ * so users never need to write template aliases themselves.
+ * 
+ * Usage:
+ * @code
+ * using MyApp = Registry<
+ *     Message::Data<TemperatureData>,
+ *     Message::Command<ResetCmd>
+ * >;
+ * 
+ * // Automatically provides:
+ * class Sensor : public MyApp::Module<TemperatureData, PeriodicInput> { ... };
+ * MyApp::Mailbox mbx(config);
+ * @endcode
+ */
+template<typename... UserMessageDefs>
+class Registry {
+public:
+    // The actual MessageRegistry type
+    using Type = MessageRegistry<
+        SubscribeRequest,
+        SubscribeReply,
+        UnsubscribeRequest,
+        UnsubscribeReply,
+        UserMessageDefs...
+    >;
+    
+    // Convenience aliases that users get automatically
+    template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
+    using Module = commrat::Module<Type, OutputDataT, InputModeT, CommandTypes...>;
+    
+    using Mailbox = commrat::RegistryMailbox<Type>;
+};
+
+// ============================================================================
+// Backward Compatibility Alias
 // ============================================================================
 
 /**
  * @brief Combine system messages with user messages into one registry
  * 
- * This automatically includes framework messages with user-defined messages.
- * Users don't need to know about subscription protocol messages.
+ * @deprecated Use Registry<> instead for automatic Module/Mailbox aliases
  */
 template<typename... UserMessageDefs>
 using CombinedRegistry = MessageRegistry<

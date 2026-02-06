@@ -29,15 +29,8 @@ struct CounterData {
     uint64_t iterations_per_second;
 };
 
-using CounterMsg = MessageDefinition<
-    CounterData,
-    MessagePrefix::UserDefined,
-    UserSubPrefix::Data,
-    0  // Explicit ID
->;
-
 // Use CombinedRegistry to automatically include system messages
-using CounterRegistry = CombinedRegistry<CounterMsg>;
+using CounterRegistry = CombinedRegistry<Message::Data<CounterData>>;
 
 // Template alias for clean syntax
 template<typename OutputDataT, typename InputModeT, typename... CommandTypes>

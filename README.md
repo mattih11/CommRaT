@@ -62,17 +62,17 @@ sudo make install
 
 **Step 1: Define Messages**
 ```cpp
-#include <commrat/system_registry.hpp>
+#include <commrat/commrat.hpp>
 
 struct TemperatureData {
     float temperature_celsius;
     uint64_t timestamp_ms;
 };
 
+// Simple! Just Message::Data<YourType>
 using AppRegistry = commrat::CombinedRegistry<
-    commrat::MessageDefinition<TemperatureData, 
-        commrat::MessagePrefix::UserDefined, 
-        commrat::UserSubPrefix::Data>
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<StatusData>
 >;
 
 template<typename OutputData, typename InputMode, typename... Commands>

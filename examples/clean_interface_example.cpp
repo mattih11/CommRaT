@@ -157,7 +157,7 @@ int main() {
     std::cout << "      TemperatureData process() { return TemperatureData{...}; }\n";
     std::cout << "  };\n\n";
     std::cout << "What you DIDN'T write:\n";
-    std::cout << "  ✗ No MessageDefinition<> in module code\n";
+    std::cout << "  ✗ Clean Message::Data<T> syntax (no verbose MessageDefinition)\n";
     std::cout << "  ✗ No registry template parameter\n";
     std::cout << "  ✗ No TimsMessage<> wrappers\n";
     std::cout << "  ✗ No manual message IDs\n";

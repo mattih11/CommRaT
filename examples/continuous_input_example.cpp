@@ -43,7 +43,7 @@ protected:
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()
                 ).count()),
-            .sensor_id = config_.instance_id,  // Use instance_id as sensor identifier
+            .sensor_id = config_.instance_id,
             .temperature_c = temp,
             .confidence = 1.0f
         };
@@ -111,20 +111,20 @@ int main() {
     // Debug: Print message IDs
     std::cout << "Message IDs:\n";
     std::cout << "  SubscribeRequest:   0x" << std::hex << std::setw(8) << std::setfill('0') 
-              << ExampleRegistry::get_message_id<commrat::SubscribeRequestPayload>() << "\n";
+              << ExampleApp::Type::get_message_id<commrat::SubscribeRequestPayload>() << "\n";
     std::cout << "  SubscribeReply:     0x" << std::hex << std::setw(8) << std::setfill('0')
-              << ExampleRegistry::get_message_id<commrat::SubscribeReplyPayload>() << "\n";
+              << ExampleApp::Type::get_message_id<commrat::SubscribeReplyPayload>() << "\n";
     std::cout << "  TemperatureData:    0x" << std::hex << std::setw(8) << std::setfill('0')
-              << ExampleRegistry::get_message_id<TemperatureData>() << "\n";
+              << ExampleApp::Type::get_message_id<TemperatureData>() << "\n";
     std::cout << std::dec << "\n";
     
     try {
         // Create producer module (publishes @ 100ms)
-        // system_id=0, instance_id=0 (PRODUCER instance)
+        // system_id=0 (first system), instance_id=1 (first sensor instance)
         ModuleConfig producer_config{
             .name = "SensorModule",
             .system_id = 0,
-            .instance_id = 0,
+            .instance_id = 1,
             .period = std::chrono::milliseconds{100},
             .message_slots = 10,
             .max_subscribers = 8,
@@ -134,17 +134,17 @@ int main() {
         SensorModule producer(producer_config);
         
         // Create consumer module (subscribes to producer)
-        // system_id=0, instance_id=1 (CONSUMER instance)
+        // system_id=0, instance_id=2 (second instance)
         ModuleConfig consumer_config{
             .name = "FilterModule",
             .system_id = 0,
-            .instance_id = 1,
+            .instance_id = 2,
             .message_slots = 10,
             .max_subscribers = 8,
             .priority = 10,
             .realtime = false,
             .source_system_id = 0,    // Subscribe to producer in system 0
-            .source_instance_id = 0   // Producer is instance 0
+            .source_instance_id = 1   // Producer is instance 1
         };
         FilterModule consumer(consumer_config);
         

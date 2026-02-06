@@ -1,7 +1,6 @@
 #pragma once
 
-#include "commrat/message_id.hpp"
-#include "commrat/system_registry.hpp"
+#include "commrat/commrat.hpp"
 
 namespace user_app {
 
@@ -33,13 +32,14 @@ struct PoseData {
 // Application Message Registry (System messages included automatically)
 // ============================================================================
 
-// Define ONLY your user messages - system messages included automatically!
-using AppMessageRegistry = commrat::CombinedRegistry<
-    // User data messages (UserDefined prefix, auto-increment IDs)
-    commrat::MessageDefinition<TemperatureData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<StatusData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<CounterData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
-    commrat::MessageDefinition<PoseData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>
+// Define your messages and get Module/Mailbox aliases automatically!
+using App = commrat::Registry<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<StatusData>,
+    commrat::Message::Data<CounterData>,
+    commrat::Message::Data<PoseData>
 >;
+
+// That's it! App::Module and App::Mailbox are now available automatically.
 
 } // namespace user_app

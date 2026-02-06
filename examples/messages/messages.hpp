@@ -23,69 +23,15 @@
 namespace user_app {
 
 // ============================================================================
-// Module Template (Automatically Configured with AppMessageRegistry)
+// Convenient Re-exports - No Manual Aliasing Needed!
 // ============================================================================
 
-/**
- * @brief Application Module template with registry pre-configured
- * 
- * Users just specify OutputData and InputMode - registry is automatic!
- * System messages (subscription protocol) are automatically included.
- * Optionally specify CommandTypes for command handling.
- * 
- * @tparam OutputDataT The payload type this module produces
- * @tparam InputModeT Input mode: PeriodicInput, LoopInput, or ContinuousInput<T>
- * @tparam CommandTypes Optional variadic command payload types this module handles
- * 
- * Example:
- * @code
- * // Simple module without commands
- * class SensorModule : public Module<TemperatureData, PeriodicInput> {
- * protected:
- *     TemperatureData process() override {
- *         return TemperatureData{.temperature_celsius = 25.0f};
- *     }
- * };
- * 
- * // Module with command handling
- * class ActuatorModule : public Module<StatusData, LoopInput, ResetCmd, CalibrateCmd> {
- * protected:
- *     StatusData process() override { return get_status(); }
- *     
- *     void on_command(const ResetCmd& cmd) override {
- *         // Handle reset
- *     }
- *     
- *     void on_command(const CalibrateCmd& cmd) override {
- *         // Handle calibration
- *     }
- * };
- * @endcode
- */
+// Module and Mailbox come directly from App (defined in user_messages.hpp)
+// They're already configured with your registry!
 template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-using Module = commrat::Module<AppMessageRegistry, OutputDataT, InputModeT, CommandTypes...>;
+using Module = App::Module<OutputDataT, InputModeT, CommandTypes...>;
 
-// ============================================================================
-// Mailbox Template (Automatically Configured with AppMessageRegistry)
-// ============================================================================
-
-/**
- * @brief Application Mailbox with registry pre-configured
- * 
- * System messages automatically included.
- * 
- * Example:
- * @code
- * Mailbox mbx(config);
- * mbx.start();
- * 
- * TemperatureData temp{.temperature_celsius = 25.5f};
- * mbx.send(temp, dest_mailbox_id);
- * 
- * auto result = mbx.receive<TemperatureData>();
- * @endcode
- */
-using Mailbox = commrat::RegistryMailbox<AppMessageRegistry>;
+using Mailbox = App::Mailbox;
 
 // Re-export input mode types for convenience
 using commrat::PeriodicInput;

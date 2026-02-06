@@ -95,7 +95,7 @@ class MessageRegistry {
 
 ### Message Definitions
 
-Messages are defined with **MessageDefinition** template that computes IDs at compile time:
+Messages are defined with the **Message::** namespace for clean, simple syntax:
 
 ```cpp
 // Message structure (plain POD, sertial-serializable)
@@ -108,13 +108,11 @@ struct TemperatureData {
 };
 
 // Registry entry (compile-time ID calculation)
-// USER SEES: Simple type alias
-using TempMsg = MessageDefinition<
-    TemperatureData,                    // Payload type
-    MessagePrefix::UserDefined,         // Prefix (8 bits)
-    UserSubPrefix::Data,                // Sub-prefix (8 bits)
-    AUTO_ID                             // Local ID (16 bits, auto-assigned)
->;
+// USER SEES: Simple, clean type alias
+using TempMsg = Message::Data<TemperatureData>;
+
+// Advanced usage (explicit prefix/ID if needed)
+using CustomMsg = Message::Data<MyData, MessagePrefix::UserDefined, 42>;
 
 // BEHIND THE SCENES: Template magic computes unique IDs, validates structure,
 // calculates buffer sizes, generates serialization code - all at compile time
@@ -247,10 +245,10 @@ auto send(T& message, uint32_t dest_mailbox) -> MailboxResult<void>;
 
 ### Compile-Time Registry Expansion
 ```cpp
-// User defines messages
+// User defines messages with clean syntax
 using MyRegistry = MessageRegistry<
-    MessageDefinition<DataA, ...>,
-    MessageDefinition<DataB, ...>
+    Message::Data<DataA>,
+    Message::Data<DataB>
 >;
 
 // System automatically adds subscription messages
