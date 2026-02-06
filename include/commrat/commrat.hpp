@@ -18,6 +18,7 @@
 #include "commrat/message_id.hpp"
 #include "commrat/message_registry.hpp"
 #include "commrat/message_helpers.hpp"
+#include "commrat/io_spec.hpp"
 #include "commrat/system_registry.hpp"
 #include "commrat/tims_wrapper.hpp"
 #include "commrat/mailbox.hpp"
