@@ -8,10 +8,16 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 
 ## Features
 
+- **Ultra-Clean User Interface**: Define messages ONCE, use payload types everywhere (no MessageDefinition in user code)
+- **Payload-Only API**: Module<OutputData, InputMode> - users never see TimsMessage wrappers or message IDs
+- **Auto-Subscription**: ContinuousInput<PayloadT> automatically handles subscription protocol
+- **Variadic Commands**: Module<..., Cmd1, Cmd2, Cmd3> with type-safe on_command() handlers
+- **System Messages Auto-Included**: CombinedRegistry automatically adds subscription protocol messages
+- **Compile-Time Message IDs**: 0xPSMM format (Prefix, SubPrefix, Message ID) with auto-increment
 - **Modern C++20**: Full template metaprogramming with concepts, `std::span`, and type safety
 - **Zero-Allocation Serialization**: Stack-allocated `std::byte` buffers via SeRTial with compile-time size computation
-- **Compile-Time Type Safety**: Templated message types with static validation
-- **Mailbox API**: Modern C++20 RAII-based mailbox with blocking/non-blocking/timeout receive patterns
+- **Compile-Time Type Safety**: Templated message types with static validation and collision detection
+- **Module Framework**: RAII-based Module<> with PeriodicInput/LoopInput/ContinuousInput modes
 - **Message Registry**: Compile-time type registry for zero-overhead message dispatch
 - **Runtime Visitor Pattern**: Efficient runtime dispatch without virtual functions (receive_any)
 - **SeRTial Integration**: Automatic serialization using `fixed_vector`, `fixed_string`, and `buffer_type`
@@ -38,45 +44,86 @@ cmake ..
 make -j$(nproc)
 ```
 
-### Simple Example
+### Ultra-Clean Interface (Recommended)
+
+**Step 1**: Define your messages ONCE
+```cpp
+// messages/user_messages.hpp
+#include <commrat/system_registry.hpp>
+
+struct TemperatureData {
+    float temperature_celsius{0.0f};
+    uint64_t timestamp_ms{0};
+};
+
+// Registry with system messages auto-included
+using AppRegistry = commrat::CombinedRegistry<
+    commrat::MessageDefinition<TemperatureData, 
+        commrat::MessagePrefix::UserDefined, 
+        commrat::UserSubPrefix::Data>
+>;
+
+// Create clean alias (hides registry)
+template<typename OutputData, typename InputMode, typename... CommandTypes>
+using Module = commrat::Module<AppRegistry, OutputData, InputMode, CommandTypes...>;
+```
+
+**Step 2**: Write your module using payload types only
+```cpp
+#include "messages/user_messages.hpp"
+
+// Ultra-clean: Module<OutputType, InputMode>
+class SensorModule : public Module<TemperatureData, PeriodicInput> {
+protected:
+    TemperatureData process() override {
+        return TemperatureData{.temperature_celsius = read_sensor()};
+    }
+};
+
+int main() {
+    ModuleConfig config{
+        .mailbox_id = 100,
+        .period = std::chrono::milliseconds(100)
+    };
+    
+    SensorModule sensor(config);
+    sensor.start();  // Auto-publishes to subscribers
+    
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    sensor.stop();
+}
+```
+
+**What You DON'T Write:**
+- ❌ MessageDefinition in module code (only in registry)
+- ❌ TimsMessage wrappers (automatic)
+- ❌ Manual message IDs (auto-increment)
+- ❌ Subscription protocol (automatic)
+- ❌ Registry parameter in Module<> (hidden in alias)
+
+### Legacy Mailbox API (Still Supported)
 
 ```cpp
 #include "commrat/commrat.hpp"
 
-int main() {
-    using namespace commrat;
-    
-    // Define message registry (compile-time)
-    using MyRegistry = MessageRegistry<StatusMessage, CommandMessage>;
-    
-    // Create mailbox
-    TimsConfig config{
-        .mailbox_name = "my_mailbox",
-        .mailbox_id = 100,
-        .max_msg_size = MyRegistry::max_message_size,
-        .priority = 10
-    };
-    
-    Mailbox<MyRegistry> mailbox(config);
-    mailbox.start();
-    
-    // Send a message
-    StatusMessage status;
-    status.payload.status_code = 200;
-    status.payload.cpu_load = 0.65f;
-    status.payload.description = "System OK";
-    
-    mailbox.send(status, 200); // Send to mailbox ID 200
-    
-    // Receive with timeout
-    auto result = mailbox.receive_for<StatusMessage>(
-        std::chrono::milliseconds(1000)
-    );
-    
-    if (result) {
-        std::cout << "Status: " << result->message.payload.status_code << "\n";
-    }
+using MyRegistry = MessageRegistry<
+    MessageDefinition<StatusData, ...>,
+    MessageDefinition<CommandData, ...>
+>;
+
+RegistryMailbox<MyRegistry> mailbox(config);
+mailbox.start();
+
+// Send payload directly
+StatusData status{.status_code = 200, .cpu_load = 0.65f};
+mailbox.send(status, dest_mailbox_id);
+
+// Receive payload directly
+auto result = mailbox.receive<StatusData>(std::chrono::milliseconds(1000));
+if (result) {
+    std::cout << "Status: " << result->message.status_code << "\n";
 }
+```
 ```
 
 ## Architecture
@@ -181,73 +228,77 @@ auto result = serialize(msg);  // msg.header.msg_type automatically set
 
 ## Running Examples and Tests
 
-### Registry Demo
+### Ultra-Clean Interface Examples (Runtime Validated ✅)
 
-Demonstrates compile-time message registry and runtime dispatch:
+#### Continuous Input Example
+Producer→Consumer with automatic subscription protocol:
+```bash
+cd build
+./example_continuous_input
+```
 
+Demonstrates:
+- Producer publishing TemperatureData @ 100ms (PeriodicInput)
+- Consumer auto-subscribing to producer (ContinuousInput<TemperatureData>)
+- Data flowing continuously between modules
+- Ultra-clean Module<PayloadT, InputMode> interface
+- No MessageDefinition in user code
+
+#### Clean Interface Example
+Minimal boilerplate with payload-only API:
+```bash
+cd build
+./example_clean_interface
+```
+
+Shows:
+- Module<TemperatureData, PeriodicInput> (no registry parameter)
+- process() returns payload type directly
+- System messages automatically included
+- One include: `messages/messages.hpp`
+
+#### Command Example
+Variadic command handling with type-safe dispatch:
+```bash
+cd build
+./example_commands
+```
+
+Demonstrates:
+- Module<TempData, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>
+- Type-safe on_command(const CmdT&) handlers
+- No manual command ID checking
+- Compile-time command validation
+
+### Legacy Examples
+
+#### Registry Demo
+Compile-time message registry and runtime dispatch:
 ```bash
 cd build
 ./example_registry_demo
 ```
 
-Shows:
-- Default registry with 6 built-in message types
-- Runtime dispatch with visitor pattern
-- Custom registry creation
-- Compile-time type information and max buffer sizes
-
-### Mailbox Example
-
-Complete sender/receiver demo with type-safe mailbox:
-
+#### Mailbox Example
+Type-safe mailbox with visitor pattern:
 ```bash
 cd build
 ./example_mailbox
 ```
 
-Demonstrates:
-- Simple bidirectional communication
-- Visitor pattern (receive_any with different types)
-- Non-blocking and timeout receive
-- Type safety with restricted registries
-- Standard mailbox usage
-
-### Non-Blocking Test
-
-Validates non-blocking receive behavior:
-
+#### Non-Blocking Test
+Validates receive behavior:
 ```bash
 cd build
 ./test_nonblocking
 ```
 
-Verifies:
-- Non-blocking receive is truly non-blocking (0ms for 10 calls)
-- Timeout receive properly times out (~1000ms due to TiMS quirk)
-
-### Simple Usage
-
-Basic serialization/deserialization example:
-
+#### Simple Usage
+Basic serialization/deserialization:
 ```bash
 cd build
 ./example_simple_usage
 ```
-
-### Simple Usage
-
-Basic serialization/deserialization example:
-
-```bash
-cd build
-./example_simple_usage
-```
-
-Shows:
-- Serialize/deserialize with automatic type IDs
-- Multiple message types
-- Compile-time type information
-- Type traits validation
 
 ## API Overview
 
