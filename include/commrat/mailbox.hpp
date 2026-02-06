@@ -3,6 +3,7 @@
 #include "tims_wrapper.hpp"
 #include "messages.hpp"
 #include "message_registry.hpp"
+#include "message_id.hpp"
 #include <expected>
 #include <optional>
 #include <chrono>
@@ -98,12 +99,36 @@ public:
     // Error constructor
     MailboxResult(MailboxError error) : error_(error) {}
     
+    // Static factory methods
+    static MailboxResult<void> ok() { return MailboxResult<void>(); }
+    static MailboxResult<void> error(MailboxError err) { return MailboxResult<void>(err); }
+    
     // Check if result is success
     explicit operator bool() const { return !error_.has_value(); }
     bool has_value() const { return !error_.has_value(); }
     
     // Access the error
-    MailboxError error() const { return *error_; }
+    MailboxError get_error() const { return *error_; }
+};
+
+// ============================================================================
+// Raw Message Receipt (for unknown message types)
+// ============================================================================
+
+/// Raw received message with type info
+struct RawReceivedMessage {
+    std::vector<std::byte> buffer;  // Message data including header
+    int32_t type;                    // Message type ID
+    uint32_t sender_id;              // Sender mailbox ID
+    size_t size;                     // Total message size
+    uint64_t timestamp;              // Message timestamp
+    
+    // Header accessor for compatibility
+    struct {
+        uint32_t msg_type;
+    } header;
+    
+    RawReceivedMessage() : type(0), sender_id(0), size(0), timestamp(0), header{0} {}
 };
 
 // ============================================================================
@@ -146,35 +171,44 @@ struct MailboxConfig {
  * @brief Strongly-typed mailbox for message-based communication
  * 
  * A modern C++20 mailbox interface that provides compile-time type safety
- * for message operations. Uses template parameter pack to statically define
- * which message types the mailbox can handle.
+ * for message operations. Accepts MessageDefinition types which contain
+ * compile-time message IDs.
  * 
- * @tparam MessageTypes Pack of message types this mailbox can handle
+ * @tparam MessageDefs Pack of MessageDefinition types this mailbox can handle
  * 
  * Example:
  * @code
- * Mailbox<StatusMessage, CommandMessage> mbx(config);
+ * using StatusMsg = MessageDefinition<StatusData, MessagePrefix::UserDefined, UserSubPrefix::Data>;
+ * using CmdMsg = MessageDefinition<CommandData, MessagePrefix::UserDefined, UserSubPrefix::Commands>;
+ * 
+ * Mailbox<StatusMsg, CmdMsg> mbx(config);
  * mbx.start();
  * 
- * StatusMessage status;
- * status.payload.status_code = 100;
+ * StatusData status{.status_code = 100};
  * mbx.send(status, dest_mailbox_id);
  * 
- * auto result = mbx.receive<CommandMessage>();
+ * auto result = mbx.receive<StatusData>();
  * if (result) {
- *     std::cout << "Command: " << result->message.payload.command_id << "\n";
+ *     std::cout << "Status: " << result->message.status_code << "\n";
  * }
  * @endcode
  */
-template<typename... MessageTypes>
+template<typename... MessageDefs>
 class Mailbox {
 private:
     // Internal registry for this mailbox's supported types
-    using Registry = MessageRegistry<MessageTypes...>;
+    using Registry = MessageRegistry<MessageDefs...>;
     
-    // Validate that all types are CommRaT messages
-    static_assert((is_commrat_message_v<MessageTypes> && ...),
-                  "All MessageTypes must be valid CommRaT message types");
+    // Helper to check if type is a MessageDefinition
+    template<typename T>
+    struct is_message_definition : std::false_type {};
+    
+    template<typename PayloadT, MessagePrefix Prefix, auto SubPrefix, uint16_t ID>
+    struct is_message_definition<MessageDefinition<PayloadT, Prefix, SubPrefix, ID>> : std::true_type {};
+    
+    // Validate that all types are MessageDefinition
+    static_assert((is_message_definition<MessageDefs>::value && ...),
+                  "All template parameters must be MessageDefinition types");
     
 public:
     // ========================================================================
@@ -239,6 +273,7 @@ public:
             return MailboxError::NotInitialized;
         }
         
+        // Receive buffer initialized
         running_ = true;
         return MailboxResult<void>();
     }
@@ -266,15 +301,23 @@ public:
     
     /**
      * @brief Check if a type is registered with this mailbox at compile time
+     * For TimsMessage<PayloadT>, check if PayloadT is registered
      */
     template<typename T>
-    static constexpr bool is_registered = Registry::template is_registered<T>;
+    static constexpr bool is_registered = []() constexpr {
+        // Check if T is TimsMessage<PayloadT>
+        if constexpr (requires { typename T::payload_type; }) {
+            return Registry::template is_registered<typename T::payload_type>;
+        } else {
+            return Registry::template is_registered<T>;
+        }
+    }();
     
     /**
      * @brief Get number of registered message types
      */
     static constexpr size_t num_message_types() {
-        return sizeof...(MessageTypes);
+        return sizeof...(MessageDefs);
     }
     
     // ========================================================================
@@ -300,13 +343,14 @@ public:
             return MailboxError::InvalidDestination;
         }
         
-        // Serialize the message (automatically sets msg_type)
+        // Registry::serialize expects TimsMessage<PayloadT>& (full message with header)
         [[maybe_unused]] auto result = Registry::serialize(message);
         
         // Send via TiMS
         auto tims_result = tims_.send(message, dest_mailbox);
         
         if (tims_result != TimsResult::SUCCESS) {
+            std::cerr << "[Mailbox] TiMS send failed with code: " << static_cast<int>(tims_result) << std::endl;
             return MailboxError::NetworkError;
         }
         
@@ -331,25 +375,25 @@ public:
         }
         
         // Receive raw bytes from TiMS
-        // Use SeRTial's buffer_type (std::byte, proper size)
-        typename sertial::Message<T>::buffer_type buffer;
+        // Use SeRTial's buffer_type for TimsMessage<T> (includes header + payload)
+        typename sertial::Message<TimsMessage<T>>::buffer_type buffer;
         auto bytes = tims_.receive_raw_bytes(buffer, std::chrono::seconds(1));
         
         if (bytes <= 0) {
             return MailboxError::NetworkError;
         }
         
-        // Deserialize using span
-        auto result = Registry::template deserialize<T>(
+        // Deserialize full TimsMessage<T> (header + payload)
+        auto result = sertial::Message<TimsMessage<T>>::deserialize(
             std::span<const std::byte>(buffer.data(), bytes)
         );
         if (!result) {
             return MailboxError::SerializationError;
         }
         
-        // Wrap in ReceivedMessage with metadata
+        // Wrap in ReceivedMessage with metadata from header
         ReceivedMessage<T> received{
-            .message = std::move(*result),
+            .message = std::move(result->payload),
             .timestamp = result->header.timestamp,
             .sequence_number = result->header.seq_number
         };
@@ -390,8 +434,8 @@ public:
         }
         
         // Receive with timeout from TiMS
-        // Use SeRTial's buffer_type (std::byte, proper size)
-        typename sertial::Message<T>::buffer_type buffer;
+        // Use SeRTial's buffer_type for TimsMessage<T> (includes header + payload)
+        typename sertial::Message<TimsMessage<T>>::buffer_type buffer;
         auto bytes = tims_.receive_raw_bytes(buffer, timeout);
         
         if (bytes == 0) {
@@ -402,22 +446,73 @@ public:
             return MailboxError::NetworkError;
         }
         
-        // Deserialize using span
-        auto result = Registry::template deserialize<T>(
+        // Deserialize full TimsMessage<T> (header + payload)
+        auto result = sertial::Message<TimsMessage<T>>::deserialize(
             std::span<const std::byte>(buffer.data(), bytes)
         );
         if (!result) {
             return MailboxError::SerializationError;
         }
         
-        // Wrap in ReceivedMessage with metadata
+        // Wrap in ReceivedMessage with metadata from header
         ReceivedMessage<T> received{
-            .message = std::move(*result),
+            .message = std::move(result->payload),
             .timestamp = result->header.timestamp,
             .sequence_number = result->header.seq_number
         };
         
         return received;
+    }
+    
+    /**
+     * @brief Receive any message without knowing its type
+     * 
+     * Returns raw message data with type information. Useful for command
+     * loops that need to inspect the message type before deserializing.
+     * 
+     * @param timeout Maximum time to wait for a message
+     * @return Raw message with type info, or error
+     */
+    auto receive_any_raw(std::chrono::milliseconds timeout = std::chrono::milliseconds{-1}) 
+        -> MailboxResult<RawReceivedMessage> {
+        if (!running_) {
+            return MailboxError::NotRunning;
+        }
+        
+        // Receive raw bytes
+        constexpr size_t buffer_size = Registry::max_message_size;
+        std::array<std::byte, buffer_size> buffer;
+        ssize_t bytes = tims_.receive_raw_bytes(buffer, timeout);
+        
+        if (bytes < 0) {
+            if (timeout.count() == -1 || timeout == std::chrono::milliseconds{0}) {
+                // Non-blocking receive with no message
+                return MailboxError::Timeout;
+            }
+            return MailboxError::NetworkError;
+        }
+        
+        // Parse header
+        if (static_cast<size_t>(bytes) < sizeof(TimsHeader)) {
+            return MailboxError::InvalidMessage;
+        }
+        
+        TimsHeader header;
+        std::memcpy(&header, buffer.data(), sizeof(TimsHeader));
+        
+        // TODO: Extract sender ID from TIMS (not currently exposed in API)
+        uint32_t sender_id = 0;  // Placeholder
+        
+        // Copy to vector for easy handling
+        RawReceivedMessage raw;
+        raw.buffer = std::vector<std::byte>(buffer.begin(), buffer.begin() + bytes);
+        raw.type = static_cast<int32_t>(header.msg_type);
+        raw.sender_id = sender_id;
+        raw.size = bytes;
+        raw.timestamp = header.timestamp;
+        raw.header.msg_type = header.msg_type;
+        
+        return raw;
     }
     
     /**
@@ -467,12 +562,15 @@ public:
         // Use registry to dispatch based on runtime type
         bool success = Registry::visit(msg_type, 
             std::span<const std::byte>(buffer.data(), bytes),
-            [&visitor, &header](auto&& msg) {
-                using MsgType = std::decay_t<decltype(msg)>;
-                ReceivedMessage<MsgType> received{
-                    .message = std::move(msg),
-                    .timestamp = header.timestamp,
-                    .sequence_number = header.seq_number
+            [&visitor, &header](auto&& tims_msg) {
+                // tims_msg is TimsMessage<PayloadT>, extract the payload
+                using TimsMsgType = std::decay_t<decltype(tims_msg)>;
+                using PayloadType = typename TimsMsgType::payload_type;
+                
+                ReceivedMessage<PayloadType> received{
+                    .message = std::move(tims_msg.payload),
+                    .timestamp = tims_msg.header.timestamp,
+                    .sequence_number = tims_msg.header.seq_number
                 };
                 std::forward<Visitor>(visitor)(received);
             });

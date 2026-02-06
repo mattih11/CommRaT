@@ -50,6 +50,9 @@ TimsResult TimsWrapper::initialize() {
         return TimsResult::SUCCESS;
     }
     
+    std::cout << "[TiMS] Creating mailbox " << config_.mailbox_id 
+              << " with max_msg_size=" << config_.max_msg_size << " bytes\n";
+    
     // Create TIMS mailbox (this handles socket creation, connection to router, and mailbox init)
     tims_fd_ = tims_mbx_create(config_.mailbox_id, 
                                10,  // message slots (adjust as needed)
@@ -57,8 +60,11 @@ TimsResult TimsWrapper::initialize() {
                                nullptr,  // let TIMS allocate buffer
                                0);  // buffer size (0 = auto)
     if (tims_fd_ < 0) {
+        std::cerr << "[TiMS] tims_mbx_create FAILED with fd=" << tims_fd_ << "\n";
         return TimsResult::ERROR_INIT;
     }
+    
+    // Mailbox created successfully
     
     is_initialized_ = true;
     return TimsResult::SUCCESS;
@@ -80,10 +86,14 @@ void TimsWrapper::shutdown() {
 
 TimsResult TimsWrapper::send_raw(const void* data, size_t size, uint32_t dest_mailbox_id) {
     if (!is_initialized_ || tims_fd_ < 0) {
+        std::cerr << "[TiMS] send_raw: NOT INITIALIZED (is_initialized=" << is_initialized_ 
+                  << ", tims_fd=" << tims_fd_ << ")\n";
         return TimsResult::ERROR_NOT_INITIALIZED;
     }
     
     if (!data || size == 0 || size > config_.max_msg_size) {
+        std::cerr << "[TiMS] send_raw: INVALID MESSAGE (data=" << data 
+                  << ", size=" << size << ", max=" << config_.max_msg_size << ")\n";
         return TimsResult::ERROR_INVALID_MESSAGE;
     }
     

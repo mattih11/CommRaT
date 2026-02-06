@@ -8,6 +8,7 @@
 #include <chrono>
 #include <atomic>
 #include <span>
+#include <array>
 
 // TIMS API includes
 #include <main/tims/tims.h>
@@ -86,9 +87,9 @@ public:
             return std::nullopt;
         }
         
-        // Allocate buffer based on SeRTial's max_buffer_size
-        constexpr size_t max_size = sertial::Message<T>::max_buffer_size;
-        std::vector<uint8_t> buffer(std::max(max_size, config_.max_msg_size));
+        // Use compile-time sized buffer from SeRTial
+        constexpr size_t buffer_size = sertial::Message<T>::max_buffer_size;
+        std::array<uint8_t, buffer_size> buffer;
         
         ssize_t received_size = receive_raw(buffer.data(), buffer.size(), timeout);
         

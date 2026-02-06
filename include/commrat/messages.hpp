@@ -21,26 +21,31 @@ struct TimsHeader {
     uint32_t flags;
 };
 
-// Message type enumeration
-enum class MessageType : uint32_t {
-    DATA = 1,
-    COMMAND = 2,
-    STATUS = 3,
-    ERROR = 4,
-    ACK = 5,
-    SENSOR_DATA = 6,
-    ROBOT_STATE = 7,
-    USER_DEFINED = 1000  // User messages start here
-};
+// Message type ID - use compile-time type hash for automatic unique IDs
+using MessageType = uint32_t;
+
+// Helper to get compile-time hash of a type
+template<typename T>
+constexpr MessageType type_hash() {
+    // Use type_info hash at compile time
+    // For C++20, we can use a simple constexpr hash
+    constexpr auto name = std::string_view{__PRETTY_FUNCTION__};
+    uint32_t hash = 2166136261u;  // FNV-1a initial value
+    for (char c : name) {
+        hash ^= static_cast<uint32_t>(c);
+        hash *= 16777619u;  // FNV prime
+    }
+    return hash;
+}
 
 // ============================================================================
 // Message Type Traits (Automatic Type-to-ID Mapping)
 // ============================================================================
 
-// Default: user must specialize this for custom payloads
+// Default: use compile-time type hash for automatic unique IDs
 template<typename PayloadT>
 struct message_type_for {
-    // No default - forces users to specify via specialization or use built-in types
+    static constexpr MessageType value = type_hash<PayloadT>();
 };
 
 // ============================================================================
@@ -54,8 +59,7 @@ struct TimsMessage {
     TimsHeader header;
     PayloadT payload;
     
-    // Compile-time message type from payload type
-    static constexpr MessageType message_type = message_type_for<PayloadT>::value;
+    // Payload type accessor
     using payload_type = PayloadT;
 };
 
@@ -69,9 +73,7 @@ struct CommandPayload {
     uint32_t target_id;
     sertial::fixed_vector<uint8_t, 64> parameters;
 };
-template<> struct message_type_for<CommandPayload> { 
-    static constexpr MessageType value = MessageType::COMMAND; 
-};
+// Note: Use MessageDefinition for new code instead of message_type_for
 
 // Status payload
 struct StatusPayload {
@@ -81,9 +83,6 @@ struct StatusPayload {
     float memory_usage;
     sertial::fixed_string<64> description;
 };
-template<> struct message_type_for<StatusPayload> { 
-    static constexpr MessageType value = MessageType::STATUS; 
-};
 
 // Error payload
 struct ErrorPayload {
@@ -91,17 +90,11 @@ struct ErrorPayload {
     uint32_t source_id;
     sertial::fixed_string<128> error_text;
 };
-template<> struct message_type_for<ErrorPayload> { 
-    static constexpr MessageType value = MessageType::ERROR; 
-};
 
 // Acknowledgment payload
 struct AckPayload {
     uint32_t acked_seq_number;
     uint32_t ack_code;
-};
-template<> struct message_type_for<AckPayload> { 
-    static constexpr MessageType value = MessageType::ACK; 
 };
 
 // Sensor data payload (example with dynamic data)
@@ -111,9 +104,6 @@ struct SensorPayload {
     float pressure;
     float humidity;
     sertial::fixed_vector<float, 16> additional_readings;
-};
-template<> struct message_type_for<SensorPayload> { 
-    static constexpr MessageType value = MessageType::SENSOR_DATA; 
 };
 
 // Robot state payload (example nested structures)
@@ -130,9 +120,6 @@ struct RobotStatePayload {
     
     uint32_t robot_id;
     sertial::fixed_string<32> status;
-};
-template<> struct message_type_for<RobotStatePayload> { 
-    static constexpr MessageType value = MessageType::ROBOT_STATE; 
 };
 
 // ============================================================================
@@ -184,8 +171,12 @@ template<typename T>
 auto serialize(T& message) -> typename sertial::Message<T>::Result {
     static_assert(is_commrat_message_v<T>, "T must be a CommRaT message type");
     
-    // Automatically set message type from template parameter
-    message.header.msg_type = static_cast<uint32_t>(T::message_type);
+    // Check if T has message_type (old-style messages)
+    if constexpr (requires { T::message_type; }) {
+        // Automatically set message type from template parameter
+        message.header.msg_type = static_cast<uint32_t>(T::message_type);
+    }
+    // For TimsMessage<PayloadT> without message_type, assume it's already set by Registry
     
     // Use SeRTial's serialization
     auto result = sertial::Message<T>::serialize(message);
