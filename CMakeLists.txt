@@ -70,6 +70,10 @@ add_executable(test_process_signature test/test_process_signature.cpp)
 target_link_libraries(test_process_signature PRIVATE commrat)
 target_include_directories(test_process_signature PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+add_executable(test_multi_output test/test_multi_output.cpp)
+target_link_libraries(test_multi_output PRIVATE commrat)
+target_include_directories(test_multi_output PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 # Install targets
 install(TARGETS commrat
     EXPORT CommRaTTargets

@@ -80,6 +80,52 @@ class ContinuousProcessorBase<void, OutputData_> {
     // No process_continuous for periodic/loop modes
 };
 
+// ============================================================================
+// Multi-Output Processor Base (Phase 5.3)
+// ============================================================================
+
+// Helper to generate multi-output process signature
+template<typename OutputTypesTuple, typename InputData_>
+class MultiOutputProcessorBase;
+
+// Single output: OutputData process() or OutputData process_continuous(const InputData&)
+template<typename T>
+class MultiOutputProcessorBase<std::tuple<T>, void> {
+    // Single output handled by normal process() - no additional signature
+};
+
+template<typename T, typename InputData_>
+class MultiOutputProcessorBase<std::tuple<T>, InputData_> {
+    // Single output with continuous input - handled by process_continuous()
+};
+
+// Multi-output without continuous input: void process(T1& out1, T2& out2, ...)
+template<typename... Ts>
+    requires (sizeof...(Ts) > 1)
+class MultiOutputProcessorBase<std::tuple<Ts...>, void> {
+protected:
+    virtual void process(Ts&... outputs) {
+        std::cerr << "[Module] ERROR: Multi-output process(...) not overridden in derived class!\n";
+        // Leave outputs as default-constructed
+    }
+};
+
+// Multi-output with continuous input: void process_continuous(const InputData&, T1& out1, T2& out2, ...)
+template<typename... Ts, typename InputData_>
+    requires (sizeof...(Ts) > 1)
+class MultiOutputProcessorBase<std::tuple<Ts...>, InputData_> {
+protected:
+    virtual void process_continuous(const InputData_& input, Ts&... outputs) {
+        std::cerr << "[Module] ERROR: Multi-output process_continuous(...) not overridden in derived class!\n";
+        // Leave outputs as default-constructed
+        (void)input;  // Suppress unused warning
+    }
+};
+
+// ============================================================================
+// Type Extraction Helpers
+// ============================================================================
+
 // Helper to extract InputData from InputSpec (outside Module class)
 template<typename T>
 struct ExtractInputPayload {
@@ -105,6 +151,22 @@ struct ExtractOutputPayload {
 template<typename T>
 struct ExtractOutputPayload<Output<T>> {
     using type = T;
+};
+
+// Helper to get output types as tuple (outside Module class)
+template<typename T>
+struct OutputTypesTuple {
+    using type = std::tuple<T>;  // Raw type
+};
+
+template<typename T>
+struct OutputTypesTuple<Output<T>> {
+    using type = std::tuple<T>;
+};
+
+template<typename... Ts>
+struct OutputTypesTuple<Outputs<Ts...>> {
+    using type = std::tuple<Ts...>;
 };
 
 // ============================================================================
@@ -146,10 +208,16 @@ template<typename UserRegistry,
          typename OutputSpec_,
          typename InputSpec_,
          typename... CommandTypes>
-class Module : public ContinuousProcessorBase<
-    typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
-    typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
-> {
+class Module 
+    : public ContinuousProcessorBase<
+        typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
+        typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
+      >
+    , public MultiOutputProcessorBase<
+        typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type,
+        typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type
+      >
+{
 private:
     // Normalize OutputSpec: raw type T -> Output<T>
     using OutputSpec = NormalizeOutput_t<OutputSpec_>;
@@ -157,11 +225,9 @@ private:
     // Normalize InputSpec: ContinuousInput<T> -> Input<T>, keep others as-is
     using InputSpec = NormalizeInput_t<InputSpec_>;
     
-    // Phase 5 constraint: reject multi-input/multi-output
-    static_assert(OutputCount_v<OutputSpec> <= 1,
-                  "Phase 5: Multi-output (Outputs<Ts...>) not yet supported. Use Output<T> or raw type.");
+    // Phase 5.3: Multi-output supported, multi-input in Phase 6
     static_assert(InputCount_v<InputSpec> <= 1,
-                  "Phase 5: Multi-input (Inputs<Ts...>) not yet supported. Use Input<T>, PeriodicInput, or LoopInput.");
+                  "Phase 5: Multi-input (Inputs<Ts...>) not yet supported (coming in Phase 6). Use Input<T>, PeriodicInput, or LoopInput.");
     
     // Helper to extract InputData type from InputSpec
     template<typename T>
@@ -185,10 +251,28 @@ private:
         using type = T;
     };
     
-    template<typename T>
-    struct ExtractOutputData<Outputs<T>> {
-        using type = void;  // Multi-output not yet supported
+    template<typename... Ts>
+    struct ExtractOutputData<Outputs<Ts...>> {
+        using type = void;  // Multi-output: void process(T1& out1, T2& out2, ...)
     };
+    
+    // Helper to get output types as tuple
+    template<typename T>
+    struct OutputTypes {
+        using type = std::tuple<T>;
+    };
+    
+    template<typename T>
+    struct OutputTypes<Output<T>> {
+        using type = std::tuple<T>;
+    };
+    
+    template<typename... Ts>
+    struct OutputTypes<Outputs<Ts...>> {
+        using type = std::tuple<Ts...>;
+    };
+    
+    using OutputTypesTuple = typename OutputTypes<OutputSpec>::type;
     
 public:
     using OutputData = typename ExtractOutputData<OutputSpec>::type;
@@ -197,6 +281,7 @@ public:
     static constexpr bool has_continuous_input = HasContinuousInput<InputSpec>;
     static constexpr bool has_periodic_input = std::is_same_v<InputSpec, PeriodicInput>;
     static constexpr bool has_loop_input = std::is_same_v<InputSpec, LoopInput>;
+    static constexpr bool has_multi_output = OutputCount_v<OutputSpec> > 1;
     
 private:
     // Type aliases for mailboxes
@@ -208,10 +293,18 @@ private:
      * @brief Calculate base mailbox address from output type, system_id, and instance_id
      * Format: [data_type_id_low16:16][system_id:8][instance_id:8]
      * Uses lower 16 bits of message ID to fit in uint32_t
+     * 
+     * For multi-output modules (OutputData = void), uses the first output type.
      */
     static constexpr uint32_t calculate_base_address(uint8_t system_id, uint8_t instance_id) {
         // Get message ID for output data type from registry
-        constexpr uint32_t data_type_id = UserRegistry::template get_message_id<OutputData>();
+        // For multi-output, use first output type from the tuple
+        using BaseType = std::conditional_t<
+            std::is_void_v<OutputData>,
+            std::tuple_element_t<0, OutputTypesTuple>,
+            OutputData
+        >;
+        constexpr uint32_t data_type_id = UserRegistry::template get_message_id<BaseType>();
         // Use lower 16 bits of message ID to fit addressing in 32 bits
         constexpr uint16_t data_type_id_low = static_cast<uint16_t>(data_type_id & 0xFFFF);
         return (static_cast<uint32_t>(data_type_id_low) << 16) | (system_id << 8) | instance_id;
@@ -417,23 +510,42 @@ protected:
         std::lock_guard<std::mutex> lock(subscribers_mutex_);
         subscribers_.erase(
             std::remove(subscribers_.begin(), subscribers_.end(), subscriber_id),
-            subscribers_.end()
-        );
-    }
-    
-    void publish_to_subscribers(OutputData& data) {
-        std::lock_guard<std::mutex> lock(subscribers_mutex_);
-        for (uint32_t subscriber_base_addr : subscribers_) {
-            // Send to subscriber's DATA mailbox (base + 2)
-            uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-            auto result = cmd_mailbox_.send(data, subscriber_data_mbx);  // Can send from any mailbox
-            if (!result) {
-                std::cout << "[" << config_.name << "] Send failed to subscriber " << subscriber_base_addr << "\n";
-            }
+        subscribers_.end()
+    );
+}
+
+// Single-output publishing (only enabled when OutputData is not void)
+template<typename T = OutputData>
+    requires (!std::is_void_v<T>)
+void publish_to_subscribers(T& data) {
+    std::lock_guard<std::mutex> lock(subscribers_mutex_);
+    for (uint32_t subscriber_base_addr : subscribers_) {
+        // Send to subscriber's DATA mailbox (base + 2)
+        uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        auto result = cmd_mailbox_.send(data, subscriber_data_mbx);  // Can send from any mailbox
+        if (!result) {
+            std::cout << "[" << config_.name << "] Send failed to subscriber " << subscriber_base_addr << "\n";
         }
     }
-    
-    // ========================================================================
+}
+
+// Multi-output publishing helper (publish each output in the tuple)
+template<typename... Ts, std::size_t... Is>
+void publish_multi_outputs_impl(const std::tuple<Ts...>& outputs, std::index_sequence<Is...>) {
+    std::lock_guard<std::mutex> lock(subscribers_mutex_);
+    for (uint32_t subscriber_base_addr : subscribers_) {
+        uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        // Publish each output separately
+        (void)std::initializer_list<int>{
+            (cmd_mailbox_.send(std::get<Is>(outputs), subscriber_data_mbx), 0)...
+        };
+    }
+}
+
+template<typename... Ts>
+void publish_multi_outputs(const std::tuple<Ts...>& outputs) {
+    publish_multi_outputs_impl(outputs, std::index_sequence_for<Ts...>{});
+}    // ========================================================================
     // Subscription Protocol (ContinuousInput)
     // ========================================================================
     
@@ -553,16 +665,32 @@ protected:
 private:
     void periodic_loop() {
         while (running_) {
-            auto output = process();
-            publish_to_subscribers(output);
+            if constexpr (has_multi_output) {
+                // Multi-output: create tuple and call process with references
+                OutputTypesTuple outputs{};
+                std::apply([this](auto&... args) { this->process(args...); }, outputs);
+                publish_multi_outputs(outputs);
+            } else {
+                // Single output: normal process
+                auto output = process();
+                publish_to_subscribers(output);
+            }
             std::this_thread::sleep_for(config_.period);
         }
     }
-    
+
     void free_loop() {
         while (running_) {
-            auto output = process();
-            publish_to_subscribers(output);
+            if constexpr (has_multi_output) {
+                // Multi-output: create tuple and call process with references
+                OutputTypesTuple outputs{};
+                std::apply([this](auto&... args) { this->process(args...); }, outputs);
+                publish_multi_outputs(outputs);
+            } else {
+                // Single output: normal process
+                auto output = process();
+                publish_to_subscribers(output);
+            }
         }
     }
     
