@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on top of TiMS (TIMS Interprocess Message System). It provides a modern, type-safe, compile-time message passing system with zero runtime overhead.
 
-**Current Status**: Phase 4 Complete (3-mailbox architecture, hierarchical addressing, clean examples)  
-**Next Evolution**: Phase 5 - Multi-input/multi-output modules (see `docs/work/ARCHITECTURE_ANALYSIS.md`)
+**Current Status**: Phase 5.2 Complete (I/O specification types, Module refactoring with virtual dispatch)  
+**Next Evolution**: Phase 5.3 - Process signature generation, then Phase 6 - Multi-input with synchronized getData
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, registries, and type safety computed at compile time
@@ -61,6 +61,7 @@ throw exceptions         // Unpredictable timing
 // ✅ REAL-TIME SAFE:
 std::array<T, N>              // Fixed-size, stack-allocated
 sertial::fixed_vector<T, N>   // Fixed capacity, no allocation
+sertial::RingBuffer<T, N>     // Circular buffer (Phase 6)
 std::atomic<T>                // Lock-free operations
 constexpr functions           // Compile-time computation
 Templates with static_assert  // Compile-time validation
@@ -80,7 +81,7 @@ concept IsCommRatMessage = requires(T msg) {
 // SFINAE for conditional compilation
 template<typename T>
 static constexpr bool has_continuous_input = 
-    std::is_same_v<InputModeT, ContinuousInput<T>>;
+    HasContinuousInput<InputSpec>;
 
 if constexpr (has_continuous_input) {
     // Compile-time branch - no runtime cost
@@ -120,14 +121,14 @@ using CustomMsg = Message::Data<MyData, MessagePrefix::UserDefined, 42>;
 // Example: 0x01000002 = UserDefined (0x01) + Data (0x00) + ID (0x0002)
 ```
 
-### Module Pattern
+### Module Pattern (Phase 5.2 Update)
 
-Modules are the core abstraction - derive from `Module<OutputData, InputMode, ...CommandTypes>`:
+Modules are the core abstraction - derive from `Module<Registry, OutputSpec, InputSpec, ...CommandTypes>`:
 
 ```cpp
 // Producer (periodic publishing)
-// USER SEES: Simple class with one process() method
-class SensorModule : public Module<TemperatureData, PeriodicInput> {
+// NEW: Can use Output<T> or just raw T (auto-normalized)
+class SensorModule : public Module<Registry, Output<TemperatureData>, PeriodicInput> {
 protected:
     TemperatureData process() override {
         // Called every config_.period
@@ -136,20 +137,29 @@ protected:
     }
 };
 
+// Backward compatible - raw type still works
+class SensorModule : public Module<Registry, TemperatureData, PeriodicInput> {
+protected:
+    TemperatureData process() override {
+        return TemperatureData{...};
+    }
+};
+
 // Consumer (continuous input processing)
-// USER SEES: Simple class with one process_continuous() method
-class FilterModule : public Module<TemperatureData, ContinuousInput<TemperatureData>> {
+// NEW: Input<T> or legacy ContinuousInput<T> (auto-normalized)
+class FilterModule : public Module<Registry, TemperatureData, Input<TemperatureData>> {
 protected:
     TemperatureData process_continuous(const TemperatureData& input) override {
         // Called for each received message
         // MUST be real-time safe
+        // NOTE: Must use 'override' keyword - this is a virtual function!
         return filtered_data;
     }
 };
 
 // Command handler
 // USER SEES: Simple overloaded methods for each command type
-class CommandableModule : public Module<Data, PeriodicInput, CmdA, CmdB> {
+class CommandableModule : public Module<Registry, Data, PeriodicInput, CmdA, CmdB> {
 protected:
     void on_command(const CmdA& cmd) override {
         // Handle CmdA (compile-time dispatch)
@@ -162,9 +172,57 @@ protected:
 // BEHIND THE SCENES: Module base class creates 3 mailboxes, spawns threads,
 // handles subscription protocol, dispatches commands/messages to correct handlers,
 // manages memory buffers - all automatically based on template parameters
+```
+
+### Helper Base Class Pattern (Phase 5.2)
+
+For conditionally providing virtual functions based on template parameters, use the **helper base class with specialization** pattern:
+
+```cpp
+// Problem: Cannot declare `const void&` parameter for PeriodicInput/LoopInput modules
+// Solution: Helper base class with void specialization
+
+// Non-void specialization: Provides virtual process_continuous
+template<typename InputData_, typename OutputData_>
+class ContinuousProcessorBase {
+protected:
+    virtual OutputData_ process_continuous(const InputData_& input) {
+        std::cerr << "[Module] ERROR: process_continuous not overridden!\n";
+        return OutputData_{};
+    }
+};
+
+// Void specialization: No process_continuous function
+template<typename OutputData_>
+class ContinuousProcessorBase<void, OutputData_> {
+    // Empty - PeriodicInput/LoopInput modules have no continuous input
+};
+
+// Module inherits from appropriate specialization
+template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
+class Module : public ContinuousProcessorBase<
+    typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
+    typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
+> {
+    // Module implementation
+};
+
+// Derived class properly overrides virtual function (MUST use 'override' keyword)
+class FilterModule : public Module<Registry, Output<TempData>, Input<TempData>> {
+protected:
+    TempData process_continuous(const TempData& input) override {
+        // Now correctly overrides base class virtual function
+        return filtered_data;
     }
 };
 ```
+
+**Key Insights:**
+- **Virtual dispatch required**: process_continuous must be virtual for derived class overrides to work
+- **Template shadowing pitfall**: Template functions in derived classes shadow base class virtuals - avoid this
+- **Void reference problem**: Cannot have `const void&` parameter → use helper base class specialization
+- **Override keyword mandatory**: Use `override` for compile-time validation that virtual function exists in base
+- **Helper outside Module**: Place ContinuousProcessorBase outside Module class for clean inheritance
 
 ## Directory Structure
 
@@ -173,6 +231,7 @@ CommRaT/
 ├── include/commrat/          # Public headers
 │   ├── commrat.hpp          # Main include
 │   ├── registry_module.hpp  # Module base class (3-mailbox)
+│   ├── io_spec.hpp          # I/O specification types (Phase 5.1)
 │   ├── mailbox.hpp          # Payload-only mailbox wrapper
 │   ├── message_registry.hpp # Compile-time registry
 │   ├── messages.hpp         # Core message types
@@ -198,11 +257,38 @@ CommRaT/
 
 ## Documentation Strategy
 
+### Emoji Usage Policy
+
+**NEVER use emojis in user-facing documentation:**
+- **Forbidden locations**: README.md, docs/*.md, examples/*.md, any user-visible markdown files
+- **Only allowed in**: .github/copilot-instructions.md (internal guidance only)
+
+**Rationale:**
+- Professional appearance for production library
+- Accessibility (screen readers, plain text compatibility)
+- Consistency with technical documentation standards
+- Avoid visual clutter in code examples
+
+**Instead of emojis, use clear text:**
+```markdown
+// DON'T: // ✅ This works
+// DO:    // VALID: This works
+
+// DON'T: // ⚠️ Be careful here
+// DO:    // WARNING: Be careful here
+
+// DON'T: // ❌ Not supported
+// DO:    // ERROR: Not supported
+```
+
 ### Documentation Structure
 
 **Active Documentation** (`docs/`):
-- `README.md` - Comprehensive overview, current state (Phase 4), and Phase 5 roadmap
+- `README.md` - Comprehensive overview, current state (Phase 5.2), and Phase 6 roadmap
 - `work/ARCHITECTURE_ANALYSIS.md` - Detailed Phase 5 design (multi-I/O modules)
+- `work/IO_SYNC_STRATEGY.md` - Multi-input synchronization strategy (Phase 6)
+- `work/RACK_ANALYSIS.md` - RACK-style getData mechanism design
+- `work/SERTIAL_RINGBUFFER_REQUEST.md` - RingBuffer requirements for buffered inputs
 - `work/FIXES_APPLIED.md` - Historical record of bug fixes and solutions
 - `archive/` - Archived historical documentation from earlier phases
 
@@ -283,6 +369,34 @@ mailbox.receive_any([](auto&& received_msg) {
 });
 ```
 
+### Type Traits Pattern
+
+All type analysis follows a consistent pattern:
+
+```cpp
+// 1. Primary template (default case)
+template<typename T>
+struct trait_name : std::false_type {};
+
+// 2. Specializations for known types
+template<typename T, std::size_t N>
+struct trait_name<sertial::fixed_vector<T, N>> : std::true_type {};
+
+template<typename InputT>
+struct trait_name<Input<InputT>> : std::true_type {};
+
+// 3. Convenience variable template
+template<typename T>
+inline constexpr bool trait_name_v = trait_name<T>::value;
+
+// 4. Usage in compile-time dispatch
+if constexpr (trait_name_v<FieldType>) {
+    // Handle special case
+} else {
+    // Default case
+}
+```
+
 ## Testing Guidelines
 
 ### Unit Tests
@@ -306,7 +420,18 @@ Focus on:
 
 ## Migration Notes
 
-### Recent Changes (Phase 3 → Phase 4)
+### Recent Changes (Phase 5.1 → Phase 5.2)
+- **OLD**: Module template directly accepted raw types for Output/Input
+- **NEW**: Module template accepts OutputSpec/InputSpec (Output<T>, Input<T>, etc.)
+- **Normalization**: Raw types automatically converted (T → Output<T>, ContinuousInput<T> → Input<T>)
+- **Virtual Override**: process_continuous now properly overridden via helper base class pattern
+- **Impact**: 
+  - Module signature: `Module<Registry, OutputSpec, InputSpec, ...Commands>`
+  - Backward compatible: Raw types still work (auto-normalized)
+  - Must use `override` keyword for process_continuous (virtual function)
+  - ContinuousProcessorBase helper provides conditional virtual functions
+
+### Phase 4 → Phase 5.1 Changes
 - **OLD**: Single mailbox with polling (100ms timeout)
 - **NEW**: 3 separate mailboxes with blocking receives
 - **Impact**: 
@@ -316,10 +441,12 @@ Focus on:
   - Commands use CMD mailbox
 
 ### Backward Compatibility
-Legacy examples may still use old single-mailbox API. When updating:
+Legacy examples may still use old single-mailbox API or raw types. When updating:
 1. Change `ModuleConfig` to use `system_id`/`instance_id`
 2. Update subscription to use source IDs, not mailbox ID
 3. Test with 3-mailbox addressing scheme
+4. Raw types (e.g., `TemperatureData`) still work - auto-normalized to `Output<T>`
+5. Add `override` keyword to process_continuous implementations
 
 ## SeRTial Integration
 
@@ -342,6 +469,120 @@ auto result = sertial::Message<TimsMessage<T>>::serialize(msg);
 // Deserialization (zero-copy when possible)
 auto result = sertial::Message<TimsMessage<T>>::deserialize(buffer);
 // result.value() returns TimsMessage<T>
+
+// RingBuffer (Phase 6) - zero allocation circular buffer
+sertial::RingBuffer<TimsMessage<T>, 100> history;
+history.push_back(msg);  // Overwrites oldest when full
+// Serialization: Only current size() elements, not full capacity
+```
+
+## Design Principles
+
+### Compile-Time Guarantee
+If it can be validated at compile time, it MUST be validated at compile time:
+
+```cpp
+// VALID: Compile-time check
+template<typename T>
+auto send_message(const T& msg) {
+    static_assert(is_registered<T>, "Type must be registered in message registry");
+    static_assert(sizeof(T) < MAX_MESSAGE_SIZE,
+                  "Message size exceeds maximum - use bounded containers");
+    // ...
+}
+
+// ERROR: Runtime check for compile-time property
+if (!is_registered(msg)) {
+    throw std::runtime_error("Type not registered");
+}
+```
+
+### Zero-Allocation Mandate
+NO heap allocations in hot paths (periodic_loop, continuous_loop, process functions):
+
+```cpp
+// VALID: Stack-based, bounded containers
+template<typename T>
+void process_data(const T& input) {
+    sertial::fixed_vector<T, 100> buffer;  // Stack-allocated
+    std::array<float, 50> results;          // Fixed size
+    // Process without allocations...
+}
+
+// ERROR: Dynamic allocation in hot path
+void process_data(const T& input) {
+    std::vector<T> buffer;        // Heap allocation!
+    buffer.push_back(input);      // May reallocate!
+}
+```
+
+### Type Safety
+Leverage C++20 type system to catch errors early:
+
+```cpp
+// VALID: Concept-based constraints
+template<RegisteredMessage T>
+auto publish(const T& msg) { /* ... */ }
+
+// Attempting to publish unregistered type:
+struct UnregisteredData { int x; };
+publish(UnregisteredData{42});  // Compile error: not RegisteredMessage
+
+// ERROR: Runtime type check
+if (!is_registered_message(msg)) {
+    throw std::runtime_error("Message not registered");
+}
+```
+
+## Performance Considerations
+
+### Hot Path Optimization
+Real-time message processing must be deterministic and fast:
+
+1. **Avoid branching**: Use compile-time dispatch (`if constexpr`)
+2. **Minimize copies**: Use `std::span` for views, not copies
+3. **Batch operations**: Process multiple messages efficiently
+4. **Cache-friendly**: Sequential memory access patterns
+
+```cpp
+// VALID: Compile-time dispatch
+template<typename InputSpec>
+void process_input() {
+    if constexpr (HasContinuousInput<InputSpec>) {
+        return process_continuous();
+    } else if constexpr (HasPeriodicInput<InputSpec>) {
+        return process_periodic();
+    }
+}
+
+// ERROR: Runtime polymorphism
+void process_input() {
+    if (mode.is_continuous()) {  // Runtime branch
+        return process_continuous();
+    }
+}
+```
+
+### Memory Layout
+Pay attention to struct padding for optimal message packing:
+
+```cpp
+// ERROR: 8 bytes of padding wasted
+struct BadLayout {
+    uint8_t  a;  // 1 byte + 3 padding
+    uint32_t b;  // 4 bytes
+    uint8_t  c;  // 1 byte + 3 padding
+    uint32_t d;  // 4 bytes
+};  // Total: 16 bytes (8 wasted)
+
+// VALID: Optimal packing
+struct GoodLayout {
+    uint32_t b;  // 4 bytes
+    uint32_t d;  // 4 bytes
+    uint8_t  a;  // 1 byte
+    uint8_t  c;  // 1 byte
+    // 2 bytes padding at end
+};  // Total: 12 bytes (2 wasted, but necessary)
 ```
 
 ## When Suggesting Code
@@ -361,6 +602,7 @@ auto result = sertial::Message<TimsMessage<T>>::deserialize(buffer);
 - Suggest `std::vector` or `std::string` in hot paths
 - Use exceptions in real-time code
 - Suggest dynamic polymorphism (virtual functions) without justification
+  - Exception: Helper base classes with specialization for conditional APIs (see ContinuousProcessorBase)
 - Ignore const-correctness
 - Use `auto` when type clarity is important
 - Expose template complexity to end users - keep metaprogramming machinery internal
@@ -394,6 +636,9 @@ if (!result) {
 ## Future Considerations
 
 ### Planned Features
+- Phase 5.3: Process signature generation (multi-output support)
+- Phase 6: Multi-input with synchronized getData (RACK-style)
+- RingBuffer integration for buffered inputs
 - ROS 2 adapter (rclcpp-commrat) - separate repository
 - DDS compatibility layer
 - Performance profiling tools
@@ -402,17 +647,19 @@ if (!result) {
 ### Technical Debt
 - Command dispatch (on_command overloads) needs improvement
 - Legacy MessageService being phased out
-- Some examples need update to 3-mailbox system
+- Examples need cleanup (remove outdated patterns)
 
 ## Questions to Ask Yourself
 
 Before suggesting code:
-1. Is this real-time safe? (No malloc, no blocking I/O)
-2. Can this be computed at compile time?
+1. Is this allocation-free? (No new/malloc/vector in hot paths)
+2. Can this be computed at compile time? (Use constexpr/consteval)
 3. Does this respect the 3-mailbox architecture?
-4. Is the type constraint clear and enforced?
-5. Would this cause unnecessary copies?
-6. Is the error handling explicit and testable?
+4. Is the type constraint clear and enforced? (Concepts/static_assert)
+5. Is error handling deterministic? (std::optional, no exceptions in hot paths)
+6. Would this cause unnecessary copies? (Use std::span for views)
+7. Is the complexity hidden from users? (Simple API, complex internals)
+8. Does this maintain real-time guarantees? (Bounded execution time)
 
 ## Summary
 

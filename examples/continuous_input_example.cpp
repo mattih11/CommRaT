@@ -64,7 +64,7 @@ private:
     size_t history_index_{0};
 
 protected:
-    TemperatureData process_continuous(const TemperatureData& input) {
+    TemperatureData process_continuous(const TemperatureData& input) override {
         // Apply simple moving average filter
         history_[history_index_] = input.temperature_c;
         history_index_ = (history_index_ + 1) % HISTORY_SIZE;

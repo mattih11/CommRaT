@@ -1,7 +1,7 @@
 # CommRaT Documentation
 
-**Last Updated**: February 6, 2026  
-**Current Version**: Phase 4 Complete
+**Last Updated**: February 7, 2026  
+**Current Version**: Phase 5.2 Complete (Multi-I/O Foundation)
 
 ---
 
@@ -9,8 +9,11 @@
 
 ### Active Documentation
 
-- **[ARCHITECTURE_ANALYSIS.md](work/ARCHITECTURE_ANALYSIS.md)** - Current architecture assessment and future roadmap (Phase 5: Multi-I/O)
-- **[FIXES_APPLIED.md](work/FIXES_APPLIED.md)** - Historical record of bug fixes and solutions
+- **[ARCHITECTURE_ANALYSIS.md](work/ARCHITECTURE_ANALYSIS.md)** - Architecture assessment and Phase 5/6 roadmap
+- **[FIXES_APPLIED.md](work/FIXES_APPLIED.md)** - Historical bug fixes and solutions
+- **[IO_SYNC_STRATEGY.md](work/IO_SYNC_STRATEGY.md)** - Multi-input synchronization strategy (Phase 6)
+- **[RACK_ANALYSIS.md](work/RACK_ANALYSIS.md)** - RACK getData mechanism analysis
+- **[SERTIAL_RINGBUFFER_REQUEST.md](work/SERTIAL_RINGBUFFER_REQUEST.md)** - RingBuffer specification for SeRTial
 
 ### Visual Assets
 
@@ -23,7 +26,7 @@ See `archive/` directory for historical design documents and validation logs fro
 
 ---
 
-## 🎯 Current State (Phase 4 Complete)
+## 🎯 Current State (Phase 5.2 Complete)
 
 ### What We Have
 
@@ -39,23 +42,32 @@ See `archive/` directory for historical design documents and validation logs fro
 - Blocking receives, zero CPU when idle
 - Thread-per-mailbox model
 
-✅ **Module Framework**
+✅ **Module Framework with I/O Specifications** (Phase 5.2 NEW)
 ```cpp
 template<typename UserRegistry,
-         typename OutputDataT,
-         typename InputModeT,
+         typename OutputSpec,    // Output<T>, Outputs<Ts...>, or raw T
+         typename InputSpec,     // Input<T>, PeriodicInput, LoopInput
          typename... CommandTypes>
 class Module;
 ```
 
+**New Features (Phase 5.1-5.2):**
+- I/O specification types: `Output<T>`, `Outputs<Ts...>`, `Input<T>`, `Inputs<Ts...>`
+- Automatic normalization: raw type `T` → `Output<T>`
+- Backward compatibility: `ContinuousInput<T>` → `Input<T>`
+- Virtual `process_continuous` with proper inheritance (bug fix)
+- Compile-time validation with helpful error messages
+
 **Input Modes:**
 - `PeriodicInput` - Timer-based execution
 - `LoopInput` - Maximum throughput (100% CPU)
-- `ContinuousInput<T>` - Processes input stream
+- `Input<T>` / `ContinuousInput<T>` - Processes input stream
+- `Inputs<Ts...>` - Multi-input (Phase 6, rejected with static_assert in Phase 5)
 
 **Features:**
 - Automatic subscription management
 - Type-safe command dispatch
+- Virtual process_continuous for proper override
 - Lifecycle hooks (on_init, on_start, on_stop, on_cleanup)
 - Zero-overhead abstractions
 
@@ -72,7 +84,34 @@ examples/
 
 ---
 
-## 🚀 Next Evolution: Phase 5 (Multi-Input/Multi-Output)
+## 🚀 Phase 5 Progress
+
+### ✅ Phase 5.1: Core I/O Specification Types (Complete)
+- `Output<T>`, `Outputs<Ts...>`, `NoOutput`
+- `Input<T>`, `Inputs<Ts...>`
+- Normalization traits and concepts
+- Comprehensive test suite
+
+### ✅ Phase 5.2: Module Refactoring (Complete)
+- Updated Module template signature to use I/O specs
+- Fixed process_continuous virtual dispatch bug
+- Helper base class `ContinuousProcessorBase<InputData, OutputData>`
+- Backward compatibility maintained
+- Phase 5 constraint: single input/output only (static_assert)
+
+### 🔄 Phase 5.3: Process Signature Generation (Next)
+- Automatic process() signature based on I/O specs
+- SFINAE-based overload generation
+- Parameter pack expansion for multiple outputs
+
+### 🔲 Phase 5.4: Testing and Examples (Pending)
+- New examples using I/O spec types
+- Migration guide
+- Performance validation
+
+---
+
+## 🚀 Future: Phase 6 (Multi-Input with Synchronized getData)
 
 ### Vision
 
