@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on top of TiMS (TIMS Interprocess Message System). It provides a modern, type-safe, compile-time message passing system with zero runtime overhead.
 
-**Current Status**: Phase 5.2 Complete (I/O specification types, Module refactoring with virtual dispatch)  
-**Next Evolution**: Phase 5.3 - Process signature generation, then Phase 6 - Multi-input with synchronized getData
+**Current Status**: Phase 5.3 In Progress (Multi-output signature generation complete, tests added)  
+**Next Evolution**: Phase 5.4 - Testing and examples, then Phase 6 - Multi-input with synchronized getData
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, registries, and type safety computed at compile time
@@ -121,21 +121,27 @@ using CustomMsg = Message::Data<MyData, MessagePrefix::UserDefined, 42>;
 // Example: 0x01000002 = UserDefined (0x01) + Data (0x00) + ID (0x0002)
 ```
 
-### Module Pattern (Phase 5.2 Update)
+### Application Definition & Module Pattern (Phase 5.3)
 
-Modules are the core abstraction. **PREFERRED USER-FACING API**: Use `Registry::Module<OutputSpec, InputSpec, ...CommandTypes>`:
+**CommRaT<>** is the main user-facing template that defines your application. It combines MessageRegistry with Module/Mailbox for a clean API:
 
 ```cpp
-// Define your message registry once
-using MyRegistry = MessageRegistry<
+// 1. DEFINE YOUR APPLICATION (replaces MessageRegistry in user code)
+using MyApp = CommRaT<
     Message::Data<TemperatureData>,
     Message::Data<FilteredData>,
     Message::Command<ResetCmd>
 >;
 
+// Now MyApp provides:
+//   MyApp::Module<OutputSpec, InputSpec, ...Commands> - Module template
+//   MyApp::Mailbox<T>                                  - Mailbox template
+//   MyApp::serialize(msg) / deserialize<T>(data)      - Serialization
+//   MyApp::get_message_id<T>()                        - Message IDs
+
+// 2. CREATE MODULES using MyApp::Module
 // Producer (periodic publishing)
-// PREFERRED: Registry::Module<...> - clean, no template parameter repetition
-class SensorModule : public MyRegistry::Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput> {
 protected:
     TemperatureData process() override {
         // Called every config_.period
@@ -144,16 +150,8 @@ protected:
     }
 };
 
-// Also valid (backward compatible): raw type auto-normalized to Output<T>
-class SensorModule : public MyRegistry::Module<TemperatureData, PeriodicInput> {
-protected:
-    TemperatureData process() override {
-        return TemperatureData{...};
-    }
-};
-
 // Consumer (continuous input processing)
-class FilterModule : public MyRegistry::Module<Output<FilteredData>, Input<TemperatureData>> {
+class FilterModule : public MyApp::Module<Output<FilteredData>, Input<TemperatureData>> {
 protected:
     FilteredData process_continuous(const TemperatureData& input) override {
         // Called for each received message
@@ -164,7 +162,7 @@ protected:
 };
 
 // Command handler with multiple command types
-class CommandableModule : public MyRegistry::Module<TemperatureData, PeriodicInput, ResetCmd, CalibrateCmd> {
+class CommandableModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput, ResetCmd, CalibrateCmd> {
 protected:
     TemperatureData process() override {
         return read_sensor();
@@ -179,25 +177,50 @@ protected:
     }
 };
 
-// ALTERNATIVE (verbose): Module<Registry, OutputSpec, InputSpec, ...> also works
-// But Registry::Module<...> is preferred - less repetition, cleaner code
-class SensorModule : public Module<MyRegistry, Output<TemperatureData>, PeriodicInput> {
-    // ... same implementation
+// 3. MULTI-OUTPUT (Phase 5.3) - void process with output references
+class MultiOutputModule : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
+protected:
+    void process(DataA& out1, DataB& out2) override {
+        // Fill multiple outputs
+        out1 = DataA{...};
+        out2 = DataB{...};
+    }
 };
 
-// BEHIND THE SCENES: Module base class creates 3 mailboxes, spawns threads,
-// handles subscription protocol, dispatches commands/messages to correct handlers,
-// manages memory buffers - all automatically based on template parameters
+// Multi-output with continuous input
+class MultiOutputFilter : public MyApp::Module<Outputs<DataA, DataB>, Input<SensorData>> {
+protected:
+    void process_continuous(const SensorData& input, DataA& out1, DataB& out2) override {
+        // Process input, fill multiple outputs
+        out1 = transform_a(input);
+        out2 = transform_b(input);
+    }
+};
+
+// 4. BACKWARD COMPATIBLE - raw types auto-normalized to Output<T>
+class LegacyModule : public MyApp::Module<TemperatureData, PeriodicInput> {
+protected:
+    TemperatureData process() override {
+        return TemperatureData{...};
+    }
+};
+
+// ARCHITECTURE NOTES:
+// - CommRaT<...> = Application definition (combines registry + Module/Mailbox)
+// - MessageRegistry<...> = Internal type registry (use CommRaT instead)
+// - Module base class creates 3 mailboxes, spawns threads, handles subscription
+// - All complexity hidden behind simple MyApp::Module<Output, Input> syntax
 ```
 
 **Key Points:**
-- **Use `Registry::Module<OutputSpec, InputSpec, ...Commands>`** - this is the clean user-facing API
-- Registry is specified once, not repeated in every module
-- Output/Input specs are normalized automatically (T → Output<T>)
-- Virtual `process()` and `process_continuous()` must use `override` keyword
-- All complexity (3 mailboxes, threads, subscription) handled automatically
+- **Use `CommRaT<...>` not `MessageRegistry<...>`** - CommRaT is the user-facing application template
+- **Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`** - clean, no repetition
+- Output/Input specs: `Output<T>`, `Outputs<T, U>`, `Input<T>`, `PeriodicInput`, `LoopInput`
+- Virtual `process()` and `process_continuous()` **must use `override` keyword**
+- Multi-output: `void process(T1& out1, T2& out2)` - outputs passed by reference
+- Raw types auto-normalized: `TemperatureData` → `Output<TemperatureData>`
 
-### Helper Base Class Pattern (Phase 5.2)
+### Helper Base Class Pattern (Phase 5.3)
 
 For conditionally providing virtual functions based on template parameters, use the **helper base class with specialization** pattern:
 
@@ -221,12 +244,22 @@ class ContinuousProcessorBase<void, OutputData_> {
     // Empty - PeriodicInput/LoopInput modules have no continuous input
 };
 
-// Module inherits from appropriate specialization
+// Multi-output specialization (Phase 5.3): void process(T1& out1, T2& out2)
+template<typename... Ts>
+    requires (sizeof...(Ts) > 1)
+class MultiOutputProcessorBase<std::tuple<Ts...>, void> {
+protected:
+    virtual void process(Ts&... outputs) {
+        std::cerr << "[Module] ERROR: Multi-output process(...) not overridden!\n";
+    }
+};
+
+// Module inherits from both helper base classes
 template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
-class Module : public ContinuousProcessorBase<
-    typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
-    typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
-> {
+class Module 
+    : public ContinuousProcessorBase<...>
+    , public MultiOutputProcessorBase<...>
+{
     // Module implementation
 };
 
@@ -252,11 +285,11 @@ protected:
 ```
 CommRaT/
 ├── include/commrat/          # Public headers
-│   ├── commrat.hpp          # Main include
-│   ├── registry_module.hpp  # Module base class (3-mailbox)
+│   ├── commrat.hpp          # Main include (CommRaT<> application template)
+│   ├── registry_module.hpp  # Module base class (3-mailbox, multi-output)
 │   ├── io_spec.hpp          # I/O specification types (Phase 5.1)
 │   ├── mailbox.hpp          # Payload-only mailbox wrapper
-│   ├── message_registry.hpp # Compile-time registry
+│   ├── message_registry.hpp # Compile-time registry (internal, use CommRaT)
 │   ├── messages.hpp         # Core message types
 │   └── tims_wrapper.hpp     # TiMS C API wrapper
 ├── src/                     # Implementation files
