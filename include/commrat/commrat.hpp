@@ -40,3 +40,64 @@
  * - Automatic system message inclusion
  * - Clean payload-only user interface
  */
+
+namespace commrat {
+
+/**
+ * @brief CommRaT Application Template - Main User-Facing Interface
+ * 
+ * This combines MessageRegistry with Module/Mailbox for a clean API:
+ * 
+ * Usage:
+ *   using MyApp = CommRaT<
+ *       MessageDefinition<SensorData, ...>,
+ *       MessageDefinition<FilteredData, ...>
+ *   >;
+ *   
+ *   class SensorModule : public MyApp::Module<Output<SensorData>, PeriodicInput> {
+ *       SensorData process() override { ... }
+ *   };
+ * 
+ * Advantages over raw MessageRegistry:
+ * - Module template alias included (Registry::Module wasn't clear)
+ * - Mailbox types available via MyApp::Mailbox<T>
+ * - All application components in one namespace
+ * - Clearer intent: "This is my CommRaT application definition"
+ */
+template<typename... MessageDefs>
+class CommRaT : public MessageRegistry<MessageDefs...> {
+private:
+    using Registry = MessageRegistry<MessageDefs...>;
+
+public:
+    // Inherit all registry functionality
+    using Registry::is_registered;
+    using Registry::get_message_id;
+    using Registry::serialize;
+    using Registry::deserialize;
+    using Registry::visit;
+    using Registry::dispatch;
+    using Registry::max_message_size;
+    
+    /**
+     * @brief Module template - create modules for this application
+     * 
+     * Preferred user-facing API for defining modules:
+     *   class MyModule : public MyApp::Module<OutputSpec, InputSpec, ...Commands> {
+     *       // Your process() implementation
+     *   };
+     */
+    template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
+    using Module = commrat::Module<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
+    
+    /**
+     * @brief Mailbox template - create mailboxes for this application
+     * 
+     * For advanced use cases that need direct mailbox access:
+     *   MyApp::Mailbox<SensorData> sensor_mailbox{config};
+     */
+    template<typename PayloadT>
+    using Mailbox = RegistryMailbox<Registry>;
+};
+
+} // namespace commrat

@@ -21,13 +21,12 @@ using namespace user_app;  // Module, Mailbox, PeriodicInput, ContinuousInput
 /**
  * @brief Temperature sensor module
  * 
- * Notice: Module<TempData, PeriodicInput>
- * - Only payload type (TempData)
- * - Only input mode (PeriodicInput)
- * - No registry parameter! (automatic)
- * - No MessageDefinition anywhere!
+ * Notice: Module<Output<TempData>, PeriodicInput>
+ * - Clean I/O specification
+ * - No registry parameter needed!
+ * - No MessageDefinition in user code!
  */
-class SensorModule : public Module<TemperatureData, PeriodicInput> {
+class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
 public:
     using Module::Module;  // Inherit constructor
     
@@ -37,7 +36,7 @@ private:
 
 protected:
     // Return payload type directly
-    TemperatureData process() {
+    TemperatureData process() override {
         float temp = base_temp_ + std::sin(counter_ * 0.1f) * 5.0f;
         counter_++;
         
@@ -55,12 +54,12 @@ protected:
 /**
  * @brief Filter module - consumes and produces TemperatureData
  * 
- * Notice: Module<TempData, ContinuousInput<TempData>>
- * - Payload type for input: ContinuousInput<TemperatureData>
- * - Payload type for output: TemperatureData
+ * Notice: Module<Output<TempData>, Input<TempData>>
+ * - Input<T> for continuous input
+ * - Output<T> for single output
  * - No registry parameter!
  */
-class FilterModule : public Module<TemperatureData, ContinuousInput<TemperatureData>> {
+class FilterModule : public Module<Output<TemperatureData>, Input<TemperatureData>> {
 public:
     using Module::Module;  // Inherit constructor
     
@@ -72,7 +71,7 @@ private:
 
 protected:
     // Receives payload, returns payload
-    TemperatureData process_continuous(const TemperatureData& input) {
+    TemperatureData process_continuous(const TemperatureData& input) override {
         window_[index_] = input.temperature_celsius;
         index_ = (index_ + 1) % WINDOW_SIZE;
         if (count_ < WINDOW_SIZE) count_++;

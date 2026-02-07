@@ -169,28 +169,6 @@ private:
     static constexpr bool is_registered_v = IsInTuple<T, PayloadTypes>::value;
 
 public:
-    // ========================================================================
-    // Module Template Alias - Preferred User-Facing API
-    // ========================================================================
-    
-    /**
-     * @brief Convenience alias for creating modules using this registry
-     * 
-     * This provides the cleaner user-facing API:
-     *   Registry::Module<OutputSpec, InputSpec, ...Commands>
-     * 
-     * Instead of the more verbose:
-     *   Module<Registry, OutputSpec, InputSpec, ...Commands>
-     * 
-     * Example:
-     *   using MyRegistry = MessageRegistry<...>;
-     *   class SensorModule : public MyRegistry::Module<Output<TempData>, PeriodicInput> {
-     *       TempData process() override { ... }
-     *   };
-     */
-    template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
-    using Module = commrat::Module<MessageRegistry, OutputSpec_, InputSpec_, CommandTypes...>;
-    
     // Maximum message size across all registered types (for buffer allocation)
     // NOTE: We calculate size of TimsMessage<Payload> not just Payload, because that's what gets serialized
     template<typename... Payloads>

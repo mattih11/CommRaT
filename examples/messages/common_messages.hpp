@@ -42,31 +42,40 @@ struct PoseData {
 };
 
 // ============================================================================
-// Message Registry with Automatic Module/Mailbox Aliases
+// CommRaT Application Definition - Combines messages with Module/Mailbox
 // ============================================================================
 
-using ExampleApp = commrat::Registry<
+// Define the CommRaT application with your messages
+using ExampleApp = commrat::CommRaT<
     commrat::Message::Data<StatusData>,
     commrat::Message::Data<CounterData>,
     commrat::Message::Data<TemperatureData>,
     commrat::Message::Data<PoseData>
 >;
 
-// Module and Mailbox are automatically available!
-// Just use: ExampleApp::Module<OutputData, InputMode>
-//       or: ExampleApp::Mailbox
+// Now you can use:
+//   ExampleApp::Module<Output<T>, InputSpec>  - Module template
+//   ExampleApp::Mailbox<T>                     - Mailbox template
+//   ExampleApp::serialize(msg)                 - Serialization
+//   ExampleApp::deserialize<T>(data)           - Deserialization
 
-// Convenient re-exports in this namespace
-template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-using Module = ExampleApp::Module<OutputDataT, InputModeT, CommandTypes...>;
+// Convenient re-exports for this namespace
+template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
+using Module = ExampleApp::Module<OutputSpec, InputSpec, CommandTypes...>;
 
-using Mailbox = ExampleApp::Mailbox;
+template<typename PayloadT>
+using Mailbox = ExampleApp::Mailbox<PayloadT>;
 
-// Re-export for convenience
+// Re-export I/O specifications
+using commrat::Output;
+using commrat::Outputs;
+using commrat::Input;
+using commrat::Inputs;
+using commrat::NoOutput;
 using commrat::PeriodicInput;
 using commrat::LoopInput;
-using commrat::ContinuousInput;
 using commrat::ModuleConfig;
 using commrat::MailboxConfig;
 
 } // namespace example_messages
+

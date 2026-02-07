@@ -28,17 +28,13 @@ struct SetModeCmd {
 
 // Add commands to registry (in real code, this goes in user_messages.hpp)
 namespace user_app {
-    // Extended registry with commands
-    using ExtendedRegistry = commrat::CombinedRegistry<
+    // Extended CommRaT application with commands
+    using ExtendedApp = commrat::CommRaT<
         commrat::Message::Data<TemperatureData>,
         commrat::Message::Command<ResetCmd>,
         commrat::Message::Command<CalibrateCmd>,
         commrat::Message::Command<SetModeCmd>
     >;
-    
-    // Module alias with extended registry
-    template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-    using ExtendedModule = commrat::Module<ExtendedRegistry, OutputDataT, InputModeT, CommandTypes...>;
 }
 
 // ============================================================================
@@ -49,14 +45,14 @@ namespace user_app {
  * @brief Sensor module that handles multiple command types
  * 
  * Notice the variadic CommandTypes at the end:
- *   Module<TemperatureData, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>
+ *   Module<Output<TempData>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>
  * 
  * The module automatically dispatches commands to the correct on_command() handler.
  */
-class CommandableSensor : public ExtendedModule<TemperatureData, PeriodicInput, 
-                                                  ResetCmd, CalibrateCmd, SetModeCmd> {
+class CommandableSensor : public ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, 
+                                                       ResetCmd, CalibrateCmd, SetModeCmd> {
 public:
-    using ExtendedModule<TemperatureData, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>::Module;  // Inherit base Module constructor
+    using Module::Module;  // Inherit constructor
     
 private:
     float calibration_offset_ = 0.0f;
@@ -64,7 +60,7 @@ private:
     int counter_ = 0;
 
 protected:
-    TemperatureData process() {
+    TemperatureData process() override {
         float raw_temp = 20.0f + std::sin(counter_++ * 0.1f) * 5.0f;
         float calibrated_temp = raw_temp + calibration_offset_;
         
@@ -133,7 +129,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     
     // Create control mailbox to send commands
-    MailboxConfig control_config{
+    commrat::MailboxConfig control_config{
         .mailbox_id = 200,
         .message_slots = 10,
         .max_message_size = 4096,
@@ -142,7 +138,7 @@ int main() {
         .mailbox_name = "ControlMailbox"
     };
     
-    commrat::RegistryMailbox<user_app::ExtendedRegistry> control(control_config);
+    ExtendedApp::Mailbox<ResetCmd> control(control_config);
     control.start();
     
     std::cout << "\n=== Sending Commands ===\n\n";

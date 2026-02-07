@@ -26,12 +26,12 @@ void signal_handler(int signal) {
 // Producer Module - Publishes temperature data @ 100ms
 // ============================================================================
 
-class SensorModule : public Module<TemperatureData, PeriodicInput> {
+class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
 public:
     using Module::Module;  // Inherit constructor
     
 protected:
-    TemperatureData process() {
+    TemperatureData process() override {
         // Simulate temperature sensor
         static float temp = 20.0f;
         temp += 0.1f * (std::rand() % 10 - 5);  // Random walk
@@ -54,7 +54,7 @@ protected:
 // Consumer Module - Receives temperature data via automatic subscription
 // ============================================================================
 
-class FilterModule : public Module<TemperatureData, ContinuousInput<TemperatureData>> {
+class FilterModule : public Module<Output<TemperatureData>, Input<TemperatureData>> {
 public:
     using Module::Module;  // Inherit constructor
     
@@ -107,16 +107,6 @@ int main() {
     std::cout << "=== Continuous Input Example ===\n";
     std::cout << "Producer → Consumer with automatic subscription\n";
     std::cout << "Press Ctrl+C to stop\n\n";
-    
-    // Debug: Print message IDs
-    std::cout << "Message IDs:\n";
-    std::cout << "  SubscribeRequest:   0x" << std::hex << std::setw(8) << std::setfill('0') 
-              << ExampleApp::Type::get_message_id<commrat::SubscribeRequestPayload>() << "\n";
-    std::cout << "  SubscribeReply:     0x" << std::hex << std::setw(8) << std::setfill('0')
-              << ExampleApp::Type::get_message_id<commrat::SubscribeReplyPayload>() << "\n";
-    std::cout << "  TemperatureData:    0x" << std::hex << std::setw(8) << std::setfill('0')
-              << ExampleApp::Type::get_message_id<TemperatureData>() << "\n";
-    std::cout << std::dec << "\n";
     
     try {
         // Create producer module (publishes @ 100ms)

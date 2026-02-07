@@ -29,17 +29,19 @@ struct PoseData {
 };
 
 // ============================================================================
-// Application Message Registry (System messages included automatically)
+// Application Definition - CommRaT combines registry with Module/Mailbox
 // ============================================================================
 
-// Define your messages and get Module/Mailbox aliases automatically!
-using App = commrat::Registry<
+using App = commrat::CommRaT<
     commrat::Message::Data<TemperatureData>,
     commrat::Message::Data<StatusData>,
     commrat::Message::Data<CounterData>,
     commrat::Message::Data<PoseData>
 >;
 
-// That's it! App::Module and App::Mailbox are now available automatically.
+// App provides:
+//   App::Module<Output<T>, InputSpec>  - Module template
+//   App::Mailbox<T>                     - Mailbox template
+//   App::serialize/deserialize          - Serialization
 
 } // namespace user_app

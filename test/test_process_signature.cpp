@@ -11,8 +11,7 @@
  * - NoOutput → void process() or void process(const InputData&)
  */
 
-#include <commrat/registry_module.hpp>
-#include <commrat/messages.hpp>
+#include <commrat/commrat.hpp>
 #include <iostream>
 #include <cassert>
 
@@ -44,19 +43,21 @@ struct CommandData {
     uint32_t command_id;
 };
 
-// Message registry
-using TestRegistry = MessageRegistry<
+// CommRaT Application Definition
+using TestApp = CommRaT<
     MessageDefinition<SensorData, MessagePrefix::UserDefined, UserSubPrefix::Data, 0>,
     MessageDefinition<FilteredData, MessagePrefix::UserDefined, UserSubPrefix::Data, 1>,
     MessageDefinition<DiagnosticsData, MessagePrefix::UserDefined, UserSubPrefix::Data, 2>,
     MessageDefinition<CommandData, MessagePrefix::UserDefined, UserSubPrefix::Commands, 0>
 >;
 
+// Note: TestApp provides Module, Mailbox, and all registry functions
+
 // ============================================================================
 // Test 1: PeriodicInput + Output<T> → OutputData process()
 // ============================================================================
 
-class PeriodicSingleOutputModule : public TestRegistry::Module<Output<SensorData>, PeriodicInput> {
+class PeriodicSingleOutputModule : public TestApp::Module<Output<SensorData>, PeriodicInput> {
 public:
     using Module::Module;
     
@@ -102,7 +103,7 @@ void test_periodic_single_output() {
 // Test 2: LoopInput + Output<T> → OutputData process()
 // ============================================================================
 
-class LoopSingleOutputModule : public TestRegistry::Module<Output<FilteredData>, LoopInput> {
+class LoopSingleOutputModule : public TestApp::Module<Output<FilteredData>, LoopInput> {
 public:
     using Module::Module;
     
@@ -144,7 +145,7 @@ void test_loop_single_output() {
 // Test 3: Input<T> + Output<U> → OutputData process_continuous(const InputData&)
 // ============================================================================
 
-class ContinuousSingleOutputModule : public TestRegistry::Module<Output<FilteredData>, Input<SensorData>> {
+class ContinuousSingleOutputModule : public TestApp::Module<Output<FilteredData>, Input<SensorData>> {
 public:
     using Module::Module;
     
@@ -190,7 +191,7 @@ void test_continuous_single_output() {
 // Test 4: Backward Compatibility - Raw Type Output
 // ============================================================================
 
-class BackwardCompatibleModule : public TestRegistry::Module<SensorData, PeriodicInput> {
+class BackwardCompatibleModule : public TestApp::Module<SensorData, PeriodicInput> {
 public:
     using Module::Module;
     
@@ -238,19 +239,19 @@ void test_type_aliases() {
     std::cout << "[Test 5] Type Aliases Verification\n";
     
     // Verify OutputData and InputData type aliases
-    using M1 = TestRegistry::Module<Output<SensorData>, PeriodicInput>;
+    using M1 = TestApp::Module<Output<SensorData>, PeriodicInput>;
     static_assert(std::is_same_v<M1::OutputData, SensorData>, 
                   "OutputData should be SensorData");
     static_assert(std::is_same_v<M1::InputData, void>, 
                   "InputData should be void for PeriodicInput");
     
-    using M2 = TestRegistry::Module<Output<FilteredData>, Input<SensorData>>;
+    using M2 = TestApp::Module<Output<FilteredData>, Input<SensorData>>;
     static_assert(std::is_same_v<M2::OutputData, FilteredData>, 
                   "OutputData should be FilteredData");
     static_assert(std::is_same_v<M2::InputData, SensorData>, 
                   "InputData should be SensorData for Input<SensorData>");
     
-    using M3 = TestRegistry::Module<SensorData, PeriodicInput>;  // Raw type
+    using M3 = TestApp::Module<SensorData, PeriodicInput>;  // Raw type
     static_assert(std::is_same_v<M3::OutputData, SensorData>, 
                   "Raw type should be normalized to Output<T>");
     
@@ -267,9 +268,9 @@ void test_compile_time_constraints() {
     std::cout << "[Test 6] Compile-Time Constraints\n";
     
     // These should compile (Phase 5 allows single I/O)
-    using Valid1 = TestRegistry::Module<Output<SensorData>, PeriodicInput>;
-    using Valid2 = TestRegistry::Module<Output<FilteredData>, Input<SensorData>>;
-    using Valid3 = TestRegistry::Module<SensorData, LoopInput>;  // Raw type
+    using Valid1 = TestApp::Module<Output<SensorData>, PeriodicInput>;
+    using Valid2 = TestApp::Module<Output<FilteredData>, Input<SensorData>>;
+    using Valid3 = TestApp::Module<SensorData, LoopInput>;  // Raw type
     
     // These should NOT compile (Phase 5 rejects multi-I/O)
     // Uncomment to verify compile-time rejection:

@@ -23,23 +23,23 @@
 namespace user_app {
 
 // ============================================================================
-// Convenient Re-exports - No Manual Aliasing Needed!
+// Convenient Aliases - Direct Access to App Components
 // ============================================================================
 
-// Module and Mailbox come directly from App (defined in user_messages.hpp)
-// They're already configured with your registry!
-template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-using Module = App::Module<OutputDataT, InputModeT, CommandTypes...>;
+// Module and Mailbox aliases for cleaner syntax in this namespace
+template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
+using Module = App::Module<OutputSpec, InputSpec, CommandTypes...>;
 
-using Mailbox = App::Mailbox;
+template<typename PayloadT>
+using Mailbox = App::Mailbox<PayloadT>;
 
-// Re-export input mode types for convenience
+// I/O specifications
+using commrat::Output;
+using commrat::Input;
 using commrat::PeriodicInput;
 using commrat::LoopInput;
-using commrat::ContinuousInput;
 
-// Re-export module config
+// Config types
 using commrat::ModuleConfig;
-using commrat::MailboxConfig;
 
 } // namespace user_app
