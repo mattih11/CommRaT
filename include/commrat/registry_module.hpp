@@ -2,6 +2,7 @@
 
 #include "commrat/registry_mailbox.hpp"
 #include "commrat/subscription_messages.hpp"
+#include "commrat/system_registry.hpp"
 #include "commrat/io_spec.hpp"
 #include <sertial/sertial.hpp>
 #include <thread>
@@ -465,7 +466,8 @@ protected:
         // Retry a few times in case the producer's mailbox isn't ready yet
         int max_retries = 5;
         for (int i = 0; i < max_retries; ++i) {
-            auto result = cmd_mailbox_.send(request, source_work_mbx);
+            // Send subscribe request from work mailbox (SystemRegistry messages)
+            auto result = work_mailbox_.send(request, source_work_mbx);
             if (result) {
                 std::cout << "[" << config_.name << "] SubscribeRequest sent successfully\n";
                 return;
@@ -502,7 +504,8 @@ protected:
             source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
         }
         
-        cmd_mailbox_.send(request, source_work_mbx);
+        // Send unsubscribe request from work mailbox (SystemRegistry messages)
+        work_mailbox_.send(request, source_work_mbx);
     }
     
     void handle_subscribe_request(const SubscribeRequestType& req) {
