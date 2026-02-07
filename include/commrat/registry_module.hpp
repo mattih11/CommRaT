@@ -103,7 +103,8 @@ class MultiOutputProcessorBase<std::tuple<T>, InputData_> {
 template<typename... Ts>
     requires (sizeof...(Ts) > 1)
 class MultiOutputProcessorBase<std::tuple<Ts...>, void> {
-protected:
+public:
+    // Public virtual function for polymorphic calls from Module
     virtual void process(Ts&... outputs) {
         std::cerr << "[Module] ERROR: Multi-output process(...) not overridden in derived class!\n";
         // Leave outputs as default-constructed
@@ -114,12 +115,34 @@ protected:
 template<typename... Ts, typename InputData_>
     requires (sizeof...(Ts) > 1)
 class MultiOutputProcessorBase<std::tuple<Ts...>, InputData_> {
-protected:
+public:
+    // Public virtual function for polymorphic calls from Module
     virtual void process_continuous(const InputData_& input, Ts&... outputs) {
         std::cerr << "[Module] ERROR: Multi-output process_continuous(...) not overridden in derived class!\n";
         // Leave outputs as default-constructed
         (void)input;  // Suppress unused warning
     }
+};
+
+// ============================================================================
+// Single-Output Processor Base (conditional process() function)
+// ============================================================================
+
+// Helper base class that provides virtual process() only for single-output modules
+// For multi-output (OutputData = void), this base is empty
+template<typename OutputData_>
+class SingleOutputProcessorBase {
+protected:
+    // Single output: provide virtual process() returning OutputData
+    virtual OutputData_ process() {
+        return OutputData_{};
+    }
+};
+
+// Specialization for void (multi-output): no process() function
+template<>
+class SingleOutputProcessorBase<void> {
+    // Empty - multi-output modules use MultiOutputProcessorBase::process(Ts&...) instead
 };
 
 // ============================================================================
@@ -216,6 +239,9 @@ class Module
     , public MultiOutputProcessorBase<
         typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type,
         typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type
+      >
+    , public SingleOutputProcessorBase<
+        typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
 {
 private:
@@ -369,10 +395,7 @@ public:
     // Processing Hooks (Override Based on InputMode)
     // ========================================================================
     
-    // For PeriodicInput and LoopInput: return output data
-    virtual OutputData process() {
-        return OutputData{};
-    }
+    // Note: process() is provided by SingleOutputProcessorBase (empty for multi-output)
 
 protected:
     // For ContinuousInput: process input and return output
@@ -531,7 +554,7 @@ void publish_to_subscribers(T& data) {
 
 // Multi-output publishing helper (publish each output in the tuple)
 template<typename... Ts, std::size_t... Is>
-void publish_multi_outputs_impl(const std::tuple<Ts...>& outputs, std::index_sequence<Is...>) {
+void publish_multi_outputs_impl(std::tuple<Ts...>& outputs, std::index_sequence<Is...>) {
     std::lock_guard<std::mutex> lock(subscribers_mutex_);
     for (uint32_t subscriber_base_addr : subscribers_) {
         uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
@@ -543,7 +566,7 @@ void publish_multi_outputs_impl(const std::tuple<Ts...>& outputs, std::index_seq
 }
 
 template<typename... Ts>
-void publish_multi_outputs(const std::tuple<Ts...>& outputs) {
+void publish_multi_outputs(std::tuple<Ts...>& outputs) {
     publish_multi_outputs_impl(outputs, std::index_sequence_for<Ts...>{});
 }    // ========================================================================
     // Subscription Protocol (ContinuousInput)
@@ -668,11 +691,16 @@ private:
             if constexpr (has_multi_output) {
                 // Multi-output: create tuple and call process with references
                 OutputTypesTuple outputs{};
-                std::apply([this](auto&... args) { this->process(args...); }, outputs);
+                // Unpack tuple and call multi-output process(Ts&...) via virtual dispatch
+                std::apply([this](auto&... args) { 
+                    // Call derived class override of MultiOutputProcessorBase::process(Ts&...)
+                    using Base = MultiOutputProcessorBase<OutputTypesTuple, InputData>;
+                    static_cast<Base*>(this)->process(args...);
+                }, outputs);
                 publish_multi_outputs(outputs);
             } else {
-                // Single output: normal process
-                auto output = process();
+                // Single output: call SingleOutputProcessorBase::process()
+                auto output = SingleOutputProcessorBase<OutputData>::process();
                 publish_to_subscribers(output);
             }
             std::this_thread::sleep_for(config_.period);
@@ -684,11 +712,16 @@ private:
             if constexpr (has_multi_output) {
                 // Multi-output: create tuple and call process with references
                 OutputTypesTuple outputs{};
-                std::apply([this](auto&... args) { this->process(args...); }, outputs);
+                // Unpack tuple and call multi-output process(Ts&...) via virtual dispatch
+                std::apply([this](auto&... args) { 
+                    // Call derived class override of MultiOutputProcessorBase::process(Ts&...)
+                    using Base = MultiOutputProcessorBase<OutputTypesTuple, InputData>;
+                    static_cast<Base*>(this)->process(args...);
+                }, outputs);
                 publish_multi_outputs(outputs);
             } else {
-                // Single output: normal process
-                auto output = process();
+                // Single output: call SingleOutputProcessorBase::process()
+                auto output = SingleOutputProcessorBase<OutputData>::process();
                 publish_to_subscribers(output);
             }
         }
