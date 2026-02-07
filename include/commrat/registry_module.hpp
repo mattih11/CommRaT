@@ -2,6 +2,7 @@
 
 #include "commrat/registry_mailbox.hpp"
 #include "commrat/subscription_messages.hpp"
+#include "commrat/io_spec.hpp"
 #include <sertial/sertial.hpp>
 #include <thread>
 #include <atomic>
@@ -59,6 +60,53 @@ struct ModuleConfig {
 };
 
 // ============================================================================
+// Helper Base Classes for Conditional Virtual Functions
+// ============================================================================
+
+// Base class providing process_continuous when InputData is not void
+template<typename InputData_, typename OutputData_>
+class ContinuousProcessorBase {
+protected:
+    virtual OutputData_ process_continuous(const InputData_& input) {
+        std::cerr << "[Module] ERROR: process_continuous not overridden in derived class!\n";
+        return OutputData_{};
+    }
+};
+
+// Specialization for void InputData (no process_continuous function)
+template<typename OutputData_>
+class ContinuousProcessorBase<void, OutputData_> {
+    // No process_continuous for periodic/loop modes
+};
+
+// Helper to extract InputData from InputSpec (outside Module class)
+template<typename T>
+struct ExtractInputPayload {
+    using type = void;  // PeriodicInput, LoopInput
+};
+
+template<typename T>
+struct ExtractInputPayload<Input<T>> {
+    using type = T;
+};
+
+template<typename T>
+struct ExtractInputPayload<ContinuousInput<T>> {
+    using type = T;  // Legacy support
+};
+
+// Helper to extract OutputData from OutputSpec (outside Module class)
+template<typename T>
+struct ExtractOutputPayload {
+    using type = T;  // Raw type
+};
+
+template<typename T>
+struct ExtractOutputPayload<Output<T>> {
+    using type = T;
+};
+
+// ============================================================================
 // Registry-Based Module (New Clean Interface)
 // ============================================================================
 
@@ -69,56 +117,87 @@ struct ModuleConfig {
  * automatically includes subscription protocol messages and uses the registry.
  * 
  * @tparam UserRegistry The application's complete MessageRegistry
- * @tparam OutputDataT The payload type this module produces
- * @tparam InputModeT Input mode: PeriodicInput, LoopInput, or ContinuousInput<PayloadT>
+ * @tparam OutputSpec_ Output specification: Output<T>, Outputs<Ts...>, or raw type T (normalized to Output<T>)
+ * @tparam InputSpec_ Input specification: Input<T>, PeriodicInput, LoopInput, ContinuousInput<T> (legacy)
  * @tparam CommandTypes Optional variadic command types this module handles
  * 
- * Example:
+ * Example (new style with I/O specs):
  * @code
- * using MyRegistry = MessageRegistry<
- *     SubscribeRequest, SubscribeReply, UnsubscribeRequest, UnsubscribeReply,
- *     MessageDefinition<TempData, MessagePrefix::UserDefined, UserSubPrefix::Data>,
- *     MessageDefinition<ResetCmd, MessagePrefix::UserDefined, UserSubPrefix::Commands>
- * >;
- * 
- * class SensorModule : public Module<MyRegistry, TempData, PeriodicInput, ResetCmd> {
+ * class SensorModule : public Module<Registry, Output<TempData>, PeriodicInput> {
  * protected:
  *     TempData process() override {
  *         return TempData{.temperature_celsius = read_sensor()};
  *     }
- *     
- *     void on_command(const ResetCmd& cmd) override {
- *         // Handle reset command
+ * };
+ * @endcode
+ * 
+ * Example (backward compatible - raw type):
+ * @code
+ * class SensorModule : public Module<Registry, TempData, PeriodicInput> {
+ * protected:
+ *     TempData process() override {
+ *         return TempData{.temperature_celsius = read_sensor()};
  *     }
  * };
  * @endcode
  */
 template<typename UserRegistry,
-         typename OutputDataT_,
-         typename InputModeT,
+         typename OutputSpec_,
+         typename InputSpec_,
          typename... CommandTypes>
-class Module {
+class Module : public ContinuousProcessorBase<
+    typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
+    typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
+> {
 private:
-    // Helper to extract InputData type from InputMode
-    template<typename T, typename = void>
+    // Normalize OutputSpec: raw type T -> Output<T>
+    using OutputSpec = NormalizeOutput_t<OutputSpec_>;
+    
+    // Normalize InputSpec: ContinuousInput<T> -> Input<T>, keep others as-is
+    using InputSpec = NormalizeInput_t<InputSpec_>;
+    
+    // Phase 5 constraint: reject multi-input/multi-output
+    static_assert(OutputCount_v<OutputSpec> <= 1,
+                  "Phase 5: Multi-output (Outputs<Ts...>) not yet supported. Use Output<T> or raw type.");
+    static_assert(InputCount_v<InputSpec> <= 1,
+                  "Phase 5: Multi-input (Inputs<Ts...>) not yet supported. Use Input<T>, PeriodicInput, or LoopInput.");
+    
+    // Helper to extract InputData type from InputSpec
+    template<typename T>
     struct ExtractInputData {
         using type = void;
     };
     
     template<typename T>
-    struct ExtractInputData<T, std::void_t<typename T::InputData>> {
-        using type = typename T::InputData;
+    struct ExtractInputData<Input<T>> {
+        using type = T;
+    };
+    
+    // Helper to extract OutputData type from OutputSpec
+    template<typename T>
+    struct ExtractOutputData {
+        using type = T;  // Raw type passes through
+    };
+    
+    template<typename T>
+    struct ExtractOutputData<Output<T>> {
+        using type = T;
+    };
+    
+    template<typename T>
+    struct ExtractOutputData<Outputs<T>> {
+        using type = void;  // Multi-output not yet supported
     };
     
 public:
-    using OutputData = OutputDataT_;
-    using InputMode = InputModeT;
-    using InputData = typename ExtractInputData<InputMode>::type;
+    using OutputData = typename ExtractOutputData<OutputSpec>::type;
+    using InputData = typename ExtractInputData<InputSpec>::type;
     
-    static constexpr bool has_continuous_input = !std::is_void_v<InputData>;
-    static constexpr bool has_periodic_input = std::is_same_v<InputMode, PeriodicInput>;
-    static constexpr bool has_loop_input = std::is_same_v<InputMode, LoopInput>;
+    static constexpr bool has_continuous_input = HasContinuousInput<InputSpec>;
+    static constexpr bool has_periodic_input = std::is_same_v<InputSpec, PeriodicInput>;
+    static constexpr bool has_loop_input = std::is_same_v<InputSpec, LoopInput>;
     
+private:
     // Type aliases for mailboxes
     using CmdMailbox = RegistryMailbox<UserRegistry>;  // Command mailbox (user commands only)
     using WorkMailbox = RegistryMailbox<SystemRegistry>;  // Work mailbox (subscription protocol)
@@ -131,7 +210,7 @@ public:
      */
     static constexpr uint32_t calculate_base_address(uint8_t system_id, uint8_t instance_id) {
         // Get message ID for output data type from registry
-        constexpr uint32_t data_type_id = UserRegistry::template get_message_id<OutputDataT_>();
+        constexpr uint32_t data_type_id = UserRegistry::template get_message_id<OutputData>();
         // Use lower 16 bits of message ID to fit addressing in 32 bits
         constexpr uint16_t data_type_id_low = static_cast<uint16_t>(data_type_id & 0xFFFF);
         return (static_cast<uint32_t>(data_type_id_low) << 16) | (system_id << 8) | instance_id;
@@ -197,20 +276,23 @@ public:
     // ========================================================================
     
     // For PeriodicInput and LoopInput: return output data
-    // Note: For other input modes, this method is not used but must exist for virtual dispatch
     virtual OutputData process() {
         return OutputData{};
     }
-    
+
+protected:
     // For ContinuousInput: process input and return output
+    // Calls process_continuous which derived classes should hide/override
     template<typename T = InputData>
-        requires (!std::is_void_v<T>)
-    OutputData process_continuous(const T& input) {
-        static_assert(has_continuous_input,
-                      "process_continuous() only available for ContinuousInput mode");
-        return OutputData{};
+    OutputData process_continuous_dispatch(const T& input) {
+        // This->process_continuous will resolve to derived class version via name hiding
+        return this->process_continuous(input);
     }
     
+    // Derived classes define this (non-template) for continuous input:
+    //   OutputData process_continuous(const InputData& input) { ... }
+    
+public:
     // ========================================================================
     // Lifecycle Management
     // ========================================================================
@@ -355,6 +437,8 @@ protected:
     // ========================================================================
     
     void subscribe_to_source(uint8_t source_system_id, uint8_t source_instance_id) {
+        static_assert(has_continuous_input, "subscribe_to_source() only available for continuous input modules");
+        
         // Calculate our base address to include in request
         uint32_t our_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
         
@@ -365,10 +449,15 @@ protected:
         
         // Calculate source module's WORK mailbox address
         // We need the source's output type ID, which we get from InputData type
-        constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
-        constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
-        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        uint32_t source_base;
+        uint32_t source_work_mbx;
+        
+        if constexpr (has_continuous_input) {
+            constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
+            constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+            source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
+            source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        }
         
         std::cout << "[" << config_.name << "] Sending SubscribeRequest to source WORK mailbox " 
                   << source_work_mbx << "\n";
@@ -394,6 +483,8 @@ protected:
     }
     
     void unsubscribe_from_source(uint8_t source_system_id, uint8_t source_instance_id) {
+        static_assert(has_continuous_input, "unsubscribe_from_source() only available for continuous input modules");
+        
         uint32_t our_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
         
         UnsubscribeRequestType request{
@@ -401,10 +492,15 @@ protected:
         };
         
         // Calculate source WORK mailbox
-        constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
-        constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
-        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        uint32_t source_base;
+        uint32_t source_work_mbx;
+        
+        if constexpr (has_continuous_input) {
+            constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
+            constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+            source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
+            source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        }
         
         cmd_mailbox_.send(request, source_work_mbx);
     }
@@ -474,7 +570,7 @@ private:
             auto result = data_mailbox_->template receive<InputData>();
             
             if (result) {
-                auto output = process_continuous(result->message);
+                auto output = process_continuous_dispatch(result->message);
                 publish_to_subscribers(output);
             }
         }

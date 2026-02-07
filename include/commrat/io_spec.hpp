@@ -257,6 +257,60 @@ concept HasContinuousInput = is_continuous_input_legacy_v<T> ||
                              is_single_input_v<T> || 
                              is_multi_input_v<T>;
 
+// --- Count Helpers ---
+
+/**
+ * @brief Get the number of outputs in an OutputSpec
+ */
+template<typename T>
+struct OutputCount {
+    static constexpr size_t value = 1;  // Raw type = single output
+};
+
+template<typename T>
+struct OutputCount<Output<T>> {
+    static constexpr size_t value = 1;
+};
+
+template<typename... Ts>
+struct OutputCount<Outputs<Ts...>> {
+    static constexpr size_t value = sizeof...(Ts);
+};
+
+template<>
+struct OutputCount<NoOutput> {
+    static constexpr size_t value = 0;
+};
+
+template<typename T>
+inline constexpr size_t OutputCount_v = OutputCount<T>::value;
+
+/**
+ * @brief Get the number of inputs in an InputSpec
+ */
+template<typename T>
+struct InputCount {
+    static constexpr size_t value = 0;  // PeriodicInput, LoopInput = no input
+};
+
+template<typename T>
+struct InputCount<Input<T>> {
+    static constexpr size_t value = 1;
+};
+
+template<typename T>
+struct InputCount<ContinuousInput<T>> {
+    static constexpr size_t value = 1;
+};
+
+template<typename... Ts>
+struct InputCount<Inputs<Ts...>> {
+    static constexpr size_t value = sizeof...(Ts);
+};
+
+template<typename T>
+inline constexpr size_t InputCount_v = InputCount<T>::value;
+
 // ============================================================================
 // Backward Compatibility Mapping
 // ============================================================================
