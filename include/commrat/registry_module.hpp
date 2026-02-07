@@ -58,6 +58,10 @@ struct ModuleConfig {
     // For ContinuousInput mode: source module's system_id and instance_id
     std::optional<uint8_t> source_system_id;
     std::optional<uint8_t> source_instance_id;
+    
+    // For multi-output producers: the primary output type ID used for base address calculation
+    // If not set, will use InputData type (works for single-output producers)
+    std::optional<uint32_t> source_primary_output_type_id;
 };
 
 // ============================================================================
@@ -343,6 +347,14 @@ private:
         return calculate_base_address(system_id, instance_id) + static_cast<uint8_t>(type);
     }
     
+    /**
+     * @brief Extract message type ID from subscriber base address
+     * Base address format: [data_type_id_low16:16][system_id:8][instance_id:8]
+     */
+    static constexpr uint16_t extract_message_type_from_address(uint32_t base_addr) {
+        return static_cast<uint16_t>((base_addr >> 16) & 0xFFFF);
+    }
+    
 protected:
     ModuleConfig config_;
     CmdMailbox cmd_mailbox_;    // base + 0: Receives user commands
@@ -552,15 +564,41 @@ void publish_to_subscribers(T& data) {
     }
 }
 
+// Helper to send output only if type matches subscriber's expected type
+template<typename OutputType>
+void send_if_type_matches(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
+    // Get the full message ID for this output type
+    constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
+    constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
+    
+    // Only send if types match
+    if (output_type_id_low == subscriber_type_id_low) {
+        auto result = cmd_mailbox_.send(output, dest_mailbox);
+        if (!result) {
+            std::cout << "[" << config_.name << "] Send failed to subscriber " 
+                      << std::hex << dest_mailbox << std::dec << "\n";
+        }
+    }
+}
+
 // Multi-output publishing helper (publish each output in the tuple)
+// Only sends outputs that match the subscriber's message type (extracted from base address)
 template<typename... Ts, std::size_t... Is>
 void publish_multi_outputs_impl(std::tuple<Ts...>& outputs, std::index_sequence<Is...>) {
     std::lock_guard<std::mutex> lock(subscribers_mutex_);
     for (uint32_t subscriber_base_addr : subscribers_) {
         uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-        // Publish each output separately
+        
+        // Extract the message type ID that this subscriber expects
+        uint16_t subscriber_type_id_low = extract_message_type_from_address(subscriber_base_addr);
+        
+        // Send each output only if it matches the subscriber's type
         (void)std::initializer_list<int>{
-            (cmd_mailbox_.send(std::get<Is>(outputs), subscriber_data_mbx), 0)...
+            (send_if_type_matches<std::tuple_element_t<Is, std::tuple<Ts...>>>(
+                subscriber_type_id_low,
+                std::get<Is>(outputs),
+                subscriber_data_mbx
+            ), 0)...
         };
     }
 }
@@ -584,13 +622,21 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
         };
         
         // Calculate source module's WORK mailbox address
-        // We need the source's output type ID, which we get from InputData type
+        // For multi-output producers, use the provided primary type ID
+        // Otherwise, use InputData type (works for single-output producers)
         uint32_t source_base;
         uint32_t source_work_mbx;
         
         if constexpr (has_continuous_input) {
-            constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
-            constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+            uint32_t source_data_type_id;
+            if (config_.source_primary_output_type_id) {
+                // Multi-output producer: use the provided primary output type ID
+                source_data_type_id = *config_.source_primary_output_type_id;
+            } else {
+                // Single-output producer: calculate from InputData type
+                source_data_type_id = UserRegistry::template get_message_id<InputData>();
+            }
+            uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
             source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
             source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
         }
