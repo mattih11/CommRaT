@@ -197,18 +197,21 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         // Create pressure receiver
+        // For multi-output producers, specify the primary output type ID
+        // (the type used to calculate the producer's base address)
         commrat::ModuleConfig pressure_receiver_config{
             .name = "PressureReceiver",
             .system_id = 30,
             .instance_id = 1,
             .period = std::chrono::milliseconds(100),
             .source_system_id = 10,  // Subscribe to producer
-            .source_instance_id = 1
+            .source_instance_id = 1,
+            .source_primary_output_type_id = SensorApp::get_message_id<TemperatureData>()  // Producer uses TemperatureData for base address
         };
         PressureReceiverModule pressure_receiver(pressure_receiver_config);
         std::cout << "[Main] Created PressureReceiver (system_id=30, instance_id=1)\n";
         pressure_receiver.start();
-        std::cout << "[Main] PressureReceiver subscribing to producer...\n\n";
+        std::cout << "[Main] PressureReceiver subscribing to producer (using TemperatureData type for address)...\n\n";
 
         // Wait for subscriptions to stabilize
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
