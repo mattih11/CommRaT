@@ -123,12 +123,19 @@ using CustomMsg = Message::Data<MyData, MessagePrefix::UserDefined, 42>;
 
 ### Module Pattern (Phase 5.2 Update)
 
-Modules are the core abstraction - derive from `Module<Registry, OutputSpec, InputSpec, ...CommandTypes>`:
+Modules are the core abstraction. **PREFERRED USER-FACING API**: Use `Registry::Module<OutputSpec, InputSpec, ...CommandTypes>`:
 
 ```cpp
+// Define your message registry once
+using MyRegistry = MessageRegistry<
+    Message::Data<TemperatureData>,
+    Message::Data<FilteredData>,
+    Message::Command<ResetCmd>
+>;
+
 // Producer (periodic publishing)
-// NEW: Can use Output<T> or just raw T (auto-normalized)
-class SensorModule : public Module<Registry, Output<TemperatureData>, PeriodicInput> {
+// PREFERRED: Registry::Module<...> - clean, no template parameter repetition
+class SensorModule : public MyRegistry::Module<Output<TemperatureData>, PeriodicInput> {
 protected:
     TemperatureData process() override {
         // Called every config_.period
@@ -137,8 +144,8 @@ protected:
     }
 };
 
-// Backward compatible - raw type still works
-class SensorModule : public Module<Registry, TemperatureData, PeriodicInput> {
+// Also valid (backward compatible): raw type auto-normalized to Output<T>
+class SensorModule : public MyRegistry::Module<TemperatureData, PeriodicInput> {
 protected:
     TemperatureData process() override {
         return TemperatureData{...};
@@ -146,33 +153,49 @@ protected:
 };
 
 // Consumer (continuous input processing)
-// NEW: Input<T> or legacy ContinuousInput<T> (auto-normalized)
-class FilterModule : public Module<Registry, TemperatureData, Input<TemperatureData>> {
+class FilterModule : public MyRegistry::Module<Output<FilteredData>, Input<TemperatureData>> {
 protected:
-    TemperatureData process_continuous(const TemperatureData& input) override {
+    FilteredData process_continuous(const TemperatureData& input) override {
         // Called for each received message
         // MUST be real-time safe
         // NOTE: Must use 'override' keyword - this is a virtual function!
-        return filtered_data;
+        return apply_filter(input);
     }
 };
 
-// Command handler
-// USER SEES: Simple overloaded methods for each command type
-class CommandableModule : public Module<Registry, Data, PeriodicInput, CmdA, CmdB> {
+// Command handler with multiple command types
+class CommandableModule : public MyRegistry::Module<TemperatureData, PeriodicInput, ResetCmd, CalibrateCmd> {
 protected:
-    void on_command(const CmdA& cmd) override {
-        // Handle CmdA (compile-time dispatch)
+    TemperatureData process() override {
+        return read_sensor();
     }
-    void on_command(const CmdB& cmd) override {
-        // Handle CmdB (different overload)
+    
+    void on_command(const ResetCmd& cmd) override {
+        // Handle reset command
     }
+    
+    void on_command(const CalibrateCmd& cmd) override {
+        // Handle calibrate command
+    }
+};
+
+// ALTERNATIVE (verbose): Module<Registry, OutputSpec, InputSpec, ...> also works
+// But Registry::Module<...> is preferred - less repetition, cleaner code
+class SensorModule : public Module<MyRegistry, Output<TemperatureData>, PeriodicInput> {
+    // ... same implementation
 };
 
 // BEHIND THE SCENES: Module base class creates 3 mailboxes, spawns threads,
 // handles subscription protocol, dispatches commands/messages to correct handlers,
 // manages memory buffers - all automatically based on template parameters
 ```
+
+**Key Points:**
+- **Use `Registry::Module<OutputSpec, InputSpec, ...Commands>`** - this is the clean user-facing API
+- Registry is specified once, not repeated in every module
+- Output/Input specs are normalized automatically (T → Output<T>)
+- Virtual `process()` and `process_continuous()` must use `override` keyword
+- All complexity (3 mailboxes, threads, subscription) handled automatically
 
 ### Helper Base Class Pattern (Phase 5.2)
 
