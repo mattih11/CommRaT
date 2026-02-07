@@ -29,12 +29,8 @@ struct CounterData {
     uint64_t iterations_per_second;
 };
 
-// Use CombinedRegistry to automatically include system messages
-using CounterRegistry = CombinedRegistry<Message::Data<CounterData>>;
-
-// Template alias for clean syntax
-template<typename OutputDataT, typename InputModeT, typename... CommandTypes>
-using CounterModule = Module<CounterRegistry, OutputDataT, InputModeT, CommandTypes...>;
+// CommRaT Application
+using CounterApp = CommRaT<Message::Data<CounterData>>;
 
 // ============================================================================
 // Fast Counter Module (LoopInput)
@@ -50,7 +46,7 @@ using CounterModule = Module<CounterRegistry, OutputDataT, InputModeT, CommandTy
  * - 100% CPU usage on one core
  * - Measures actual throughput
  */
-class FastCounterModule : public CounterModule<CounterData, LoopInput> {
+class FastCounterModule : public CounterApp::Module<Output<CounterData>, LoopInput> {
 public:
     explicit FastCounterModule(const ModuleConfig& config)
         : Module(config)
@@ -109,9 +105,9 @@ private:
 
 /**
  * Monitors the counter module and reports statistics.
- * Uses ContinuousInput to process every message from the counter.
+ * Uses Input<CounterData> to process every message from the counter.
  */
-class ThroughputMonitor : public CounterModule<CounterData, ContinuousInput<CounterData>> {
+class ThroughputMonitor : public CounterApp::Module<Output<CounterData>, Input<CounterData>> {
 public:
     explicit ThroughputMonitor(const ModuleConfig& config)
         : Module(config)
@@ -123,7 +119,7 @@ public:
     {}
 
 protected:
-    CounterData process_continuous(const CounterData& input) {
+    CounterData process_continuous(const CounterData& input) override {
         ++total_messages_;
         
         // Track throughput statistics (only when report is available)
