@@ -58,10 +58,10 @@ Create `include/my_messages.hpp`:
 
 ```cpp
 #pragma once
-#include <commrat/system_registry.hpp>
+#include <commrat/commrat.hpp>
 #include <cstdint>
 
-// Step 2.1: Define your data structures
+// Step 2.1: Define your data structures (plain POD structs)
 struct TemperatureData {
     float temperature_celsius{0.0f};
     float humidity_percent{0.0f};
@@ -74,24 +74,26 @@ struct StatusData {
     uint64_t uptime_ms{0};
 };
 
-// Step 2.2: Create message registry using simple aliases
-// CombinedRegistry automatically includes system messages (subscription protocol)
-using AppRegistry = commrat::CombinedRegistry<
-    commrat::Message::Data<TemperatureData>,  // Automatically gets prefix/subprefix/AUTO_ID
-    commrat::Message::Data<StatusData>        // Clean and simple!
+// Step 2.2: Define your application with CommRaT<> template
+// This replaces MessageRegistry and provides everything you need
+using MyApp = commrat::CommRaT<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<StatusData>
 >;
 
-// Optional: Create a shorter Module alias for your app
-template<typename OutputData, typename InputMode, typename... CommandTypes>
-using Module = commrat::Module<AppRegistry, OutputData, InputMode, CommandTypes...>;
+// Now MyApp provides:
+//   MyApp::Module<OutputSpec, InputSpec, ...Commands> - Module template
+//   MyApp::Mailbox<T>                                  - Mailbox template (if needed)
+//   MyApp::serialize(msg) / deserialize<T>(data)      - Serialization
+//   MyApp::get_message_id<T>()                        - Message IDs
 ```
 
 **That's it for messages!** You've:
 - ✅ Defined your data types (plain structs)
-- ✅ Registered them with AUTO_ID
-- ✅ (Optional) Created a Module alias for convenience
+- ✅ Created your application template with `CommRaT<>`
+- ✅ Ready to use `MyApp::Module<>` for creating modules
 
-The Module base class handles all mailbox management internally - you never need to touch mailboxes directly!
+CommRaT automatically includes system messages (subscription protocol) and handles all mailbox management internally!
 
 ---
 
@@ -101,14 +103,15 @@ Create `src/main.cpp`:
 
 ```cpp
 #include "my_messages.hpp"
-#include <commrat/registry_module.hpp>
 #include <iostream>
 #include <thread>
 
+using namespace commrat;
+
 // Step 3.1: Create a Producer Module
-class TemperatureSensor : public Module<TemperatureData, commrat::PeriodicInput> {
+class TemperatureSensor : public MyApp::Module<Output<TemperatureData>, PeriodicInput> {
 public:
-    using Module::Module;  // Inherit constructor
+    using MyApp::Module<Output<TemperatureData>, PeriodicInput>::Module;  // Inherit constructor
 
 protected:
     // Called every config.period milliseconds
@@ -127,9 +130,9 @@ protected:
 };
 
 // Step 3.2: Create a Consumer Module
-class TemperatureMonitor : public Module<StatusData, commrat::ContinuousInput<TemperatureData>> {
+class TemperatureMonitor : public MyApp::Module<Output<StatusData>, Input<TemperatureData>> {
 public:
-    using Module::Module;
+    using MyApp::Module<Output<StatusData>, Input<TemperatureData>>::Module;
 
 protected:
     // Called for each received TemperatureData message
@@ -156,24 +159,21 @@ int main() {
     std::cout << "=== CommRaT Getting Started Example ===\n\n";
     
     // Configure sensor (producer)
-    commrat::ModuleConfig sensor_config{
+    ModuleConfig sensor_config{
+        .name = "TempSensor",
         .system_id = 1,      // System ID
         .instance_id = 0,    // Instance within system
-        .period = std::chrono::milliseconds(500),  // 2Hz
-        .name = "TempSensor"
+        .period = Milliseconds(500)  // 2Hz
     };
     
     // Configure monitor (consumer)
-    commrat::ModuleConfig monitor_config{
+    ModuleConfig monitor_config{
+        .name = "TempMonitor",
         .system_id = 2,
         .instance_id = 0,
-        .name = "TempMonitor"
-    };
-    
-    // Set subscription target (monitor subscribes to sensor)
-    monitor_config.subscription_sources = {
-        {.system_id = sensor_config.system_id, 
-         .instance_id = sensor_config.instance_id}
+        .input_sources = {
+            InputSource{.system_id = 1, .instance_id = 0}
+        }
     };
     
     // Create and start modules
@@ -255,16 +255,16 @@ struct CalibrateCommand {
     float reference_temp{25.0f};
 };
 
-// Add to registry using Message::Command<>
-using ExtendedRegistry = commrat::CombinedRegistry<
+// Add to your application using CommRaT<>
+using MyAppWithCommands = commrat::CommRaT<
     commrat::Message::Data<TemperatureData>,
     commrat::Message::Command<CalibrateCommand>
 >;
 
-// Update module signature
-class TemperatureSensor : public Module<
-    TemperatureData, 
-    commrat::PeriodicInput,
+// Update module signature - add command type as template parameter
+class TemperatureSensor : public MyAppWithCommands::Module<
+    Output<TemperatureData>, 
+    PeriodicInput,
     CalibrateCommand  // ← Add command type here
 > {
 protected:
@@ -283,7 +283,18 @@ protected:
 ### Use LoopInput for Maximum Throughput
 
 ```cpp
-class HighSpeedCounter : public Module<CounterData, commrat::LoopInput> {
+// Define counter data type
+struct CounterData {
+    uint64_t count{0};
+};
+
+// Add to application
+using CounterApp = commrat::CommRaT<
+    commrat::Message::Data<CounterData>
+>;
+
+// Module with LoopInput (no delays, runs as fast as possible)
+class HighSpeedCounter : public CounterApp::Module<Output<CounterData>, LoopInput> {
 protected:
     CounterData process() override {
         return CounterData{.count = counter_++};
@@ -327,13 +338,17 @@ tims_router
 
 **Solution**: CommRaT auto-increments within the same category. The simple aliases handle this automatically:
 ```cpp
-// ✅ GOOD: Using simple aliases - IDs assigned automatically
-Message::Data<SensorA>    // Gets ID 0x01000001
-Message::Data<SensorB>    // Gets ID 0x01000002
-Message::Command<ResetCmd>    // Gets ID 0x01010001 (different subprefix)
+// GOOD: Using CommRaT<> - IDs assigned automatically
+using MyApp = commrat::CommRaT<
+    commrat::Message::Data<SensorA>,      // Gets ID 0x01000001
+    commrat::Message::Data<SensorB>,      // Gets ID 0x01000002
+    commrat::Message::Command<ResetCmd>   // Gets ID 0x01010001 (different subprefix)
+>;
 
 // Advanced: Manual IDs if you need specific values
-Message::Data<SpecialData, MessagePrefix::UserDefined, 42>  // Gets ID 0x0100002A
+using MyApp = commrat::CommRaT<
+    commrat::Message::Data<SpecialData, MessagePrefix::UserDefined, 42>  // Gets ID 0x0100002A
+>;
 ```
 
 ---
@@ -343,8 +358,8 @@ Message::Data<SpecialData, MessagePrefix::UserDefined, 42>  // Gets ID 0x0100002
 **Creating a CommRaT application requires just 3 steps:**
 
 1. **Set up project** - CMake with `find_package(CommRaT)`
-2. **Define messages** - Plain structs + `Message::Data<T>` / `Message::Command<T>`
-3. **Create modules** - Inherit from `Module<Output, InputMode, Commands...>`
+2. **Define application** - `CommRaT<Message::Data<T>, ...>` with your message types
+3. **Create modules** - Inherit from `MyApp::Module<Output<T>, Input<U>, Commands...>`
 
 **Everything else is automatic:**
 - ✅ Message ID assignment
@@ -353,4 +368,4 @@ Message::Data<SpecialData, MessagePrefix::UserDefined, 42>  // Gets ID 0x0100002
 - ✅ Serialization/deserialization
 - ✅ Type-safe dispatch
 
-**Next**: Read [Architecture Documentation](README.md) for advanced features and Phase 5 roadmap.
+**Next**: Read [USER_GUIDE.md](USER_GUIDE.md) for comprehensive documentation and [examples/](../examples/) for complete working examples.
