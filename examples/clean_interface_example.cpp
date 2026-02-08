@@ -26,14 +26,10 @@ using namespace user_app;  // Module, Mailbox, PeriodicInput, ContinuousInput
  * - No registry parameter needed!
  * - No MessageDefinition in user code!
  */
-class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public App::Module<Output<TemperatureData>, PeriodicInput> {
 public:
-    using Module::Module;  // Inherit constructor
+    explicit SensorModule(const ModuleConfig& config) : App::Module<Output<TemperatureData>, PeriodicInput>(config) {}
     
-private:
-    float base_temp_ = 20.0f;
-    int counter_ = 0;
-
 protected:
     // Return payload type directly
     TemperatureData process() override {
@@ -46,6 +42,10 @@ protected:
             .temperature_celsius = temp
         };
     }
+
+private:
+    float base_temp_ = 20.0f;
+    int counter_ = 0;
 };
 
 /**
@@ -56,16 +56,10 @@ protected:
  * - Output<T> for single output
  * - No registry parameter!
  */
-class FilterModule : public Module<Output<TemperatureData>, Input<TemperatureData>> {
+class FilterModule : public App::Module<Output<TemperatureData>, Input<TemperatureData>> {
 public:
-    using Module::Module;  // Inherit constructor
+    explicit FilterModule(const ModuleConfig& config) : App::Module<Output<TemperatureData>, Input<TemperatureData>>(config) {}
     
-private:
-    static constexpr size_t WINDOW_SIZE = 5;
-    float window_[WINDOW_SIZE] = {0};
-    size_t index_ = 0;
-    size_t count_ = 0;
-
 protected:
     // Receives payload, returns payload
     TemperatureData process_continuous(const TemperatureData& input) override {
@@ -86,6 +80,12 @@ protected:
             .temperature_celsius = filtered
         };
     }
+
+private:
+    static constexpr size_t WINDOW_SIZE = 5;
+    float window_[WINDOW_SIZE] = {};
+    size_t index_ = 0;
+    size_t count_ = 0;
 };
 
 // ============================================================================
