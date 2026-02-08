@@ -9,49 +9,48 @@ This document tracks known issues, limitations, and areas requiring investigatio
 
 ## Active Issues
 
-### 1. Multi-Input getData Synchronization (High Priority)
+### ~~1. Multi-Input getData Synchronization (High Priority)~~ ✅ RESOLVED
 
-**Status**: 🔴 Not Working  
+**Status**: 🟢 Resolved (commit 519469b)  
 **Affected**: Example 03 (Multi-Input Fusion), test_multi_input_module  
-**Introduced**: Phase 6.9 (Multi-Input Synchronization)
+**Introduced**: Phase 6.9 (Multi-Input Synchronization)  
+**Resolved**: Phase 6.10 (February 8, 2026)
 
-**Symptom**:
-- Multi-input modules fail with "Failed to sync inputs" errors
-- `getData(timestamp, tolerance)` queries always fail
-- Secondary inputs never successfully synchronize with primary input
-- Fusion modules receive primary input but cannot retrieve synchronized secondary inputs
+**Root Cause**:
+- **CRITICAL BUG**: Tolerance unit conversion missing in `timestamped_ring_buffer.hpp` line 295
+- Timestamps from `Time::now()` are `uint64_t` nanoseconds since epoch
+- Tolerance parameter is `Duration` (milliseconds from config)
+- Code cast `tolerance.count()` directly to `uint64_t` without converting ms → ns
+- With 100ms tolerance config → became 100 **nanoseconds** (100,000x too small!)
 
-**Expected Behavior**:
-- Primary input blocks on `receive()` (e.g., IMU at 100Hz)
-- Secondary inputs use `getData(primary_timestamp, tolerance)` to fetch synchronized data
-- HistoricalMailbox should buffer recent messages and return closest match within tolerance
-- Multi-input `process(const T1&, const T2&)` should be called with synchronized inputs
+**Impact**:
+- GPS at 10Hz: 100ms spacing = 100,000,000 ns between messages
+- IMU at 100Hz: 10ms spacing = 10,000,000 ns between messages
+- Even perfect timing has >10ms difference, but tolerance was 0.0001ms
+- **Result**: All getData queries failed with "no matching message within tolerance"
 
-**Investigation Notes**:
-- HistoricalMailbox appears to receive and buffer secondary input messages correctly
-- `secondary_input_receive_loop[1]` shows messages arriving with timestamps
-- getData queries fail despite messages being in the historical buffer
-- May be timestamp mismatch or tolerance calculation issue
-- Config shows `sync_tolerance=50ms` but queries still fail
+**Solution** (commit 519469b):
+```cpp
+// BEFORE (WRONG):
+uint64_t tolerance_units = static_cast<uint64_t>(tolerance.count());
 
-**Workaround**:
-- None currently available
-- Example 03 serves as API documentation only
-- Multi-input modules cannot be used in production until resolved
+// AFTER (CORRECT):
+// Convert tolerance from milliseconds to nanoseconds
+// Timestamps are in nanoseconds (from Time::now()), so tolerance must match
+uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
+```
 
-**Files to Check**:
-- `include/commrat/mailbox/historical_mailbox.hpp` (getData implementation)
-- `include/commrat/mailbox/timestamped_ring_buffer.hpp` (buffer search logic)
-- `include/commrat/module/loops/loop_executor.hpp` (multi_input_loop)
-- `docs/examples/03_multi_input_fusion/multi_input_fusion.cpp`
-- `test/test_3input_fusion.cpp`
+**Verification**:
+- Example 03 now shows successful fusion: `[Fusion] #100 | GPS: ✓fresh age=17.7405ms`
+- Sync ages well within 100ms tolerance: 17ms, 36ms, 66ms, 87ms, 7ms, 27ms
+- Monitor receives continuous stream of fused outputs
+- Phase 6.9 Multi-Input Synchronization feature **now fully functional**
 
-**Next Steps**:
-1. Add debug logging to getData to see query parameters vs buffer contents
-2. Verify timestamp units match (nanoseconds vs milliseconds)
-3. Check if historical buffer is actually populated when getData is called
-4. Verify sync_tolerance is correctly converted from Milliseconds to nanoseconds
-5. Test with simpler 2-input case at same rates (eliminate rate mismatch as factor)
+**Lessons Learned**:
+- Unit mismatches (ms vs ns) are subtle but catastrophic bugs
+- Comments like "unit depends on usage" are dangerous - should be explicit
+- Parameter naming matters: `tolerance_units` was ambiguous, `tolerance_ns` is clear
+- Testing with realistic data rates is crucial to catch magnitude errors
 
 ---
 

@@ -1,6 +1,6 @@
-# Example 03: Multi-Input Fusion (WORK IN PROGRESS)
+# Example 03: Multi-Input Fusion
 
-⚠️ **STATUS**: This example compiles and demonstrates the multi-input API, but getData synchronization is not yet fully functional. This will be resolved in a future update.
+✅ **STATUS**: Fully functional! This example demonstrates multi-input sensor fusion with time-synchronized getData. Fixed in commit 519469b (tolerance unit conversion bug).
 
 This example demonstrates **multi-input sensor fusion** with **time-synchronized data** from multiple sources at different rates. An IMU sensor running at 100Hz is fused with GPS data at 10Hz using CommRaT's multi-input synchronization.
 
@@ -206,7 +206,7 @@ make
 ./multi_input_fusion
 ```
 
-### Expected Output (Design Intent)
+### Expected Output
 
 ```
 === CommRaT Example 03: Multi-Input Fusion ===
@@ -214,7 +214,7 @@ make
 Creating modules...
 [IMU] Initialized (100Hz)
 [GPS] Initialized (10Hz) at (37.7749, -122.419)
-[Fusion] Initialized with sync_tolerance=50ms
+[Fusion] Initialized with sync_tolerance=100ms
 [Monitor] Initialized
 
 Starting sensors...
@@ -231,12 +231,14 @@ Starting fusion...
 
 🚗 Running sensor fusion... (Press Ctrl+C to stop)
 
-[Fusion] ⚠ GPS stale (age: 50.2 ms, reused from previous iteration)
-[Fusion] #100 | IMU: [0.95, 0.12, 9.83] m/s² | GPS: (37.7749, -122.419) ✓fresh age=5ms
-[Monitor] Fused #100 | Pos: (37.7749, -122.419), alt=100m | Vel: [14.9, 1.5] m/s | GPS: ✓
+[Fusion] #100 | IMU: [-0.328401, -0.0130347, 9.75061] m/s² | GPS: (37.7751, -122.419) ✓fresh age=17.7405ms
+[Monitor] Fused #100 | Pos: (37.7751, -122.419), alt=101.115m | Vel: [14.9251, 1.4975] m/s | GPS: ✓
 
-[Fusion] #200 | IMU: [1.02, -0.08, 9.79] m/s² | GPS: (37.7750, -122.419) ⚠stale age=48ms
-[Monitor] Fused #200 | Pos: (37.7750, -122.419), alt=102m | Vel: [15.1, 1.4] m/s | GPS: ⚠
+[Fusion] #200 | IMU: [0.802381, 0.156789, 9.88897] m/s² | GPS: (37.7752, -122.419) ✓fresh age=36.313ms
+[Monitor] Fused #200 | Pos: (37.7752, -122.419), alt=100.869m | Vel: [14.9251, 1.4975] m/s | GPS: ✓
+
+[Fusion] #300 | IMU: [-1.03636, 0.059671, 9.82302] m/s² | GPS: (37.7753, -122.419) ✓fresh age=66.4988ms
+[Monitor] Fused #300 | Pos: (37.7753, -122.419), alt=101.886m | Vel: [14.9251, 1.4975] m/s | GPS: ✓
 
 ... (continues until Ctrl+C)
 
@@ -245,23 +247,14 @@ Starting fusion...
 ✅ Done!
 ```
 
-## Known Issues
+**Note**: GPS age varies (17ms, 36ms, 66ms, 87ms) due to asynchronous rates (100Hz IMU vs 10Hz GPS). All ages are well within the 100ms tolerance.
 
-⚠️ **Current Status**: The getData synchronization mechanism is not yet fully operational in this example. The fusion module correctly subscribes to both sensors, but getData queries are failing. This is being investigated and will be resolved in a future update.
-
-**Symptoms:**
-- "Failed to sync inputs" messages
-- No fusion output produced
-- Secondary input receive loop works but getData fails
-
-**Workaround**: This example serves as API documentation for multi-input modules. The concepts and configuration are correct, but the underlying getData implementation needs debugging.
-
-## Key Observations (Design Intent)
+## Key Observations
 
 1. **Rate mismatch handled**: 100Hz IMU + 10Hz GPS → 100Hz fusion output
-2. **Synchronization**: GPS data time-aligned to IMU timestamps
-3. **Freshness tracking**: System detects when GPS data is stale
-4. **Graceful degradation**: Fusion continues with last valid GPS data if new data unavailable
+2. **Synchronization working**: GPS data time-aligned to IMU timestamps within 100ms
+3. **Freshness tracking**: System shows GPS age (17ms, 36ms, 66ms, 87ms) all within tolerance
+4. **Successful getData**: Secondary input synchronization fully functional (fixed in commit 519469b)
 5. **Metadata rich**: Timestamps, freshness flags, validity flags all accessible
 
 ## Common Patterns
