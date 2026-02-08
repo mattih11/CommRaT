@@ -155,6 +155,38 @@ struct Inputs {
     static_assert(count > 0, "Inputs<> requires at least one type");
 };
 
+/**
+ * @brief Primary input designation for multi-input synchronization (Phase 6)
+ * 
+ * When a module has multiple continuous inputs (Inputs<T, U, V>), one must be
+ * designated as PRIMARY. The primary input drives execution - the module blocks
+ * waiting for primary input, then fetches time-synchronized secondary inputs
+ * using getData(timestamp).
+ * 
+ * @tparam T The payload type of the primary input (must be in Inputs<...>)
+ * 
+ * Example:
+ * @code
+ * // IMU runs at 100Hz (fast), GPS at 10Hz (slow)
+ * // Use IMU as primary to maintain high update rate
+ * class SensorFusion : public Module<Registry,
+ *                                    Output<FusedPose>,
+ *                                    Inputs<IMUData, GPSData>,
+ *                                    PrimaryInput<IMUData>> {
+ *     FusedPose process(const IMUData& imu,      // PRIMARY - received (blocking)
+ *                       const GPSData& gps)       // SECONDARY - fetched at imu.timestamp
+ *         override {
+ *         // Both inputs time-aligned to imu.timestamp
+ *         return ekf_update(imu, gps);
+ *     }
+ * };
+ * @endcode
+ */
+template<typename T>
+struct PrimaryInput {
+    using PayloadType = T;
+};
+
 // ============================================================================
 // Type Traits and Concepts
 // ============================================================================
@@ -239,6 +271,15 @@ struct is_multi_input<Inputs<Ts...>> : std::true_type {};
 
 template<typename T>
 inline constexpr bool is_multi_input_v = is_multi_input<T>::value;
+
+template<typename T>
+struct is_primary_input : std::false_type {};
+
+template<typename T>
+struct is_primary_input<PrimaryInput<T>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_primary_input_v = is_primary_input<T>::value;
 
 template<typename T>
 concept ValidInputSpec = is_periodic_input_v<T> || 
@@ -436,5 +477,86 @@ struct SingleInputType<ContinuousInput<T>> {
 
 template<typename InputSpec>
 using SingleInputType_t = typename SingleInputType<InputSpec>::Type;
+
+// ============================================================================
+// Primary Input Index Extraction (Phase 6)
+// ============================================================================
+
+/**
+ * @brief Extract the index of the primary input type within Inputs<Ts...>
+ * 
+ * Used for compile-time validation and runtime lookup of the primary input
+ * mailbox in multi-input modules.
+ * 
+ * @tparam PrimaryT The payload type designated as primary (from PrimaryInput<T>)
+ * @tparam InputsTuple The tuple of input types (from Inputs<Ts...>::PayloadTypes)
+ * 
+ * Example:
+ * @code
+ * using Inputs = Inputs<IMUData, GPSData, LidarData>;
+ * using Primary = PrimaryInput<GPSData>;
+ * 
+ * // Find GPSData index in (IMUData, GPSData, LidarData)
+ * constexpr size_t idx = PrimaryInputIndex<GPS Data,
+ *                                          typename Inputs::PayloadTypes>::value;
+ * // idx == 1
+ * @endcode
+ */
+template<typename PrimaryT, typename InputsTuple>
+struct PrimaryInputIndex;
+
+// Base case: Primary type not found - compile error
+template<typename PrimaryT>
+struct PrimaryInputIndex<PrimaryT, std::tuple<>> {
+    static_assert(sizeof(PrimaryT) == 0, 
+                  "PrimaryInput type not found in Inputs<...> list. "
+                  "Ensure PrimaryInput<T> specifies a type T that exists in Inputs<Ts...>.");
+};
+
+// Recursive case: Primary type matches first type in tuple
+template<typename PrimaryT, typename... Rest>
+struct PrimaryInputIndex<PrimaryT, std::tuple<PrimaryT, Rest...>> {
+    static constexpr size_t value = 0;
+};
+
+// Recursive case: Primary type doesn't match, continue searching
+template<typename PrimaryT, typename First, typename... Rest>
+struct PrimaryInputIndex<PrimaryT, std::tuple<First, Rest...>> {
+    static constexpr size_t value = 1 + PrimaryInputIndex<PrimaryT, std::tuple<Rest...>>::value;
+};
+
+template<typename PrimaryT, typename InputsTuple>
+inline constexpr size_t PrimaryInputIndex_v = PrimaryInputIndex<PrimaryT, InputsTuple>::value;
+
+/**
+ * @brief Validate that PrimaryInput<T> is compatible with Inputs<Ts...>
+ * 
+ * Ensures compile-time safety: the primary input type must be one of the
+ * input types in the Inputs<...> specification.
+ * 
+ * @tparam PrimaryInputSpec Must be PrimaryInput<T>
+ * @tparam InputSpec Must be Inputs<Ts...> where T is in Ts...
+ */
+template<typename PrimaryInputSpec, typename InputSpec>
+struct ValidatePrimaryInput {
+    static_assert(is_primary_input_v<PrimaryInputSpec>,
+                  "PrimaryInputSpec must be PrimaryInput<T>");
+    
+    static_assert(is_multi_input_v<InputSpec>,
+                  "InputSpec must be Inputs<Ts...> when using PrimaryInput<T>");
+    
+    using PrimaryPayload = typename PrimaryInputSpec::PayloadType;
+    using InputsPayloadTypes = typename InputSpec::PayloadTypes;
+    
+    // This will trigger compile error if PrimaryPayload not in InputsPayloadTypes
+    static constexpr size_t primary_index = 
+        PrimaryInputIndex_v<PrimaryPayload, InputsPayloadTypes>;
+    
+    static constexpr bool value = true;
+};
+
+template<typename PrimaryInputSpec, typename InputSpec>
+inline constexpr bool ValidatePrimaryInput_v = 
+    ValidatePrimaryInput<PrimaryInputSpec, InputSpec>::value;
 
 } // namespace commrat
