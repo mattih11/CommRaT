@@ -186,8 +186,23 @@ add_custom_target(run_tests
     COMMAND ${CMAKE_COMMAND} -E echo "--- test_process_signature ---"
     COMMAND $<TARGET_FILE:test_process_signature> 2>&1 | tail -3 || true
     COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_timestamped_ring_buffer ---"
+    COMMAND $<TARGET_FILE:test_timestamped_ring_buffer> 2>&1 | grep -E "(===|PASS|Test)" || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_multi_output ---"
+    COMMAND $<TARGET_FILE:test_multi_output> 2>&1 | tail -3 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_multi_input ---"
+    COMMAND $<TARGET_FILE:test_multi_input> 2>&1 | tail -3 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_multi_input_module ---"
+    COMMAND $<TARGET_FILE:test_multi_input_module> 2>&1 | tail -3 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_multi_input_compilation ---"
+    COMMAND $<TARGET_FILE:test_multi_input_compilation> 2>&1 | tail -3 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
     COMMAND ${CMAKE_COMMAND} -E echo "=== Test Suite Complete ==="
-    DEPENDS test_timestamp_logic test_3input_fusion test_historical_mailbox test_process_signature
+    DEPENDS test_timestamp_logic test_3input_fusion test_historical_mailbox test_process_signature test_timestamped_ring_buffer test_multi_output test_multi_input test_multi_input_module test_multi_input_compilation
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Running all CommRaT tests"
     VERBATIM

@@ -1,7 +1,7 @@
 # CommRaT Documentation
 
-**Last Updated**: February 7, 2026  
-**Current Version**: Phase 5.2 Complete (Multi-I/O Foundation)
+**Last Updated**: February 8, 2026  
+**Current Version**: Phase 6.10 Complete (Timestamp Metadata Accessors)
 
 ---
 
@@ -26,7 +26,7 @@ See `archive/` directory for historical design documents and validation logs fro
 
 ---
 
-## 🎯 Current State (Phase 5.2 Complete)
+## 🎯 Current State (Phase 6.10 Complete)
 
 ### What We Have
 
@@ -42,32 +42,80 @@ See `archive/` directory for historical design documents and validation logs fro
 - Blocking receives, zero CPU when idle
 - Thread-per-mailbox model
 
-✅ **Module Framework with I/O Specifications** (Phase 5.2 NEW)
+✅ **Module Framework with I/O Specifications** (Phase 5.2)
 ```cpp
 template<typename UserRegistry,
          typename OutputSpec,    // Output<T>, Outputs<Ts...>, or raw T
-         typename InputSpec,     // Input<T>, PeriodicInput, LoopInput
+         typename InputSpec,     // Input<T>, Inputs<Ts...>, PeriodicInput, LoopInput
          typename... CommandTypes>
 class Module;
 ```
 
-**New Features (Phase 5.1-5.2):**
+✅ **Multi-Input with Synchronized getData** (Phase 6.9 NEW)
+```cpp
+// 3-input sensor fusion with time synchronization
+class FusionModule : public MyApp::Module<
+    Output<FusedData>,
+    Inputs<IMUData, GPSData, LidarData>,
+    PrimaryInput<IMUData>  // Designate IMU as synchronization driver
+> {
+protected:
+    FusedData process_multi_input(
+        const IMUData& imu,      // PRIMARY - blocking receive
+        const GPSData& gps,      // SECONDARY - getData(imu.timestamp)
+        const LidarData& lidar   // SECONDARY - getData(imu.timestamp)
+    ) override {
+        return fuse_sensors(imu, gps, lidar);
+    }
+};
+```
+
+✅ **Timestamp Metadata Accessors** (Phase 6.10 NEW)
+```cpp
+// Access input metadata in process functions
+FusedData process_multi_input(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {
+    // Index-based access (always works)
+    auto imu_meta = get_input_metadata<0>();
+    auto gps_meta = get_input_metadata<1>();
+    
+    // Type-based access (when types unique)
+    auto lidar_ts = get_input_timestamp<LidarData>();
+    
+    // Check data freshness
+    if (!has_new_data<1>()) {
+        std::cout << "GPS data is stale\n";
+    }
+    
+    // Check data validity
+    if (!is_input_valid<2>()) {
+        std::cerr << "Lidar getData failed\n";
+    }
+    
+    return fuse_sensors(imu, gps, lidar);
+}
+```
+
+**Phase 5-6 Features:**
 - I/O specification types: `Output<T>`, `Outputs<Ts...>`, `Input<T>`, `Inputs<Ts...>`
-- Automatic normalization: raw type `T` → `Output<T>`
+- Multi-input synchronization via `HistoricalMailbox` with `getData(timestamp, tolerance)`
+- Primary input designation: `PrimaryInput<T>` for explicit control
+- Automatic timestamp propagation through message chains
+- Input metadata: timestamp, sequence number, freshness, validity
+- Index-based and type-based metadata access
 - Backward compatibility: `ContinuousInput<T>` → `Input<T>`
-- Virtual `process_continuous` with proper inheritance (bug fix)
+- Virtual `process_continuous` with proper inheritance
 - Compile-time validation with helpful error messages
 
 **Input Modes:**
 - `PeriodicInput` - Timer-based execution
 - `LoopInput` - Maximum throughput (100% CPU)
 - `Input<T>` / `ContinuousInput<T>` - Processes input stream
-- `Inputs<Ts...>` - Multi-input (Phase 6, rejected with static_assert in Phase 5)
+- `Inputs<Ts...>` - Multi-input with synchronized getData (Phase 6)
 
 **Features:**
 - Automatic subscription management
 - Type-safe command dispatch
-- Virtual process_continuous for proper override
+- Virtual process methods for proper override
 - Lifecycle hooks (on_init, on_start, on_stop, on_cleanup)
 - Zero-overhead abstractions
 
@@ -82,9 +130,18 @@ examples/
 └── loop_mode_example.cpp          # Maximum throughput demo
 ```
 
+**Tests:**
+```
+test/
+├── test_timestamp_logic.cpp      # Phase 6.10: Metadata accessors
+├── test_3input_fusion.cpp        # Phase 6.9: Multi-input synchronization
+├── test_historical_mailbox.cpp   # Phase 6.3: HistoricalMailbox getData
+└── test_process_signature.cpp    # Phase 5: Type constraints
+```
+
 ---
 
-## 🚀 Phase 5 Progress
+## 🚀 Phase 5-6 Progress
 
 ### ✅ Phase 5.1: Core I/O Specification Types (Complete)
 - `Output<T>`, `Outputs<Ts...>`, `NoOutput`
@@ -97,71 +154,73 @@ examples/
 - Fixed process_continuous virtual dispatch bug
 - Helper base class `ContinuousProcessorBase<InputData, OutputData>`
 - Backward compatibility maintained
-- Phase 5 constraint: single input/output only (static_assert)
 
-### 🔄 Phase 5.3: Process Signature Generation (Next)
-- Automatic process() signature based on I/O specs
-- SFINAE-based overload generation
-- Parameter pack expansion for multiple outputs
+### ✅ Phase 5.3: Multi-Output Support (Complete)
+- `void process(T1& out1, T2& out2)` for multiple outputs
+- Type-specific publishing to subscribers
+- Multi-output with multi-input support
 
-### 🔲 Phase 5.4: Testing and Examples (Pending)
-- New examples using I/O spec types
-- Migration guide
-- Performance validation
+### ✅ Phase 6.1-6.5: Multi-Input Infrastructure (Complete)
+- `PrimaryInput<T>` designation
+- `ModuleConfig.input_sources` for multi-subscription
+- Input type extraction and validation
+- Multi-input module configuration
+
+### ✅ Phase 6.6-6.8: Multi-Input Implementation (Complete)
+- `HistoricalMailbox` with timestamped history
+- Multi-input mailbox creation and management
+- `multi_input_loop()` with getData synchronization
+- Compilation tests with type safety validation
+
+### ✅ Phase 6.9: End-to-End Multi-Input (Complete)
+- 3-input sensor fusion test (IMU + GPS + LiDAR)
+- Primary/secondary input coordination
+- getData with tolerance-based synchronization
+- Secondary input receive threads
+
+### ✅ Phase 6.10: Timestamp Metadata Accessors (Complete)
+- `InputMetadata` structure with timestamp, sequence, freshness, validity
+- Index-based accessors: `get_input_metadata<0>()`
+- Type-based accessors: `get_input_metadata<IMUData>()`
+- Convenience methods: `get_input_timestamp<Index>()`, `has_new_data<Index>()`
+- Automatic metadata population before process() calls
+- Single source of truth: `TimsHeader.timestamp` only
+
+### 🔄 Phase 5 Wave 6: Module Cleanup (Complete)
+### 🔄 Phase 5 Wave 6: Module Cleanup (Complete)
+- Attempted extraction of remaining helpers
+- Determined complex stateful helpers better kept inline
+- Removed unnecessary abstraction files
+- Final result: registry_module.hpp at 1,003 lines (49% reduction from original 1,952)
+- Extracted valuable modules: subscription, publishing, loops, metadata accessors
 
 ---
 
-## 🚀 Future: Phase 6 (Multi-Input with Synchronized getData)
+## 🚀 Future: Phase 7 (Advanced Features)
 
-### Vision
+### Planned Features
 
-Support modules with **multiple typed inputs and outputs**, all resolved at compile time:
+**Phase 7.1**: Optional Secondary Inputs
+- Graceful getData failure handling
+- Fallback strategies for missing/stale data
+- `Optional<T>` wrapper for secondary inputs
 
-```cpp
-// Sensor fusion: 3 inputs → 2 outputs
-class FusionModule : public Module<
-    Registry,
-    Outputs<FusedPose, Diagnostics>,       // 2 outputs
-    Inputs<IMUData, GPSData, LidarData>    // 3 inputs
-> {
-protected:
-    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar,
-                 FusedPose& pose, Diagnostics& diag) override {
-        // All inputs/outputs as parameters - clean and simple!
-        pose = ekf_.update(imu, gps, lidar);
-        diag.latency = calculate_latency();
-    }
-};
-```
+**Phase 7.2**: Input Buffering Strategies  
+- Sliding window buffers
+- Latest-only mode
+- Configurable overflow behavior
 
-### Key Benefits
+**Phase 7.3**: ROS 2 Adapter (separate repository)
+- rclcpp-commrat bridge
+- Automatic message conversion
+- Lifecycle node integration
 
-- ✅ **Zero runtime cost** - all dispatch at compile time
-- ✅ **Type safe** - invalid configurations rejected by compiler
-- ✅ **Backward compatible** - existing single-I/O modules still work
-- ✅ **Intuitive** - users see simple function signatures
-- ✅ **Scalable** - complex fusion topologies supported
+**Phase 7.4**: Performance Tools
+- Real-time profiling
+- Latency measurement
+- Static analysis for RT safety
 
-### Implementation Plan
-
-**Phase 5** (6 weeks): Multi-I/O foundation
-- Input/Output bundle types (`Inputs<Ts...>`, `Outputs<Ts...>`)
-- Parameter expansion via index sequences
-- Multiple mailbox management
-- Updated subscription protocol
-
-**Phase 6** (3 weeks): Command reply mechanisms
-- Three patterns: fire-and-forget, parameter reply, return value
-- Automatic reply routing
-- Timeout handling
-
-**Phase 7** (4 weeks): Advanced features
-- Conditional outputs
-- Dynamic input selection
-- Priority-based processing
-- Zero-copy shared memory
-
-**Target**: Phase 5 complete by **April 30, 2026**
+**Target**: Phase 7 features by **Q2 2026**
 
 ---
 

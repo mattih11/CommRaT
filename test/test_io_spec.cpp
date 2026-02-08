@@ -5,7 +5,7 @@
  * Tests compile-time properties of Input/Output specifications.
  */
 
-#include <commrat/io_spec.hpp>
+#include <commrat/module/io_spec.hpp>
 #include <iostream>
 #include <cassert>
 

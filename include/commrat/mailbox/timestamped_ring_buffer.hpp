@@ -289,14 +289,13 @@ public:
             tolerance = default_tolerance_;
         }
         
-        // Convert tolerance to nanoseconds (timestamps are in ns)
-        uint64_t tolerance_ns = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(tolerance).count()
-        );
+        // Tolerance is in milliseconds, convert to match timestamp units
+        // (timestamps are uint64_t but unit depends on usage - could be ns, ms, etc.)
+        uint64_t tolerance_units = static_cast<uint64_t>(tolerance.count());
         
         // Quick bounds check (handle underflow for low timestamps)
-        uint64_t lower_bound = (timestamp >= tolerance_ns) ? (timestamp - tolerance_ns) : 0;
-        uint64_t upper_bound = timestamp + tolerance_ns;
+        uint64_t lower_bound = (timestamp >= tolerance_units) ? (timestamp - tolerance_units) : 0;
+        uint64_t upper_bound = timestamp + tolerance_units;
         if (upper_bound < timestamp) {  // Overflow check
             upper_bound = UINT64_MAX;
         }
@@ -308,15 +307,15 @@ public:
         // Dispatch to mode-specific implementation
         switch (mode) {
             case InterpolationMode::NEAREST:
-                return getData_nearest(timestamp, tolerance_ns);
+                return getData_nearest(timestamp, tolerance_units);
             case InterpolationMode::BEFORE:
-                return getData_before(timestamp, tolerance_ns);
+                return getData_before(timestamp, tolerance_units);
             case InterpolationMode::AFTER:
-                return getData_after(timestamp, tolerance_ns);
+                return getData_after(timestamp, tolerance_units);
             case InterpolationMode::INTERPOLATE:
                 // Future: Linear interpolation between messages
                 // For now, fall back to NEAREST
-                return getData_nearest(timestamp, tolerance_ns);
+                return getData_nearest(timestamp, tolerance_units);
         }
         
         return std::nullopt;
@@ -344,7 +343,7 @@ private:
      * @brief Find message with timestamp closest to requested
      * @note Assumes lock is held (called from getData)
      */
-    std::optional<T> getData_nearest(uint64_t timestamp, uint64_t tolerance_ms) const {
+    std::optional<T> getData_nearest(uint64_t timestamp, uint64_t tolerance_units) const {
         if (buffer_.empty()) {
             return std::nullopt;
         }
@@ -361,7 +360,7 @@ private:
             }
         }
         
-        if (best_diff <= tolerance_ms) {
+        if (best_diff <= tolerance_units) {
             return buffer_[best_idx];
         }
         
@@ -372,7 +371,7 @@ private:
      * @brief Find newest message with timestamp <= requested
      * @note Assumes lock is held (called from getData)
      */
-    std::optional<T> getData_before(uint64_t timestamp, uint64_t tolerance_ms) const {
+    std::optional<T> getData_before(uint64_t timestamp, uint64_t tolerance_units) const {
         if (buffer_.empty()) {
             return std::nullopt;
         }
@@ -382,7 +381,7 @@ private:
             size_type idx = i - 1;
             if (TimestampAccessor<T>::get(buffer_[idx]) <= timestamp) {
                 uint64_t diff = timestamp - TimestampAccessor<T>::get(buffer_[idx]);
-                if (diff <= tolerance_ms) {
+                if (diff <= tolerance_units) {
                     return buffer_[idx];
                 }
                 break;  // Found newest candidate, but out of tolerance
@@ -396,7 +395,7 @@ private:
      * @brief Find oldest message with timestamp >= requested
      * @note Assumes lock is held (called from getData)
      */
-    std::optional<T> getData_after(uint64_t timestamp, uint64_t tolerance_ms) const {
+    std::optional<T> getData_after(uint64_t timestamp, uint64_t tolerance_units) const {
         if (buffer_.empty()) {
             return std::nullopt;
         }
@@ -405,7 +404,7 @@ private:
         for (size_type i = 0; i < buffer_.size(); ++i) {
             if (TimestampAccessor<T>::get(buffer_[i]) >= timestamp) {
                 uint64_t diff = TimestampAccessor<T>::get(buffer_[i]) - timestamp;
-                if (diff <= tolerance_ms) {
+                if (diff <= tolerance_units) {
                     return buffer_[i];
                 }
                 break;  // Found oldest candidate, but out of tolerance
