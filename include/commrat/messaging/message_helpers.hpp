@@ -1,6 +1,6 @@
 #pragma once
 
-#include "commrat/message_registry.hpp"
+#include "message_registry.hpp"
 #include <cstdint>
 
 namespace commrat {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "commrat/message_id.hpp"
+#include "../message_id.hpp"
 #include <cstdint>
 
 namespace commrat {

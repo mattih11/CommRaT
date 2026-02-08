@@ -2,9 +2,9 @@
 
 #include "commrat/mailbox.hpp"
 #include "commrat/messages.hpp"
-#include "commrat/subscription_messages.hpp"
-#include "commrat/threading.hpp"
-#include "commrat/timestamp.hpp"
+#include "commrat/messaging/system/subscription_messages.hpp"
+#include "commrat/platform/threading.hpp"
+#include "commrat/platform/timestamp.hpp"
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>

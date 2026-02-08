@@ -18,7 +18,7 @@
 
 #include <commrat/registry_mailbox.hpp>
 #include <commrat/timestamped_ring_buffer.hpp>
-#include <commrat/threading.hpp>
+#include <commrat/platform/threading.hpp>
 #include <optional>
 #include <memory>
 

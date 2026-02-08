@@ -1,10 +1,10 @@
 #pragma once
 
-#include "tims_wrapper.hpp"
+#include "platform/tims_wrapper.hpp"
 #include "messages.hpp"
-#include "message_registry.hpp"
-#include "message_id.hpp"
-#include "threading.hpp"
+#include "messaging/message_registry.hpp"
+#include "messaging/message_id.hpp"
+#include "platform/threading.hpp"
 #include <expected>
 #include <optional>
 #include <chrono>  // Keep for std::chrono::milliseconds in API
