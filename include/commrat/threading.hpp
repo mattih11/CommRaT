@@ -327,15 +327,16 @@ public:
     void notify_one() noexcept { cv_.notify_one(); }
     void notify_all() noexcept { cv_.notify_all(); }
     
-    void wait(UniqueLock& lock) { cv_.wait(lock); }
+    // Accept std::unique_lock<std::mutex> directly for condition variable compatibility
+    void wait(std::unique_lock<std::mutex>& lock) { cv_.wait(lock); }
     
     template<typename Predicate>
-    void wait(UniqueLock& lock, Predicate pred) {
+    void wait(std::unique_lock<std::mutex>& lock, Predicate pred) {
         cv_.wait(lock, pred);
     }
     
     template<typename Rep, typename Period>
-    std::cv_status wait_for(UniqueLock& lock, 
+    std::cv_status wait_for(std::unique_lock<std::mutex>& lock, 
                            const std::chrono::duration<Rep, Period>& rel_time) {
         return cv_.wait_for(lock, rel_time);
     }

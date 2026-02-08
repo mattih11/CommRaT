@@ -14,6 +14,7 @@
 #pragma once
 
 #include <chrono>
+#include <thread>  // For std::this_thread::sleep_for
 #include <cstdint>
 #include <ctime>
 
@@ -26,6 +27,19 @@ namespace commrat {
  * Range: ~584 years from epoch (sufficient for all practical purposes)
  */
 using Timestamp = uint64_t;
+
+/**
+ * @brief Duration type aliases (compatible with std::chrono but using uint64_t)
+ * 
+ * These provide drop-in replacements for std::chrono::duration types
+ * while maintaining compatibility with future realtime clock sources.
+ */
+using Nanoseconds = std::chrono::nanoseconds;
+using Microseconds = std::chrono::microseconds;
+using Milliseconds = std::chrono::milliseconds;
+using Seconds = std::chrono::seconds;
+using Minutes = std::chrono::minutes;
+using Hours = std::chrono::hours;
 
 /**
  * @brief Time utility class - abstraction over clock sources
@@ -217,8 +231,14 @@ private:
 };
 
 /**
- * @brief Timestamp comparison operators
+ * @brief Timestamp comparison and arithmetic operators
+ * 
+ * NOTE: These operators are NOT NEEDED since Timestamp is just uint64_t.
+ * They are commented out to avoid C++ compilation errors (operator overloading
+ * for primitive types is not allowed). Use normal uint64_t operators directly.
  */
+
+/*
 inline constexpr bool operator<(Timestamp lhs, Timestamp rhs) noexcept {
     return lhs < rhs;
 }
@@ -235,9 +255,6 @@ inline constexpr bool operator>=(Timestamp lhs, Timestamp rhs) noexcept {
     return lhs >= rhs;
 }
 
-/**
- * @brief Timestamp arithmetic operators
- */
 inline constexpr Timestamp operator+(Timestamp ts, uint64_t ns) noexcept {
     return ts + ns;
 }
@@ -249,6 +266,7 @@ inline constexpr Timestamp operator-(Timestamp ts, uint64_t ns) noexcept {
 inline constexpr Timestamp operator-(Timestamp t1, Timestamp t2) noexcept {
     return t1 - t2;
 }
+*/
 
 /**
  * @brief Convenience literals for time durations

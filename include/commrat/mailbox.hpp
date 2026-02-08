@@ -4,13 +4,13 @@
 #include "messages.hpp"
 #include "message_registry.hpp"
 #include "message_id.hpp"
+#include "threading.hpp"
 #include <expected>
 #include <optional>
-#include <chrono>
+#include <chrono>  // Keep for std::chrono::milliseconds in API
 #include <functional>
 #include <concepts>
 #include <span>
-#include <mutex>
 #include <queue>
 
 namespace commrat {

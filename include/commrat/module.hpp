@@ -3,14 +3,12 @@
 #include "commrat/mailbox.hpp"
 #include "commrat/messages.hpp"
 #include "commrat/subscription_messages.hpp"
+#include "commrat/threading.hpp"
+#include "commrat/timestamp.hpp"
 #include <sertial/sertial.hpp>
-#include <thread>
 #include <atomic>
-#include <chrono>
 #include <vector>
 #include <functional>
-#include <optional>
-#include <mutex>
 #include <optional>
 
 namespace commrat {
@@ -398,7 +396,7 @@ private:
                 std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
             
             if (sleep_time > std::chrono::milliseconds(0)) {
-                std::this_thread::sleep_for(sleep_time);
+                Time::sleep(sleep_time);
             }
         }
     }
@@ -592,7 +590,7 @@ private:
     std::thread command_thread_;
     
     std::vector<uint32_t> subscribers_;
-    std::mutex subscribers_mutex_;
+    Mutex subscribers_mutex_;
 };
 
 } // namespace commrat
