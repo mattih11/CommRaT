@@ -26,9 +26,9 @@ void signal_handler(int signal) {
 // Producer Module - Publishes temperature data @ 100ms
 // ============================================================================
 
-class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public ExampleApp::Module<Output<TemperatureData>, PeriodicInput> {
 public:
-    using Module::Module;  // Inherit constructor
+    using ExampleApp::Module<Output<TemperatureData>, PeriodicInput>::Module;  // Inherit constructor
     
 protected:
     TemperatureData process() override {
@@ -54,9 +54,9 @@ protected:
 // Consumer Module - Receives temperature data via automatic subscription
 // ============================================================================
 
-class FilterModule : public Module<Output<TemperatureData>, Input<TemperatureData>> {
+class FilterModule : public ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>> {
 public:
-    using Module::Module;  // Inherit constructor
+    using ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>>::Module;  // Inherit constructor
     
 private:
     static constexpr size_t HISTORY_SIZE = 5;
