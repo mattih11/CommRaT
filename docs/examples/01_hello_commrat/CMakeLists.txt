@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.16)
 project(HelloCommRaT CXX)
 
 # Require C++20
@@ -6,25 +6,35 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find CommRaT library
-# If CommRaT is installed system-wide, this should work automatically
-# Otherwise, adjust CMAKE_PREFIX_PATH or provide hints
-find_package(CommRaT REQUIRED)
+# Find SeRTial package
+find_package(SeRTial REQUIRED)
 
-# Find TiMS library (required dependency)
-find_library(TIMS_LIBRARY NAMES tims REQUIRED)
+# Set path to parent CommRaT project
+set(COMMRAT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+
+# Include TIMS and RACK headers
+include_directories(
+    ${COMMRAT_ROOT}/include
+    ${COMMRAT_ROOT}/tims
+    /usr/local/include/rack
+)
+
+# Link against librack from /usr/local/lib
+link_directories(/usr/local/lib)
 
 # Create executable
 add_executable(hello_commrat
     hello_commrat.cpp
+    ${COMMRAT_ROOT}/src/tims_wrapper.cpp
 )
 
 # Link libraries
 target_link_libraries(hello_commrat
     PRIVATE
-        CommRaT::commrat    # CommRaT framework
-        ${TIMS_LIBRARY}     # TiMS messaging layer
+        SeRTial::sertial    # Serialization library
+        rack                # RACK/TiMS library
         pthread             # POSIX threads
+        rt                  # Real-time extensions
 )
 
 # Enable warnings
