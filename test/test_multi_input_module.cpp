@@ -11,7 +11,7 @@
 
 #include <commrat/commrat.hpp>
 #include <commrat/registry_module.hpp>
-#include <commrat/historical_mailbox.hpp>
+#include <commrat/mailbox/historical_mailbox.hpp>
 #include <chrono>
 #include <thread>
 #include <iostream>

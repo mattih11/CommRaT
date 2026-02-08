@@ -16,9 +16,9 @@
 
 #pragma once
 
-#include <commrat/registry_mailbox.hpp>
-#include <commrat/timestamped_ring_buffer.hpp>
-#include <commrat/platform/threading.hpp>
+#include "registry_mailbox.hpp"
+#include "timestamped_ring_buffer.hpp"
+#include "../platform/threading.hpp"
 #include <optional>
 #include <memory>
 

@@ -9,7 +9,7 @@
  * - Buffer overflow behavior
  */
 
-#include "commrat/timestamped_ring_buffer.hpp"
+#include "commrat/mailbox/timestamped_ring_buffer.hpp"
 #include <iostream>
 #include <cassert>
 #include <thread>

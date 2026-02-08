@@ -7,7 +7,7 @@
  * and stores in history buffer for getData() synchronization.
  */
 
-#include <commrat/historical_mailbox.hpp>
+#include <commrat/mailbox/historical_mailbox.hpp>
 #include <commrat/commrat.hpp>
 #include <iostream>
 #include <thread>

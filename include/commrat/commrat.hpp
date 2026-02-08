@@ -21,8 +21,8 @@
 #include "commrat/io_spec.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/platform/tims_wrapper.hpp"
-#include "commrat/mailbox.hpp"
-#include "commrat/registry_mailbox.hpp"
+#include "commrat/mailbox/mailbox.hpp"
+#include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/registry_module.hpp"
 
 /**
