@@ -6,7 +6,7 @@
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Phase 5.3 Complete](https://img.shields.io/badge/Phase-5.3%20Complete-green.svg)](docs/README.md)
+[![Phase 6.10 Complete](https://img.shields.io/badge/Phase-6.10%20Complete-green.svg)](docs/README.md)
 
 A modern C++20 communication framework that combines **RACK's TiMS IPC** message service with **SeRTial's** zero-allocation serialization, providing compile-time safe, real-time capable messaging with templated message types and a powerful mailbox interface for efficient type dispatch.
 
@@ -14,9 +14,11 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 
 ## Features
 
-- **Multi-Output Modules** ⭐ NEW (Phase 5.3): Produce multiple message types simultaneously with type-specific delivery
+- **Timestamp Metadata Accessors** ⭐ NEW (Phase 6.10): Access input timestamps, sequence numbers, freshness/validity flags
+- **Multi-Input Synchronization** ⭐ NEW (Phase 6.9): Fuse multiple sensor streams with time-aligned getData
+- **Multi-Output Modules** (Phase 5.3): Produce multiple message types simultaneously with type-specific delivery
 - **Ultra-Clean User Interface**: Define messages ONCE, use payload types everywhere (no MessageDefinition in user code)
-- **Payload-Only API**: Module<OutputSpec, InputSpec> with Output<T>/Outputs<T, U, V> specification
+- **Payload-Only API**: Module<OutputSpec, InputSpec> with Output<T>/Inputs<T, U, V> specification
 - **Auto-Subscription**: Input<PayloadT> automatically handles subscription protocol with type filtering
 - **Variadic Commands**: Module<..., Cmd1, Cmd2, Cmd3> with type-safe on_command() handlers
 - **System Messages Auto-Included**: CombinedRegistry automatically adds subscription protocol messages

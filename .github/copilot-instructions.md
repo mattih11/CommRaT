@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on top of TiMS (TIMS Interprocess Message System). It provides a modern, type-safe, compile-time message passing system with zero runtime overhead.
 
-**Current Status**: Phase 5.3 COMPLETE! Multi-output fully functional with type-specific filtering  
-**Next Evolution**: Phase 5.4 - Documentation and examples, then Phase 6 - Multi-input with synchronized getData
+**Current Status**: Phase 6.10 COMPLETE! Timestamp metadata accessors fully functional  
+**Next Evolution**: Phase 7 - Advanced features (optional inputs, buffering, ROS 2 adapter)
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, registries, and type safety computed at compile time
@@ -259,10 +259,146 @@ protected:
 **Key Points:**
 - **Use `CommRaT<...>` not `MessageRegistry<...>`** - CommRaT is the user-facing application template
 - **Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`** - clean, no repetition
-- Output/Input specs: `Output<T>`, `Outputs<T, U>`, `Input<T>`, `PeriodicInput`, `LoopInput`
+- Output/Input specs: `Output<T>`, `Outputs<T, U>`, `Input<T>`, `Inputs<T, U, V>`, `PeriodicInput`, `LoopInput`
 - Virtual `process()` and `process_continuous()` **must use `override` keyword**
 - Multi-output: `void process(T1& out1, T2& out2)` - outputs passed by reference
+- Multi-input: `process_multi_input(const T1&, const T2&, const T3&)` - synchronized inputs
 - Raw types auto-normalized: `TemperatureData` → `Output<TemperatureData>`
+
+### Multi-Input Pattern (Phase 6.9)
+
+**Synchronized multi-input processing** with automatic getData synchronization:
+
+```cpp
+// Multi-input fusion module
+class SensorFusion : public MyApp::Module<
+    Output<FusedData>,
+    Inputs<IMUData, GPSData, LidarData>,  // Multiple inputs
+    PrimaryInput<IMUData>                  // Primary drives execution
+> {
+protected:
+    FusedData process_multi_input(
+        const IMUData& imu,      // PRIMARY - received (blocking)
+        const GPSData& gps,      // SECONDARY - fetched via getData
+        const LidarData& lidar   // SECONDARY - fetched via getData
+    ) override {
+        // All inputs time-aligned to imu.header.timestamp
+        return fuse_sensors(imu, gps, lidar);
+    }
+};
+
+// Configuration for multi-input module
+ModuleConfig fusion_config{
+    .name = "SensorFusion",
+    .system_id = 20,
+    .instance_id = 1,
+    .period = Milliseconds(10),  // Primary input rate (100Hz)
+    .input_sources = {
+        {10, 1},  // IMU sensor (primary)
+        {11, 1},  // GPS sensor (secondary)
+        {12, 1}   // Lidar sensor (secondary)
+    },
+    .sync_tolerance = 50'000'000  // 50ms tolerance for getData
+};
+```
+
+**How Multi-Input Works:**
+1. **Primary Input**: Blocks on receive() - drives execution rate
+2. **Secondary Inputs**: Use getData(primary_timestamp, tolerance) for sync
+3. **HistoricalMailbox**: Circular buffer stores recent messages for getData queries
+4. **Time Alignment**: All inputs synchronized to primary timestamp
+5. **Freshness Tracking**: Can detect stale vs fresh secondary data
+
+### Timestamp Management (Phase 6.10)
+
+**Single Source of Truth**: `TimsHeader.timestamp` ONLY - no payload timestamp fields!
+
+**Automatic Timestamp Assignment:**
+- `PeriodicInput`: `timestamp = Time::now()` at generation moment
+- `ContinuousInput`: `timestamp = input.header.timestamp` (exact propagation)
+- `Multi-input`: `timestamp = primary_input.header.timestamp` (synchronization point)
+
+**Accessing Input Metadata in process():**
+
+```cpp
+class TimestampAwareModule : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
+protected:
+    FilteredData process_continuous(const SensorData& input) override {
+        // INDEX-BASED ACCESS (always works)
+        auto meta = get_input_metadata<0>();  // Get metadata for input 0
+        uint64_t ts = get_input_timestamp<0>();  // Just timestamp
+        bool fresh = has_new_data<0>();       // Freshness flag
+        bool valid = is_input_valid<0>();     // Validity flag
+        
+        // Verify timestamp
+        assert(meta.timestamp > 0);
+        assert(meta.is_new_data);  // Always true for continuous
+        assert(meta.is_valid);     // Always true for continuous
+        
+        return apply_filter(input);
+    }
+};
+
+// Multi-input with metadata access
+class MultiInputFusion : public MyApp::Module<
+    Output<FusedData>,
+    Inputs<IMUData, GPSData, LidarData>,
+    PrimaryInput<IMUData>
+> {
+protected:
+    FusedData process_multi_input(
+        const IMUData& imu,
+        const GPSData& gps,
+        const LidarData& lidar
+    ) override {
+        // INDEX-BASED: Always works
+        auto imu_meta = get_input_metadata<0>();    // Primary
+        auto gps_meta = get_input_metadata<1>();    // Secondary
+        auto lidar_meta = get_input_metadata<2>();  // Secondary
+        
+        // TYPE-BASED: When types unique (compile-time checked)
+        auto imu_ts = get_input_timestamp<IMUData>();
+        auto gps_ts = get_input_timestamp<GPSData>();
+        
+        // Check secondary freshness
+        if (!has_new_data<1>()) {
+            uint64_t age = imu_meta.timestamp - gps_meta.timestamp;
+            std::cout << "GPS stale (age: " << age / 1'000'000 << " ms)\n";
+        }
+        
+        // Check secondary validity
+        if (!is_input_valid<2>()) {
+            std::cerr << "Lidar getData failed\n";
+        }
+        
+        return fuse_sensors(imu, gps, lidar);
+    }
+};
+```
+
+**Metadata Structure:**
+```cpp
+struct InputMetadata<T> {
+    uint64_t timestamp;       // From TimsHeader (ns since epoch)
+    uint32_t sequence_number; // From TimsHeader
+    uint32_t message_id;      // From TimsHeader
+    bool is_new_data;         // True if fresh, false if stale/reused
+    bool is_valid;            // True if getData succeeded
+};
+```
+
+**When to Use:**
+- **Index-based** (`get_input_metadata<0>()`): Always works, aligns with input order
+- **Type-based** (`get_input_metadata<IMUData>()`): Cleaner code when types unique (compile error if duplicate types)
+- **Freshness checks**: Detect stale secondary inputs in multi-input modules
+- **Validity checks**: Handle optional secondary inputs that may fail getData
+- **Monotonicity verification**: Ensure timestamps increase (for debugging)
+
+**Key Insights:**
+- NO payload timestamp fields - header only!
+- Module automatically populates metadata before process() calls
+- Zero overhead: Fixed-size array, only allocated when inputs exist
+- Compile-time validation: Invalid indices/duplicate types caught at compile time
 
 ### Helper Base Class Pattern (Phase 5.3)
 
@@ -367,13 +503,6 @@ ModuleConfig pressure_receiver_config{
 ```
 
 **Result**: Clean type-specific delivery - each subscriber receives ONLY their subscribed message type!
-
-**Key Insights:**
-- **Virtual dispatch required**: process_continuous must be virtual for derived class overrides to work
-- **Template shadowing pitfall**: Template functions in derived classes shadow base class virtuals - avoid this
-- **Void reference problem**: Cannot have `const void&` parameter → use helper base class specialization
-- **Override keyword mandatory**: Use `override` for compile-time validation that virtual function exists in base
-- **Helper outside Module**: Place ContinuousProcessorBase outside Module class for clean inheritance
 
 ## Directory Structure
 
@@ -571,16 +700,30 @@ Focus on:
 
 ## Migration Notes
 
-### Recent Changes (Phase 5.1 → Phase 5.2)
-- **OLD**: Module template directly accepted raw types for Output/Input
-- **NEW**: Module template accepts OutputSpec/InputSpec (Output<T>, Input<T>, etc.)
-- **Normalization**: Raw types automatically converted (T → Output<T>, ContinuousInput<T> → Input<T>)
-- **Virtual Override**: process_continuous now properly overridden via helper base class pattern
+### Recent Changes (Phase 6.9 → Phase 6.10)
+- **Phase 6.9**: Multi-input with synchronized getData
+  - `Inputs<T, U, V>` for multiple input types
+  - `PrimaryInput<T>` designates synchronization driver
+  - `process_multi_input(const T&, const U&, const V&)` for fusion
+  - HistoricalMailbox with circular buffer for getData queries
+  - Automatic time synchronization via getData(timestamp, tolerance)
+- **Phase 6.10**: Timestamp metadata accessors
+  - Single source of truth: `TimsHeader.timestamp` only (NO payload timestamps)
+  - Input metadata API: `get_input_metadata<Index>()`, `get_input_timestamp<Index>()`
+  - Type-based access: `get_input_metadata<IMUData>()` when types unique
+  - Freshness tracking: `is_new_data` flag for multi-input sync status
+  - Validity tracking: `is_valid` flag for optional inputs
+  - Automatic population before process() calls
+
+### Recent Changes (Phase 5.1 → Phase 5.3)
+- **Phase 5.1**: I/O specification types (Output<T>, Input<T>, Inputs<T, U>)
+- **Phase 5.2**: Helper base classes for conditional virtual functions
+- **Phase 5.3**: Multi-output with type-specific filtering
+- **Normalization**: Raw types automatically converted (T → Output<T>)
 - **Impact**: 
   - Module signature: `Module<Registry, OutputSpec, InputSpec, ...Commands>`
   - Backward compatible: Raw types still work (auto-normalized)
-  - Must use `override` keyword for process_continuous (virtual function)
-  - ContinuousProcessorBase helper provides conditional virtual functions
+  - Must use `override` keyword for process methods (virtual functions)
 
 ### Phase 4 → Phase 5.1 Changes
 - **OLD**: Single mailbox with polling (100ms timeout)
@@ -786,19 +929,25 @@ if (!result) {
 
 ## Future Considerations
 
-### Planned Features
-- Phase 5.3: Process signature generation (multi-output support)
-- Phase 6: Multi-input with synchronized getData (RACK-style)
-- RingBuffer integration for buffered inputs
+### Completed Features
+- ✅ Phase 5.3: Multi-output with type-specific filtering
+- ✅ Phase 6.9: Multi-input with synchronized getData (RACK-style)
+- ✅ Phase 6.10: Timestamp metadata accessors
+
+### Planned Features (Phase 7+)
+- Optional secondary inputs (getData failure handling)
+- Input buffering strategies (sliding window, latest-only)
+- RingBuffer integration for message history
 - ROS 2 adapter (rclcpp-commrat) - separate repository
 - DDS compatibility layer
 - Performance profiling tools
 - Static analysis for real-time safety
 
 ### Technical Debt
+- ReceivedMessage<T> should be replaced with TimsMessage<T> (cleaner architecture)
 - Command dispatch (on_command overloads) needs improvement
 - Legacy MessageService being phased out
-- Examples need cleanup (remove outdated patterns)
+- Type-based metadata accessors need full tuple unpacking (currently limited to 2 types)
 
 ## Questions to Ask Yourself
 
@@ -811,6 +960,8 @@ Before suggesting code:
 6. Would this cause unnecessary copies? (Use std::span for views)
 7. Is the complexity hidden from users? (Simple API, complex internals)
 8. Does this maintain real-time guarantees? (Bounded execution time)
+9. Are timestamps managed via TimsHeader only? (No payload timestamp fields)
+10. Can users access metadata if needed? (get_input_metadata API)
 
 ## Summary
 

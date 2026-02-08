@@ -78,6 +78,10 @@ public:
         return mailbox_.is_running();
     }
     
+    uint32_t mailbox_id() const {
+        return mailbox_.mailbox_id();
+    }
+    
     // ========================================================================
     // Type Validation (Payload Types)
     // ========================================================================
@@ -112,6 +116,35 @@ public:
                 .msg_type = Registry::template get_message_id<PayloadT>(),
                 .msg_size = 0,  // Will be set by serialization
                 .timestamp = 0, // Will be set by TiMS
+                .seq_number = 0, // Will be set by TiMS
+                .flags = 0
+            },
+            .payload = payload
+        };
+        
+        return mailbox_.send(msg, dest_mailbox);
+    }
+    
+    /**
+     * @brief Send a message payload with explicit timestamp (Phase 6.10)
+     * 
+     * Use this for timestamp propagation in message chains.
+     * 
+     * @tparam PayloadT Payload type (must be registered)
+     * @param payload Payload to send
+     * @param dest_mailbox Destination mailbox ID
+     * @param timestamp Timestamp to set in header (nanoseconds since epoch)
+     * @return Success or error
+     */
+    template<typename PayloadT>
+        requires is_registered<PayloadT>
+    auto send(PayloadT& payload, uint32_t dest_mailbox, uint64_t timestamp) -> MailboxResult<void> {
+        // Create TimsMessage wrapper with explicit timestamp
+        TimsMessage<PayloadT> msg{
+            .header = {
+                .msg_type = Registry::template get_message_id<PayloadT>(),
+                .msg_size = 0,  // Will be set by serialization
+                .timestamp = timestamp, // USER-PROVIDED timestamp
                 .seq_number = 0, // Will be set by TiMS
                 .flags = 0
             },
