@@ -564,7 +564,9 @@ CommRaT/
 ### Documentation Structure
 
 **Active Documentation** (`docs/`):
-- `README.md` - Comprehensive overview, current state (Phase 5.2), and Phase 6 roadmap
+- `README.md` - Comprehensive overview, current state (Phase 6.10), and roadmap
+- `USER_GUIDE.md` - Comprehensive framework documentation (Sections 1-8 complete)
+- `KNOWN_ISSUES.md` - Active issues, limitations, and workarounds
 - `work/ARCHITECTURE_ANALYSIS.md` - Detailed Phase 5 design (multi-I/O modules)
 - `work/IO_SYNC_STRATEGY.md` - Multi-input synchronization strategy (Phase 6)
 - `work/RACK_ANALYSIS.md` - RACK-style getData mechanism design
@@ -578,6 +580,8 @@ CommRaT/
 - Phase completion → Update `docs/README.md` current state section
 - Design decisions with trade-offs → Add to `ARCHITECTURE_ANALYSIS.md`
 - Template metaprogramming insights → Document in relevant analysis file
+- **New issues discovered → Add to `KNOWN_ISSUES.md` with status, symptoms, workarounds**
+- **Issues resolved → Update status in `KNOWN_ISSUES.md` and document solution**
 
 **Documentation Style**:
 - `docs/README.md` - Structured reference with examples, accessible to new users
@@ -947,6 +951,7 @@ if (!result) {
 - Command dispatch (on_command overloads) needs improvement
 - Legacy MessageService being phased out
 - Type-based metadata accessors need full tuple unpacking (currently limited to 2 types)
+- Multi-input getData synchronization not working (see KNOWN_ISSUES.md #1)
 
 ## Questions to Ask Yourself
 
@@ -961,6 +966,7 @@ Before suggesting code:
 8. Does this maintain real-time guarantees? (Bounded execution time)
 9. Are timestamps managed via TimsHeader only? (No payload timestamp fields)
 10. Can users access metadata if needed? (get_input_metadata API)
+11. **Is this a known issue? (Check docs/KNOWN_ISSUES.md before implementing workarounds)**
 
 ## Summary
 

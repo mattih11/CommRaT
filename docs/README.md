@@ -53,7 +53,8 @@ See `archive/` directory for historical design documents from earlier developmen
 ### What We Have
 
 ✅ **Compile-Time Message System**
-- `MessageRegistry<MessageDefs...>` with variadic templates
+- `CommRaT<MessageDefs...>` application template (user-facing API)
+- `MessageRegistry<MessageDefs...>` with variadic templates (internal)
 - Automatic message ID calculation (compile-time)
 - Zero runtime allocation for message dispatch
 - Type-safe serialization via SeRTial
@@ -248,19 +249,25 @@ test/
 
 ## 📖 Core Concepts
 
-### Message Registry
+### Application Definition
 
 Single source of truth for all communication types:
 
 ```cpp
-using MyRegistry = MessageRegistry<
-    // System messages (subscription protocol)
-    MessageDefinition<SubscribeRequestPayload, ...>,
-    MessageDefinition<SubscribeReplyPayload, ...>,
+// User-facing API: CommRaT<> defines your application
+using MyApp = commrat::CommRaT<
     // User messages (simplified Message:: syntax)
-    Message::Data<SensorData>,
-    Message::Command<CommandData>
+    commrat::Message::Data<SensorData>,
+    commrat::Message::Command<CommandData>
 >;
+
+// MyApp now provides:
+//   MyApp::Module<OutputSpec, InputSpec, ...Commands>
+//   MyApp::Mailbox<T>
+//   MyApp::serialize(msg) / deserialize<T>(data)
+//   MyApp::get_message_id<T>()
+
+// System messages (subscription protocol) automatically included
 ```
 
 **Key Properties:**
@@ -268,6 +275,7 @@ using MyRegistry = MessageRegistry<
 - Automatic message ID generation (0xPSMM format)
 - Buffer size computation via fold expressions
 - Type-safe visitor pattern for dispatch
+- Clean user API hides internal MessageRegistry complexity
 
 ### 3-Mailbox System (RACK-style)
 
