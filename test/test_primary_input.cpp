@@ -8,7 +8,7 @@
  * - Compile-time validation of primary in inputs list
  */
 
-#include "commrat/io_spec.hpp"
+#include "commrat/module/io_spec.hpp"
 #include <iostream>
 #include <cassert>
 
