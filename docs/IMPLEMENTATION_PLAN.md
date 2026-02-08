@@ -371,14 +371,16 @@ See docs/CONTRIBUTING.md for development guidelines.
 ### Day 1 (Today)
 - [x] Create DOCUMENTATION_STRATEGY.md
 - [x] Create IMPLEMENTATION_PLAN.md
-- [ ] Reorganize existing docs (move work → internal)
-- [ ] Create directory structure
-- [ ] Create placeholder files
+- [x] Reorganize existing docs (move work → internal)
+- [x] Create directory structure
+- [x] Create placeholder files
+- [ ] **Add Doxygen to documentation strategy**
 
 ### Day 2
 - [ ] Write USER_GUIDE.md sections 1-4
 - [ ] Create Example 01 (Hello CommRaT)
 - [ ] Update main README.md with new structure
+- [ ] **Create initial Doxyfile configuration**
 
 ### Day 3
 - [ ] Write USER_GUIDE.md sections 5-8
@@ -389,27 +391,35 @@ See docs/CONTRIBUTING.md for development guidelines.
 - [ ] Write USER_GUIDE.md sections 9-12
 - [ ] Create Examples 04-05
 - [ ] Write API_REFERENCE.md
+- [ ] **Configure Doxygen (Doxyfile)**
+- [ ] **Generate initial API docs (`make docs`)**
 
 ### Day 5
 - [ ] Create Examples 06-07
 - [ ] Write ARCHITECTURE.md
 - [ ] Write EXAMPLES.md index
+- [ ] **Review and update Doxygen comments in headers**
+- [ ] **Integrate Doxygen links into API_REFERENCE.md**
 
 ### Day 6
 - [ ] Organize docs/internal/
 - [ ] Write internal README.md
 - [ ] Update internal docs with intros
+- [ ] **Add Doxygen build target to CMakeLists.txt**
 
 ### Day 7
 - [ ] Write MIGRATION_GUIDE.md
 - [ ] Write CONTRIBUTING.md
 - [ ] Write FAQ.md
+- [ ] **Create docs/api/README.md (how to generate)**
 
 ### Day 8
 - [ ] Review all documentation
 - [ ] Update cross-references
 - [ ] Test examples
 - [ ] Final polish
+- [ ] **Verify Doxygen output quality**
+- [ ] **Update .gitignore for docs/api/html/**
 
 ## Success Metrics
 
@@ -421,6 +431,9 @@ After implementation:
 - [ ] Internal docs explain design decisions
 - [ ] Zero emoji usage throughout
 - [ ] All cross-references valid
+- [ ] **Doxygen generates clean HTML without warnings**
+- [ ] **API reference links to detailed Doxygen pages**
+- [ ] **`make docs` command generates complete API documentation**
 
 ## Notes
 

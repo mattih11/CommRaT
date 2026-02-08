@@ -214,16 +214,140 @@ Documentation is successful when:
 - User feedback tracked in GitHub issues
 - Versioned documentation for major releases
 
+## Doxygen Integration
+
+### Approach: Hybrid Documentation
+
+**Hand-Written** (docs/):
+- User guides and tutorials
+- Architecture overviews
+- Example walkthroughs
+- Getting started guides
+
+**Doxygen Generated** (from source comments):
+- Detailed API reference
+- Class/function documentation
+- Template parameter descriptions
+- Code cross-references
+
+### Doxygen Configuration
+
+Create `Doxyfile` in project root with:
+- `OUTPUT_DIRECTORY = docs/api/`
+- `GENERATE_HTML = YES`
+- `GENERATE_LATEX = NO`
+- `EXTRACT_ALL = NO` (only documented entities)
+- `EXTRACT_PRIVATE = NO` (public API only)
+- `JAVADOC_AUTOBRIEF = YES` (first line is brief)
+- `INLINE_INHERITED_MEMBERS = YES`
+- `ENABLE_PREPROCESSING = YES` (handle templates)
+- `MACRO_EXPANSION = YES`
+- `PREDEFINED = DOXYGEN_SHOULD_SKIP_THIS` (skip implementation details)
+
+### Documentation Comments
+
+Already exist in headers, ensure consistency:
+```cpp
+/**
+ * @brief Short description (one line)
+ * 
+ * Detailed description with usage examples.
+ * Can span multiple paragraphs.
+ * 
+ * @tparam T Template parameter description
+ * @param param Parameter description
+ * @return Return value description
+ * 
+ * @note Important notes
+ * @warning Warnings about usage
+ * @see Related functions
+ * 
+ * @example
+ * @code
+ * // Usage example
+ * MyClass obj;
+ * obj.method();
+ * @endcode
+ */
+```
+
+### Integration with API_REFERENCE.md
+
+API_REFERENCE.md becomes the **entry point**:
+- High-level overview of APIs
+- Conceptual organization
+- Links to detailed Doxygen pages
+- Quick reference tables
+
+Example structure:
+```markdown
+## Module Class
+
+The Module base class provides the framework for message processing.
+
+**Quick Reference**:
+- `Module<OutputSpec, InputSpec, ...Commands>` - Template signature
+- `start()` - Begin module execution
+- `stop()` - Graceful shutdown
+- `process()` - Override for periodic/loop modules
+- `process_continuous()` - Override for continuous input
+
+[Detailed API Documentation →](api/html/classcommrat_1_1Module.html)
+```
+
+### Build Integration
+
+Add Doxygen generation to CMakeLists.txt:
+```cmake
+# Find Doxygen
+find_package(Doxygen OPTIONAL_COMPONENTS dot)
+
+if(DOXYGEN_FOUND)
+    # Configure Doxyfile
+    set(DOXYGEN_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs/api)
+    set(DOXYGEN_INPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+    
+    # Add target
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generating API documentation with Doxygen"
+        VERBATIM
+    )
+    
+    message(STATUS "Doxygen found. Run 'make docs' to generate documentation.")
+else()
+    message(STATUS "Doxygen not found. API documentation will not be generated.")
+endif()
+```
+
+### .gitignore Updates
+
+Ignore generated documentation:
+```
+# Doxygen output
+docs/api/html/
+docs/api/latex/
+docs/api/xml/
+```
+
+Keep `docs/api/.gitkeep` or a README explaining how to generate.
+
 ## Open Questions
 
-1. Should we generate API docs with Doxygen or write by hand?
-   - Recommendation: Doxygen for detailed API, hand-written for overview
+1. ~~Should we generate API docs with Doxygen or write by hand?~~
+   - **RESOLVED**: Hybrid approach - Doxygen for detailed API, hand-written overviews
 2. Where should tutorial-style guides live?
    - Recommendation: examples/ with extensive README.md files
 3. Do we need video tutorials?
    - Recommendation: Start with text, add video later if needed
 4. Should internal docs be public?
    - Recommendation: Yes, in docs/internal/ - transparency helps contributors
+5. Should Doxygen output be committed to git?
+   - Recommendation: No, generate on-demand. Provide instructions in docs/api/README.md
 
 ## Next Steps
 
