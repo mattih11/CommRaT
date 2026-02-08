@@ -244,7 +244,9 @@ private:
         
         // Create TimsMessage from ReceivedMessage components
         TimsMessage<T> tims_msg;
-        tims_msg.header.timestamp = received.timestamp;
+        // CRITICAL: Use payload timestamp, not ReceivedMessage wrapper timestamp (which is 0)
+        // The payload contains the actual timestamp set by the producer
+        tims_msg.header.timestamp = received.message.timestamp;
         tims_msg.header.seq_number = received.sequence_number;
         tims_msg.payload = received.message;
         
