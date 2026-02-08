@@ -414,9 +414,23 @@ protected:
     
     // Multi-input mode (Phase 6.6) - one HistoricalMailbox per input type
     // Tuple index corresponds to position in Inputs<T1, T2, ...>
-    // Example: Inputs<IMU, GPS> → tuple<HistoricalMailbox<..., IMU>, HistoricalMailbox<..., GPS>>
+    // Example: Inputs<IMU, GPS> → tuple<HistoricalMailbox<Registry, HistorySize, IMU>, ...>
     // Only populated if has_multi_input == true
-    using HistoricalMailboxTuple = std::tuple<>;  // Will be specialized below
+    
+    // Helper: Create HistoricalMailbox type for each input type in the tuple
+    template<typename T>
+    using HistoricalMailboxFor = HistoricalMailbox<UserRegistry, 100>; // TODO: Make history size configurable
+    
+    // Generate tuple of HistoricalMailbox types from InputTypesTuple
+    template<typename Tuple>
+    struct MakeHistoricalMailboxTuple;
+    
+    template<typename... Ts>
+    struct MakeHistoricalMailboxTuple<std::tuple<Ts...>> {
+        using type = std::tuple<HistoricalMailboxFor<Ts>...>;
+    };
+    
+    using HistoricalMailboxTuple = typename MakeHistoricalMailboxTuple<InputTypesTuple>::type;
     std::optional<HistoricalMailboxTuple> input_mailboxes_;
     
     // Subscription tracking (Phase 6.6)
@@ -444,12 +458,17 @@ public:
         : config_(config)
         , cmd_mailbox_(createMailboxConfig(config, MailboxType::CMD))
         , work_mailbox_(createWorkMailboxConfig(config))
-        , data_mailbox_(has_continuous_input ? 
+        , data_mailbox_(has_continuous_input && !has_multi_input ? 
             std::make_optional<DataMailbox>(createMailboxConfig(config, MailboxType::DATA)) : 
             std::nullopt)
         , running_(false)
     {
         subscribers_.reserve(config.max_subscribers);
+        
+        // Phase 6.6: Initialize multi-input mailboxes
+        if constexpr (has_multi_input) {
+            initialize_multi_input_mailboxes();
+        }
     }
     
     virtual ~Module() {
@@ -511,12 +530,17 @@ public:
             throw std::runtime_error("Failed to start work mailbox");
         }
         
-        // Only start data mailbox for ContinuousInput modules
+        // Only start data mailbox for single ContinuousInput modules
         if (data_mailbox_) {
             auto data_result = data_mailbox_->start();
             if (!data_result) {
                 throw std::runtime_error("Failed to start data mailbox");
             }
+        }
+        
+        // Phase 6.6: Start multi-input mailboxes
+        if constexpr (has_multi_input) {
+            start_input_mailboxes();
         }
         
         running_ = true;
@@ -1044,6 +1068,68 @@ private:
             .realtime = config.realtime,
             .mailbox_name = config.name + "_work"
         };
+    }
+    
+    // ========================================================================
+    // Phase 6.6: Multi-Input Mailbox Helpers
+    // ========================================================================
+    
+    // Create HistoricalMailbox for specific input at compile-time index
+    template<size_t Index>
+    auto create_historical_mailbox_for_input() {
+        using InputType = std::tuple_element_t<Index, InputTypesTuple>;
+        
+        // Create DATA mailbox config for this input
+        // Use input type's message ID to calculate base address
+        constexpr uint32_t input_msg_id = UserRegistry::template get_message_id<InputType>();
+        constexpr uint16_t input_type_id_low = static_cast<uint16_t>(input_msg_id & 0xFFFF);
+        uint32_t base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
+                             (config_.system_id << 8) | config_.instance_id;
+        uint32_t data_mailbox_id = base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        
+        MailboxConfig mbx_config{
+            .mailbox_id = data_mailbox_id,
+            .message_slots = config_.message_slots,
+            .max_message_size = UserRegistry::max_message_size,
+            .send_priority = static_cast<uint8_t>(config_.priority),
+            .realtime = config_.realtime,
+            .mailbox_name = config_.name + "_data_" + std::to_string(Index)
+        };
+        
+        return HistoricalMailboxFor<InputType>(
+            mbx_config,
+            config_.sync_tolerance
+        );
+    }
+    
+    // Create tuple of HistoricalMailbox instances
+    template<size_t... Is>
+    void create_input_mailboxes_impl(std::index_sequence<Is...>) {
+        if constexpr (has_multi_input) {
+            input_mailboxes_ = std::make_tuple(
+                create_historical_mailbox_for_input<Is>()...
+            );
+        }
+    }
+    
+    void initialize_multi_input_mailboxes() {
+        if constexpr (has_multi_input) {
+            create_input_mailboxes_impl(std::make_index_sequence<InputCount>{});
+        }
+    }
+    
+    // Start all input mailboxes
+    template<size_t... Is>
+    void start_input_mailboxes_impl(std::index_sequence<Is...>) {
+        if (input_mailboxes_) {
+            (std::get<Is>(*input_mailboxes_).start(), ...);
+        }
+    }
+    
+    void start_input_mailboxes() {
+        if constexpr (has_multi_input) {
+            start_input_mailboxes_impl(std::make_index_sequence<InputCount>{});
+        }
     }
 };
 
