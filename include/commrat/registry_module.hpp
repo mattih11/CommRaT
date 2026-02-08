@@ -44,6 +44,16 @@ enum class MailboxType : uint8_t {
     DATA = 32   // Data mailbox - receives input data streams
 };
 
+// Phase 6.5: Multi-input source configuration
+struct InputSource {
+    uint8_t system_id{0};      // Source module's system identifier
+    uint8_t instance_id{0};    // Source module's instance number
+    bool is_primary{false};    // Is this the primary input? (drives execution)
+    
+    // For multi-output producers: primary output type ID for base address calculation
+    std::optional<uint32_t> source_primary_output_type_id;
+};
+
 struct ModuleConfig {
     std::string name;
     uint8_t system_id{0};        // System/robot identifier
@@ -54,6 +64,10 @@ struct ModuleConfig {
     int priority{10};
     bool realtime{false};
     
+    // ========================================================================
+    // Single-Input Mode (backward compatible)
+    // ========================================================================
+    
     // For ContinuousInput mode: source module's system_id and instance_id
     std::optional<uint8_t> source_system_id;
     std::optional<uint8_t> source_instance_id;
@@ -61,6 +75,21 @@ struct ModuleConfig {
     // For multi-output producers: the primary output type ID used for base address calculation
     // If not set, will use InputData type (works for single-output producers)
     std::optional<uint32_t> source_primary_output_type_id;
+    
+    // ========================================================================
+    // Multi-Input Mode (Phase 6.5)
+    // ========================================================================
+    
+    // Multiple input sources (one per type in Inputs<Ts...>)
+    // Order must match order of types in Inputs<T1, T2, ...>
+    // Exactly one source must have is_primary=true
+    std::vector<InputSource> input_sources;
+    
+    // Per-input history buffer capacity (for getData synchronization)
+    size_t history_buffer_size{100};
+    
+    // Default tolerance for getData() calls (milliseconds)
+    std::chrono::milliseconds sync_tolerance{50};
 };
 
 // ============================================================================
