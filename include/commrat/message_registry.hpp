@@ -150,9 +150,6 @@ private:
     
     using PayloadTypes = typename ExtractPayloads<ProcessedDefs>::PayloadTypes;
     
-    // Number of registered message types
-    static constexpr size_t num_types = sizeof...(MessageDefs);
-    
     // Check for ID collisions at compile-time
     static constexpr bool collisions_checked = CheckCollisions<MessageDefs...>::check();
     
@@ -169,6 +166,9 @@ private:
     static constexpr bool is_registered_v = IsInTuple<T, PayloadTypes>::value;
 
 public:
+    // Number of registered message types
+    static constexpr size_t num_types = sizeof...(MessageDefs);
+    
     // Maximum message size across all registered types (for buffer allocation)
     // NOTE: We calculate size of TimsMessage<Payload> not just Payload, because that's what gets serialized
     template<typename... Payloads>
@@ -464,6 +464,24 @@ public:
     
     static constexpr auto message_ids() {
         return get_all_ids_impl(static_cast<ProcessedDefs*>(nullptr));
+    }
+    
+    // ========================================================================
+    // Phase 6 Multi-Input Helpers
+    // ========================================================================
+    
+    /**
+     * @brief Get payload type at index I
+     */
+    template<std::size_t I>
+    using type_at = std::tuple_element_t<I, PayloadTypes>;
+    
+    /**
+     * @brief Get type index for payload type T
+     */
+    template<typename T>
+    static constexpr std::size_t get_type_index() {
+        return type_index<T>();
     }
     
 private:
