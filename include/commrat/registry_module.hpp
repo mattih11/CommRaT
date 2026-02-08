@@ -179,6 +179,53 @@ class SingleOutputProcessorBase<void> {
 };
 
 // ============================================================================
+// Phase 6.7: Multi-Input Processor Base
+// ============================================================================
+
+// Helper base class that provides virtual multi-input process signatures
+// Only enabled when InputCount > 1 (multi-input modules)
+
+template<typename InputTypesTuple_, typename OutputData_, size_t InputCount_>
+class MultiInputProcessorBase {
+    // Primary template - should not be instantiated
+    // Use specializations for InputCount == 0, 1, or > 1
+};
+
+// No multi-input (single input or no input): empty base
+template<typename InputTypesTuple_, typename OutputData_>
+class MultiInputProcessorBase<InputTypesTuple_, OutputData_, 0> {
+    // Empty - not multi-input
+};
+
+template<typename InputTypesTuple_, typename OutputData_>
+class MultiInputProcessorBase<InputTypesTuple_, OutputData_, 1> {
+    // Empty - single input, not multi-input
+};
+
+// Multi-input with single output: OutputData process(const T1&, const T2&, ...)
+template<typename... Ts, typename OutputData_>
+    requires (sizeof...(Ts) > 1 && !std::is_void_v<OutputData_>)
+class MultiInputProcessorBase<std::tuple<Ts...>, OutputData_, sizeof...(Ts)> {
+public:
+    virtual OutputData_ process(const Ts&... inputs) {
+        std::cerr << "[Module] ERROR: Multi-input process(...) not overridden in derived class!\n";
+        (void)std::make_tuple(inputs...);  // Suppress unused warnings
+        return OutputData_{};
+    }
+};
+
+// Multi-input with multi-output: void process(const T1&, const T2&, ..., O1& out1, O2& out2, ...)
+template<typename... InputTs, typename... OutputTs>
+    requires (sizeof...(InputTs) > 1 && sizeof...(OutputTs) > 1)
+class MultiInputProcessorBase<std::tuple<InputTs...>, std::tuple<OutputTs...>, sizeof...(InputTs)> {
+public:
+    virtual void process(const InputTs&... inputs, OutputTs&... outputs) {
+        std::cerr << "[Module] ERROR: Multi-input+multi-output process(...) not overridden!\n";
+        (void)std::make_tuple(inputs...);  // Suppress unused warnings
+    }
+};
+
+// ============================================================================
 // Type Extraction Helpers
 // ============================================================================
 
@@ -196,6 +243,22 @@ struct ExtractInputPayload<Input<T>> {
 template<typename T>
 struct ExtractInputPayload<ContinuousInput<T>> {
     using type = T;  // Legacy support
+};
+
+// Helper to extract input types tuple from InputSpec (outside Module)
+template<typename T>
+struct ExtractInputTypes {
+    using type = std::tuple<>;  // Default: no inputs (PeriodicInput, LoopInput)
+};
+
+template<typename T>
+struct ExtractInputTypes<Input<T>> {
+    using type = std::tuple<T>;  // Single input
+};
+
+template<typename... Ts>
+struct ExtractInputTypes<Inputs<Ts...>> {
+    using type = std::tuple<Ts...>;  // Multi-input
 };
 
 // Helper to extract OutputData from OutputSpec (outside Module class)
@@ -260,6 +323,19 @@ struct OutputTypesTuple<Outputs<Ts...>> {
  * };
  * @endcode
  */
+// Helper to resolve MultiInputProcessorBase template arguments
+// (workaround for complex nested template parsing issues)
+template<typename InputSpec_, typename OutputSpec_>
+struct ResolveMultiInputBase {
+    using NormalizedInput = typename NormalizeInput<InputSpec_>::Type;
+    using InputTypesTuple = typename ExtractInputTypes<NormalizedInput>::type;
+    using NormalizedOutput = typename NormalizeOutput<OutputSpec_>::Type;
+    using OutputData = typename ExtractOutputPayload<NormalizedOutput>::type;
+    static constexpr std::size_t InputCount = std::tuple_size_v<InputTypesTuple>;
+    
+    using type = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
+};
+
 template<typename UserRegistry,
          typename OutputSpec_,
          typename InputSpec_,
@@ -276,6 +352,7 @@ class Module
     , public SingleOutputProcessorBase<
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
+    , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
 {
 private:
     // Normalize OutputSpec: raw type T -> Output<T>
@@ -317,6 +394,35 @@ private:
     using InputTypesTuple = typename ExtractInputTypes<InputSpec>::type;
     static constexpr size_t InputCount = std::tuple_size_v<InputTypesTuple>;
     static constexpr bool has_multi_input = InputCount > 1;
+    
+    // Helper to check if there's an explicit PrimaryInput in CommandTypes
+    // (PrimaryInput is passed as a command type to Module<..., Inputs<>, PrimaryInput<T>>)
+    template<typename...>
+    struct HasPrimaryInputHelper : std::false_type {};
+    
+    template<typename T, typename... Rest>
+    struct HasPrimaryInputHelper<PrimaryInput<T>, Rest...> : std::true_type {};
+    
+    template<typename First, typename... Rest>
+    struct HasPrimaryInputHelper<First, Rest...> : HasPrimaryInputHelper<Rest...> {};
+    
+    static constexpr bool has_primary_input_spec = HasPrimaryInputHelper<CommandTypes...>::value;
+    
+    // Helper to extract primary payload type from CommandTypes
+    template<typename...>
+    struct ExtractPrimaryPayloadHelper {
+        using type = void;
+    };
+    
+    template<typename T, typename... Rest>
+    struct ExtractPrimaryPayloadHelper<PrimaryInput<T>, Rest...> {
+        using type = T;
+    };
+    
+    template<typename First, typename... Rest>
+    struct ExtractPrimaryPayloadHelper<First, Rest...> : ExtractPrimaryPayloadHelper<Rest...> {};
+    
+    using PrimaryPayloadType = typename ExtractPrimaryPayloadHelper<CommandTypes...>::type;
     
     // Helper to extract OutputData type from OutputSpec
     template<typename T>
@@ -998,12 +1104,17 @@ private:
                 continue;
             }
             
-            // Step 3: Call process with all inputs (TODO Phase 6.7)
-            // For now, just log success
-            std::cout << "[" << config_.name << "] Successfully gathered all " << InputCount << " inputs\n";
-            
-            // TODO Phase 6.7: Call multi-input process signature
-            // TODO Phase 6.7: Publish outputs
+            // Step 3: Call process with all inputs
+            if constexpr (has_multi_output) {
+                // Multi-input + Multi-output: void process(const T1&, ..., O1&, O2&, ...)
+                OutputTypesTuple outputs{};
+                call_multi_input_multi_output_process(*all_inputs, outputs);
+                publish_multi_outputs(outputs);
+            } else {
+                // Multi-input + Single output: OutputData process(const T1&, ...)
+                auto output = call_multi_input_process(*all_inputs);
+                publish_to_subscribers(output);
+            }
         }
         
         std::cout << "[" << config_.name << "] multi_input_loop ended\n";
@@ -1011,9 +1122,14 @@ private:
     
     // Helper: Get primary input index at compile time
     static constexpr size_t get_primary_input_index() {
-        // TODO Phase 6.7: Extract from PrimaryInput<T> in InputSpec
-        // For now, assume first input is primary
-        return 0;
+        // Phase 6.7: Extract primary input from CommandTypes (PrimaryInput<T> passed as command)
+        if constexpr (has_primary_input_spec) {
+            // PrimaryInput<T> found in CommandTypes, extract T and find index
+            return PrimaryInputIndex_v<PrimaryPayloadType, InputTypesTuple>;
+        } else {
+            // No explicit PrimaryInput - use first input as primary
+            return 0;
+        }
     }
     
     // Helper: Receive from primary input mailbox
@@ -1093,6 +1209,34 @@ private:
             std::cout << "[" << config_.name << "] Failed to sync input " << Index << "\n";
             return false;
         }
+    }
+    
+    // Phase 6.7: Call multi-input process with single output
+    OutputData call_multi_input_process(const InputTypesTuple& inputs) {
+        return call_multi_input_process_impl(inputs, std::make_index_sequence<InputCount>{});
+    }
+    
+    template<size_t... Is>
+    OutputData call_multi_input_process_impl(const InputTypesTuple& inputs, std::index_sequence<Is...>) {
+        // Unpack tuple and call process(const T1&, const T2&, ...)
+        using Base = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
+        return static_cast<Base*>(this)->process(std::get<Is>(inputs)...);
+    }
+    
+    // Phase 6.7: Call multi-input process with multi-output
+    void call_multi_input_multi_output_process(const InputTypesTuple& inputs, OutputTypesTuple& outputs) {
+        call_multi_input_multi_output_process_impl(inputs, outputs, 
+                                                    std::make_index_sequence<InputCount>{},
+                                                    std::make_index_sequence<std::tuple_size_v<OutputTypesTuple>>{});
+    }
+    
+    template<size_t... InputIs, size_t... OutputIs>
+    void call_multi_input_multi_output_process_impl(const InputTypesTuple& inputs, OutputTypesTuple& outputs,
+                                                      std::index_sequence<InputIs...>,
+                                                      std::index_sequence<OutputIs...>) {
+        // Unpack both tuples and call process(const T1&, ..., O1&, O2&, ...)
+        using Base = MultiInputProcessorBase<InputTypesTuple, OutputTypesTuple, InputCount>;
+        static_cast<Base*>(this)->process(std::get<InputIs>(inputs)..., std::get<OutputIs>(outputs)...);
     }
     
     void command_loop() {
