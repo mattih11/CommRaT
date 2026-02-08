@@ -1,7 +1,7 @@
 #pragma once
 
-#include "message_id.hpp"
-#include "message_registry.hpp"
+#include "../message_id.hpp"
+#include "../message_registry.hpp"
 #include "subscription_messages.hpp"
 
 // Forward declaration for Module (breaks circular dependency)

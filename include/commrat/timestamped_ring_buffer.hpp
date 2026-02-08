@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <commrat/threading.hpp>
-#include <commrat/timestamp.hpp>
+#include <commrat/platform/threading.hpp>
+#include <commrat/platform/timestamp.hpp>
 #include <commrat/messages.hpp>  // For TimsMessage
 #include <sertial/containers/ring_buffer.hpp>
 #include <optional>

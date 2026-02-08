@@ -1,8 +1,8 @@
 #pragma once
 
 #include "mailbox.hpp"
-#include "message_registry.hpp"
-#include "threading.hpp"
+#include "messaging/message_registry.hpp"
+#include "platform/threading.hpp"
 
 namespace commrat {
 

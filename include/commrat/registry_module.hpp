@@ -2,11 +2,11 @@
 
 #include "commrat/registry_mailbox.hpp"
 #include "commrat/historical_mailbox.hpp"
-#include "commrat/subscription_messages.hpp"
-#include "commrat/system_registry.hpp"
+#include "commrat/messaging/system/subscription_messages.hpp"
+#include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/io_spec.hpp"
-#include "commrat/threading.hpp"
-#include "commrat/timestamp.hpp"
+#include "commrat/platform/threading.hpp"
+#include "commrat/platform/timestamp.hpp"
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
