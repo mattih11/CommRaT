@@ -90,6 +90,10 @@ add_executable(test_timestamped_ring_buffer test/test_timestamped_ring_buffer.cp
 target_link_libraries(test_timestamped_ring_buffer PRIVATE commrat)
 target_include_directories(test_timestamped_ring_buffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+add_executable(test_historical_mailbox test/test_historical_mailbox.cpp)
+target_link_libraries(test_historical_mailbox PRIVATE commrat)
+target_include_directories(test_historical_mailbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 # Install targets
 install(TARGETS commrat
     EXPORT CommRaTTargets

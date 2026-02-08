@@ -13,12 +13,38 @@
 
 #include <commrat/threading.hpp>
 #include <commrat/timestamp.hpp>
+#include <commrat/messages.hpp>  // For TimsMessage
 #include <sertial/containers/ring_buffer.hpp>
 #include <optional>
 #include <cmath>
 #include <algorithm>
 
 namespace commrat {
+
+// ============================================================================
+// Timestamp Accessor Trait (handles both direct .timestamp and .header.timestamp)
+// ============================================================================
+
+/**
+ * @brief Trait to access timestamp from different message types
+ * 
+ * Default: Access .timestamp directly
+ * Specialization for TimsMessage<T>: Access .header.timestamp
+ */
+template<typename T>
+struct TimestampAccessor {
+    static uint64_t get(const T& msg) {
+        return msg.timestamp;
+    }
+};
+
+// Specialization for TimsMessage<T>
+template<typename PayloadT>
+struct TimestampAccessor<TimsMessage<PayloadT>> {
+    static uint64_t get(const TimsMessage<PayloadT>& msg) {
+        return msg.header.timestamp;
+    }
+};
 
 /**
  * @brief Interpolation mode for timestamp-based lookup
@@ -167,7 +193,7 @@ public:
         
         // Validate timestamp ordering (debug only)
         #ifndef NDEBUG
-        if (!buffer_.empty() && message.timestamp < newest_timestamp_) {
+        if (!buffer_.empty() && TimestampAccessor<T>::get(message) < newest_timestamp_) {
             // WARNING: Timestamps must be monotonically increasing
             // This is a logic error in the producer
         }
@@ -175,12 +201,12 @@ public:
         
         // Update timestamp bounds
         if (buffer_.empty()) {
-            oldest_timestamp_ = message.timestamp;
+            oldest_timestamp_ = TimestampAccessor<T>::get(message);
         } else if (buffer_.full()) {
             // Overwriting oldest - update lower bound
-            oldest_timestamp_ = buffer_[1].timestamp;  // Second-oldest becomes oldest
+            oldest_timestamp_ = TimestampAccessor<T>::get(buffer_[1]);  // Second-oldest becomes oldest
         }
-        newest_timestamp_ = message.timestamp;
+        newest_timestamp_ = TimestampAccessor<T>::get(message);
         
         buffer_.push_back(message);
     }
@@ -194,17 +220,17 @@ public:
         UniqueLockShared lock(mutex_);
         
         #ifndef NDEBUG
-        if (!buffer_.empty() && message.timestamp < newest_timestamp_) {
+        if (!buffer_.empty() && TimestampAccessor<T>::get(message) < newest_timestamp_) {
             // WARNING: Timestamp order violation
         }
         #endif
         
         if (buffer_.empty()) {
-            oldest_timestamp_ = message.timestamp;
+            oldest_timestamp_ = TimestampAccessor<T>::get(message);
         } else if (buffer_.full()) {
-            oldest_timestamp_ = buffer_[1].timestamp;
+            oldest_timestamp_ = TimestampAccessor<T>::get(buffer_[1]);
         }
-        newest_timestamp_ = message.timestamp;
+        newest_timestamp_ = TimestampAccessor<T>::get(message);
         
         buffer_.push_back(std::move(message));
     }
@@ -263,25 +289,34 @@ public:
             tolerance = default_tolerance_;
         }
         
-        // Quick bounds check
-        uint64_t tolerance_ms = static_cast<uint64_t>(tolerance.count());
-        if (timestamp + tolerance_ms < oldest_timestamp_ || 
-            timestamp - tolerance_ms > newest_timestamp_) {
+        // Convert tolerance to nanoseconds (timestamps are in ns)
+        uint64_t tolerance_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(tolerance).count()
+        );
+        
+        // Quick bounds check (handle underflow for low timestamps)
+        uint64_t lower_bound = (timestamp >= tolerance_ns) ? (timestamp - tolerance_ns) : 0;
+        uint64_t upper_bound = timestamp + tolerance_ns;
+        if (upper_bound < timestamp) {  // Overflow check
+            upper_bound = UINT64_MAX;
+        }
+        
+        if (upper_bound < oldest_timestamp_ || lower_bound > newest_timestamp_) {
             return std::nullopt;  // Requested timestamp outside buffer range
         }
         
         // Dispatch to mode-specific implementation
         switch (mode) {
             case InterpolationMode::NEAREST:
-                return getData_nearest(timestamp, tolerance_ms);
+                return getData_nearest(timestamp, tolerance_ns);
             case InterpolationMode::BEFORE:
-                return getData_before(timestamp, tolerance_ms);
+                return getData_before(timestamp, tolerance_ns);
             case InterpolationMode::AFTER:
-                return getData_after(timestamp, tolerance_ms);
+                return getData_after(timestamp, tolerance_ns);
             case InterpolationMode::INTERPOLATE:
                 // Future: Linear interpolation between messages
                 // For now, fall back to NEAREST
-                return getData_nearest(timestamp, tolerance_ms);
+                return getData_nearest(timestamp, tolerance_ns);
         }
         
         return std::nullopt;
@@ -315,11 +350,11 @@ private:
         }
         
         size_type best_idx = 0;
-        uint64_t best_diff = std::abs(static_cast<int64_t>(buffer_[0].timestamp - timestamp));
+        uint64_t best_diff = std::abs(static_cast<int64_t>(TimestampAccessor<T>::get(buffer_[0]) - timestamp));
         
         // Linear search for minimum time difference
         for (size_type i = 1; i < buffer_.size(); ++i) {
-            uint64_t diff = std::abs(static_cast<int64_t>(buffer_[i].timestamp - timestamp));
+            uint64_t diff = std::abs(static_cast<int64_t>(TimestampAccessor<T>::get(buffer_[i]) - timestamp));
             if (diff < best_diff) {
                 best_diff = diff;
                 best_idx = i;
@@ -345,8 +380,8 @@ private:
         // Search backwards from newest to oldest
         for (size_type i = buffer_.size(); i > 0; --i) {
             size_type idx = i - 1;
-            if (buffer_[idx].timestamp <= timestamp) {
-                uint64_t diff = timestamp - buffer_[idx].timestamp;
+            if (TimestampAccessor<T>::get(buffer_[idx]) <= timestamp) {
+                uint64_t diff = timestamp - TimestampAccessor<T>::get(buffer_[idx]);
                 if (diff <= tolerance_ms) {
                     return buffer_[idx];
                 }
@@ -368,8 +403,8 @@ private:
         
         // Search forwards from oldest to newest
         for (size_type i = 0; i < buffer_.size(); ++i) {
-            if (buffer_[i].timestamp >= timestamp) {
-                uint64_t diff = buffer_[i].timestamp - timestamp;
+            if (TimestampAccessor<T>::get(buffer_[i]) >= timestamp) {
+                uint64_t diff = TimestampAccessor<T>::get(buffer_[i]) - timestamp;
                 if (diff <= tolerance_ms) {
                     return buffer_[i];
                 }
