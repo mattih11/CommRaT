@@ -1,10 +1,10 @@
 # Example Message Definitions
 
-This directory contains shared message type definitions for inter-module communication examples.
+This directory contains shared message type definitions and application setup for CommRaT examples.
 
 ## Purpose
 
-Message definitions are kept in a **shared header** separate from module implementations to:
+Message definitions are kept in **shared headers** separate from module implementations to:
 
 1. **Ensure consistency** - All modules use the same data structures
 2. **Enable type safety** - Compile-time checking of message types
@@ -14,138 +14,191 @@ Message definitions are kept in a **shared header** separate from module impleme
 
 ## Structure
 
+### `user_messages.hpp`
+
+Defines the application and its message types using `CommRaT<>`:
+
+```cpp
+namespace user_app {
+
+// Message structures (plain POD)
+struct TemperatureData {
+    float temperature_celsius{0.0f};
+};
+
+// Application definition with CommRaT<>
+using App = commrat::CommRaT<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<StatusData>
+>;
+
+} // namespace user_app
+```
+
 ### `common_messages.hpp`
 
-Contains message data structures and their CommRaT type registrations.
-
-**Message Categories:**
-
-- **Status Messages** - System health and monitoring data
-- **Counter Messages** - Simple counters for testing/benchmarking
-- **Sensor Messages** - Sensor readings (temperature, etc.)
-- **Kinematic Messages** - Position, velocity, pose data
-
-Each message type includes:
-- Data structure definition with documented fields
-- Registration with `commrat::message_type_for<>` template specialization
-- Mapping to appropriate `MessageType` enum value
-
-## Usage Pattern
-
-### 1. Define Your Message Structure
+Similar pattern for examples that share common message types:
 
 ```cpp
 namespace example_messages {
 
-struct MyData {
-    uint64_t timestamp;
-    float value;
-    // ... more fields
+struct TemperatureData {
+    uint32_t sensor_id{0};
+    float temperature_c{0.0f};
 };
+
+using ExampleApp = commrat::CommRaT<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<CounterData>
+>;
 
 } // namespace example_messages
 ```
 
-### 2. Register with CommRaT
+### `messages.hpp`
+
+Convenience re-exports for cleaner code:
 
 ```cpp
-template<>
-struct commrat::message_type_for<example_messages::MyData> {
-    static constexpr commrat::MessageType value = commrat::MessageType::DATA;
-};
+namespace user_app {
+
+using commrat::Output;
+using commrat::Input;
+using commrat::PeriodicInput;
+using commrat::ModuleConfig;
+
+} // namespace user_app
 ```
 
-### 3. Use in Modules
+## Usage Pattern
+
+### 1. Define Your Application
 
 ```cpp
-#include "messages/common_messages.hpp"
+// In your_messages.hpp
+#pragma once
+#include <commrat/commrat.hpp>
 
-using namespace example_messages;
+namespace my_app {
 
-class MyModule : public Module<MyData, PeriodicInput> {
-    void process(MyData& output) override {
-        output.timestamp = get_timestamp();
-        output.value = compute_value();
+// Step 1: Define message structures (plain POD)
+struct SensorData {
+    float value{0.0f};
+    uint32_t sensor_id{0};
+};
+
+struct ProcessedData {
+    float filtered_value{0.0f};
+};
+
+// Step 2: Create CommRaT application
+using App = commrat::CommRaT<
+    commrat::Message::Data<SensorData>,
+    commrat::Message::Data<ProcessedData>
+>;
+
+} // namespace my_app
+```
+
+### 2. Create Modules
+
+```cpp
+#include "your_messages.hpp"
+
+using namespace my_app;
+
+// Producer module
+class SensorModule : public App::Module<Output<SensorData>, PeriodicInput> {
+public:
+    explicit SensorModule(const ModuleConfig& config) 
+        : App::Module<Output<SensorData>, PeriodicInput>(config) {}
+    
+protected:
+    SensorData process() override {
+        return SensorData{
+            .value = read_sensor(),
+            .sensor_id = config_.instance_id
+        };
+    }
+};
+
+// Consumer module
+class ProcessorModule : public App::Module<Output<ProcessedData>, Input<SensorData>> {
+public:
+    explicit ProcessorModule(const ModuleConfig& config)
+        : App::Module<Output<ProcessedData>, Input<SensorData>>(config) {}
+    
+protected:
+    ProcessedData process_continuous(const SensorData& input) override {
+        return ProcessedData{
+            .filtered_value = apply_filter(input.value)
+        };
     }
 };
 ```
-
-## Available Message Types
-
-From `commrat::MessageType` enum:
-
-- `DATA` - Generic data messages
-- `COMMAND` - Command/control messages  
-- `STATUS` - Status/health information
-- `ERROR` - Error reports
-- `ACK` - Acknowledgments
-- `SENSOR_DATA` - Sensor readings
-- `ROBOT_STATE` - Robot kinematic state
-- `USER_DEFINED` (≥1000) - Custom application types
 
 ## Best Practices
 
 ### ✅ DO
 
-- Keep message structures simple and focused
-- Document all fields with comments
-- Use consistent naming conventions (e.g., `_data` suffix)
-- Group related messages in namespaces
-- Use standard integer types (`uint64_t`, `float`, etc.)
-- Include timestamps for temporal data
-- Version your message definitions
+- Use `CommRaT<>` to define your application with all message types
+- Inherit directly from `App::Module<OutputSpec, InputSpec>` (not template aliases)
+- Keep message structures simple POD types with inline defaults
+- Use `Message::Data<T>` for data messages, `Message::Command<T>` for commands
+- Document message fields with comments
+- Use consistent naming conventions
+- Include namespace for organization
+- Use minimal explicit constructors: `Ctor(const ModuleConfig& config) : BaseModule(config) {}`
 
 ### ❌ DON'T
 
+- Use `MessageRegistry<>` directly (use `CommRaT<>` instead)
+- Create template aliases like `using Module = App::Module<...>` (use `App::Module` directly)
 - Define messages inside module classes
 - Use pointers or dynamic allocations in message structs
 - Mix business logic with message definitions
-- Create circular dependencies between message types
 - Use platform-specific types (use `uint32_t` not `unsigned int`)
 
-## Example: Producer-Consumer Pattern
+## Example: Multi-Output Module
 
 ```cpp
-// In common_messages.hpp
-struct SensorReading {
-    uint64_t timestamp;
-    uint32_t sensor_id;
-    float value;
-};
+// Application with multiple message types
+using App = commrat::CommRaT<
+    commrat::Message::Data<TemperatureData>,
+    commrat::Message::Data<PressureData>
+>;
 
-template<>
-struct commrat::message_type_for<SensorReading> {
-    static constexpr commrat::MessageType value = commrat::MessageType::SENSOR_DATA;
-};
-
-// Producer module
-class SensorModule : public Module<SensorReading, PeriodicInput> {
-    void process(SensorReading& output) override {
-        output.sensor_id = 42;
-        output.value = read_sensor();
-        output.timestamp = get_timestamp();
-    }
-};
-
-// Consumer module
-class ProcessorModule : public Module<ProcessedData, ContinuousInput<SensorModule>> {
-    void process(const SensorReading& input, ProcessedData& output) override {
-        output.filtered_value = apply_filter(input.value);
+// Multi-output producer
+class WeatherStation : public App::Module<
+    Outputs<TemperatureData, PressureData>, 
+    PeriodicInput
+> {
+public:
+    explicit WeatherStation(const ModuleConfig& config)
+        : App::Module<Outputs<TemperatureData, PressureData>, PeriodicInput>(config) {}
+    
+protected:
+    void process(TemperatureData& temp, PressureData& pressure) override {
+        temp.temperature_c = read_temp();
+        pressure.pressure_pa = read_pressure();
     }
 };
 ```
 
-## Adding New Messages
+## Available I/O Specifications
 
-1. Define structure in appropriate namespace
-2. Add `message_type_for<>` specialization
-3. Document the message purpose and fields
-4. Update this README if adding new categories
-5. Rebuild dependent modules
+- `Output<T>` - Single output of type T
+- `Outputs<T, U, ...>` - Multiple outputs
+- `Input<T>` - Continuous input (process_continuous called for each message)
+- `Inputs<T, U, ...>` - Multiple synchronized inputs
+- `PeriodicInput` - Periodic execution (process called at config.period rate)
+- `LoopInput` - Maximum throughput (process called as fast as possible)
 
 ## See Also
 
-- `../module_example.cpp` - Examples using these messages
-- `../../include/commrat/messages.hpp` - Base message types
-- `../../include/commrat/module.hpp` - Module framework
+- `../clean_interface_example.cpp` - Clean API demonstration
+- `../continuous_input_example.cpp` - Producer-consumer pattern
+- `../command_example.cpp` - Command handling
+- `../../docs/USER_GUIDE.md` - Comprehensive framework documentation
+- `../../docs/GETTING_STARTED.md` - Quick start guide
 - `../../docs/MODULE_FRAMEWORK.md` - Module system documentation
