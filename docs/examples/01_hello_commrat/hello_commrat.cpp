@@ -1,0 +1,334 @@
+/**
+ * Example 01: Hello CommRaT
+ * 
+ * The simplest possible CommRaT system:
+ * - CounterModule: Generates counter values at 10Hz (PeriodicInput)
+ * - DisplayModule: Receives and displays counter values (ContinuousInput)
+ * 
+ * Demonstrates:
+ * - Message definition (plain POD struct)
+ * - Application registration (CommRaT<...>)
+ * - Producer module (PeriodicInput, process())
+ * - Consumer module (Input<T>, process_continuous())
+ * - Configuration (system_id, period, source_system_id)
+ * - Lifecycle (start, run, stop)
+ */
+
+#include <commrat/commrat.hpp>
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+// STEP 1: Define your message structure
+//-----------------------------------------------------------------------------
+
+/**
+ * CounterMessage - Simple counter value with timestamp
+ * 
+ * Requirements:
+ * - Plain POD type (no pointers, no virtual functions)
+ * - Fixed-size or bounded (no std::string, use sertial::fixed_string)
+ * - Serializable with SeRTial
+ */
+struct CounterMessage {
+    uint64_t timestamp;    // When this message was generated (ns since epoch)
+    uint32_t count;        // Counter value (0, 1, 2, 3, ...)
+};
+
+//-----------------------------------------------------------------------------
+// STEP 2: Register message types with CommRaT
+//-----------------------------------------------------------------------------
+
+/**
+ * HelloApp - Application definition
+ * 
+ * This registers all message types used in your application.
+ * CommRaT validates uniqueness, assigns IDs, and generates serialization.
+ */
+using HelloApp = CommRaT<
+    Message::Data<CounterMessage>  // Register CounterMessage as data type
+>;
+
+//-----------------------------------------------------------------------------
+// STEP 3: Create a producer module
+//-----------------------------------------------------------------------------
+
+/**
+ * CounterModule - Generates counter values periodically
+ * 
+ * Template parameters:
+ * - Output<CounterMessage>: This module produces CounterMessage
+ * - PeriodicInput: Runs at fixed intervals (config_.period)
+ * 
+ * Override process() to generate data.
+ */
+class CounterModule : public HelloApp::Module<
+    Output<CounterMessage>,  // What this module produces
+    PeriodicInput            // How it generates data (timer-driven)
+> {
+public:
+    /**
+     * Constructor
+     * @param config Module configuration (system_id, period, etc.)
+     */
+    explicit CounterModule(const ModuleConfig& config)
+        : Module(config)
+        , counter_(0)
+    {
+        std::cout << "[Counter] Starting counter at " << counter_ << "\n";
+    }
+
+    /**
+     * Destructor - called on shutdown
+     */
+    ~CounterModule() override {
+        std::cout << "[Counter] Stopped at count=" << counter_ << "\n";
+    }
+
+protected:
+    /**
+     * process() - Called every config_.period
+     * 
+     * This function MUST:
+     * - Return quickly (< period)
+     * - Not allocate memory (real-time safe)
+     * - Not block on I/O
+     * - Use 'override' keyword (it's virtual)
+     * 
+     * @return Message to publish to all subscribers
+     */
+    CounterMessage process() override {
+        CounterMessage msg{
+            .timestamp = Time::now(),  // Current time in nanoseconds
+            .count = counter_++        // Increment counter
+        };
+        
+        std::cout << "[Counter] Generated: count=" << msg.count << "\n";
+        
+        // Return value is automatically published to all subscribers
+        return msg;
+    }
+
+private:
+    uint32_t counter_;  // Current counter value
+};
+
+//-----------------------------------------------------------------------------
+// STEP 4: Create a consumer module
+//-----------------------------------------------------------------------------
+
+/**
+ * DisplayModule - Receives and displays counter values
+ * 
+ * Template parameters:
+ * - Output<void>: This module has no output (sink/monitor)
+ * - Input<CounterMessage>: Receives CounterMessage (event-driven)
+ * 
+ * Override process_continuous() to handle incoming messages.
+ */
+class DisplayModule : public HelloApp::Module<
+    Output<void>,             // No output (this is a sink)
+    Input<CounterMessage>     // What this module receives
+> {
+public:
+    /**
+     * Constructor
+     * @param config Module configuration (system_id, source_system_id, etc.)
+     */
+    explicit DisplayModule(const ModuleConfig& config)
+        : Module(config)
+        , message_count_(0)
+    {
+        std::cout << "[Display] Ready to receive counter values\n";
+    }
+
+    /**
+     * Destructor - called on shutdown
+     */
+    ~DisplayModule() override {
+        std::cout << "[Display] Received " << message_count_ << " messages total\n";
+    }
+
+protected:
+    /**
+     * process_continuous() - Called for EACH received message
+     * 
+     * This function MUST:
+     * - Not allocate memory (real-time safe)
+     * - Not block indefinitely
+     * - Use 'override' keyword (it's virtual)
+     * 
+     * @param msg The received CounterMessage
+     */
+    void process_continuous(const CounterMessage& msg) override {
+        message_count_++;
+        
+        // Display the received counter value
+        std::cout << "[Display] Received: count=" << msg.count << "\n";
+        
+        // Could add logic here:
+        // - Log to file
+        // - Check thresholds
+        // - Accumulate statistics
+        // - etc.
+    }
+
+private:
+    uint32_t message_count_;  // Total messages received
+};
+
+//-----------------------------------------------------------------------------
+// STEP 5: Wire everything together
+//-----------------------------------------------------------------------------
+
+int main() {
+    std::cout << "=== Hello CommRaT ===\n\n";
+    
+    //-------------------------------------------------------------------------
+    // Initialize TiMS messaging layer
+    //-------------------------------------------------------------------------
+    if (!tims::init()) {
+        std::cerr << "ERROR: Failed to initialize TiMS\n";
+        return 1;
+    }
+    
+    //-------------------------------------------------------------------------
+    // Configure the counter module (producer)
+    //-------------------------------------------------------------------------
+    ModuleConfig counter_config{
+        .name = "Counter",           // Human-readable name (for debugging)
+        .system_id = 10,             // Unique system ID (must be unique)
+        .instance_id = 1,            // Instance within system
+        .period = Milliseconds(100)  // Generate message every 100ms (10Hz)
+    };
+    
+    //-------------------------------------------------------------------------
+    // Configure the display module (consumer)
+    //-------------------------------------------------------------------------
+    ModuleConfig display_config{
+        .name = "Display",           // Human-readable name
+        .system_id = 20,             // Different system ID (must differ from producer)
+        .instance_id = 1,            // Instance within system
+        .source_system_id = 10,      // Subscribe to Counter (system 10)
+        .source_instance_id = 1      // Instance 1 of Counter
+    };
+    
+    //-------------------------------------------------------------------------
+    // Create module instances
+    //-------------------------------------------------------------------------
+    CounterModule counter(counter_config);
+    DisplayModule display(display_config);
+    
+    //-------------------------------------------------------------------------
+    // Start both modules
+    //-------------------------------------------------------------------------
+    // start() spawns threads:
+    // - command_loop() thread (handles commands)
+    // - work_loop() thread (handles subscription protocol)
+    // - data_thread_ (PeriodicInput timer or ContinuousInput receiver)
+    
+    counter.start();  // Begins generating counter values
+    display.start();  // Subscribes to counter and begins receiving
+    
+    //-------------------------------------------------------------------------
+    // Let the system run for 3 seconds
+    //-------------------------------------------------------------------------
+    std::cout << "\nRunning for 3 seconds...\n\n";
+    Time::sleep(Seconds(3));
+    
+    //-------------------------------------------------------------------------
+    // Clean shutdown
+    //-------------------------------------------------------------------------
+    std::cout << "\nShutting down...\n";
+    
+    // stop() signals threads to exit and waits for them to join
+    counter.stop();
+    display.stop();
+    
+    // Cleanup TiMS
+    tims::cleanup();
+    
+    std::cout << "Done!\n";
+    return 0;
+}
+
+//-----------------------------------------------------------------------------
+// Expected Output
+//-----------------------------------------------------------------------------
+/*
+=== Hello CommRaT ===
+
+[Counter] Starting counter at 0
+[Display] Ready to receive counter values
+
+Running for 3 seconds...
+
+[Counter] Generated: count=0
+[Display] Received: count=0
+[Counter] Generated: count=1
+[Display] Received: count=1
+[Counter] Generated: count=2
+[Display] Received: count=2
+[Counter] Generated: count=3
+[Display] Received: count=3
+[Counter] Generated: count=4
+[Display] Received: count=4
+...
+[Counter] Generated: count=29
+[Display] Received: count=29
+
+Shutting down...
+[Counter] Stopped at count=30
+[Display] Received 30 messages total
+Done!
+*/
+
+//-----------------------------------------------------------------------------
+// What Happens Under the Hood
+//-----------------------------------------------------------------------------
+/*
+Timeline:
+
+0ms: main() starts
+     ├─ tims::init()
+     ├─ Create CounterModule
+     │  └─ 3 mailboxes created (CMD, WORK, DATA)
+     └─ Create DisplayModule
+        └─ 3 mailboxes created (CMD, WORK, DATA)
+
+10ms: counter.start()
+      ├─ Spawn command_loop() thread (blocks on CMD mailbox)
+      ├─ Spawn work_loop() thread (blocks on WORK mailbox)
+      └─ Spawn data_thread_ (timer fires every 100ms)
+
+15ms: display.start()
+      ├─ Spawn command_loop() thread
+      ├─ Spawn work_loop() thread
+      ├─ Spawn data_thread_ (continuous_loop, blocks on DATA mailbox)
+      └─ Send SubscribeRequest to counter's WORK mailbox
+
+20ms: Counter's work_loop receives SubscribeRequest
+      ├─ Add display's DATA mailbox to subscribers_ list
+      └─ Send SubscribeReply to display's WORK mailbox
+
+25ms: Display's work_loop receives SubscribeReply
+      └─ Subscription confirmed
+
+100ms: Counter's timer fires
+       ├─ Call process()
+       ├─ User code generates CounterMessage{count=0}
+       └─ Publish to all subscribers (display's DATA mailbox)
+
+100ms: Display's continuous_loop receives message
+       ├─ Deserialize CounterMessage
+       ├─ Call process_continuous(msg)
+       └─ User code displays "count=0"
+       └─ Block on DATA mailbox again
+
+200ms: Counter's timer fires again
+       └─ Repeat...
+
+3000ms: main() wakes up
+        ├─ counter.stop() → threads exit
+        └─ display.stop() → threads exit
+        └─ tims::cleanup()
+*/
