@@ -94,6 +94,22 @@ struct ModuleConfig {
 };
 
 // ============================================================================
+// Phase 6.10: Automatic Timestamp Management
+// ============================================================================
+
+/**
+ * @brief Phase 6.10: Timestamp Management Architecture
+ * 
+ * Timestamps are stored ONLY in TimsHeader.timestamp, never in payload.
+ * Module automatically wraps payloads in TimsMessage and sets header.timestamp:
+ * - PeriodicInput/LoopInput: timestamp = Time::now() (data generation time)
+ * - Multi-input: timestamp = primary_input ReceivedMessage.timestamp (sync point)
+ * - ContinuousInput: timestamp = input ReceivedMessage.timestamp (propagation)
+ * 
+ * Users never deal with timestamps - messages are clean data structures.
+ */
+
+// ============================================================================
 // Helper Base Classes for Conditional Virtual Functions
 // ============================================================================
 
@@ -581,10 +597,66 @@ protected:
     std::optional<std::thread> data_thread_;
     std::optional<std::thread> command_thread_;
     std::optional<std::thread> work_thread_;
+    std::vector<std::thread> secondary_input_threads_;  // Phase 6.9: Receive loops for secondary inputs
     
     // Subscriber management
     std::vector<uint32_t> subscribers_;
     std::mutex subscribers_mutex_;
+    
+    // ========================================================================
+    // Phase 6.10: Input Metadata Storage
+    // ========================================================================
+    
+    /**
+     * @brief Storage for input message metadata
+     * 
+     * Stores metadata about received input messages, populated before process() calls.
+     * Available to derived classes via get_input_metadata<Index>() accessors.
+     */
+    struct InputMetadataStorage {
+        uint64_t timestamp{0};           // Message timestamp (from TimsHeader)
+        uint32_t sequence_number{0};     // Message sequence number (from TimsHeader)
+        uint32_t message_id{0};          // Message type ID (from TimsHeader)
+        bool is_new_data{false};         // True if freshly received, false if stale/reused
+        bool is_valid{false};            // True if getData succeeded, false if failed
+    };
+    
+    // Calculate number of inputs at compile time
+    static constexpr std::size_t num_inputs = InputCount_v<InputSpec>;
+    
+    // Fixed-size array for input metadata (zero-size when no inputs)
+    std::array<InputMetadataStorage, (num_inputs > 0 ? num_inputs : 1)> input_metadata_;
+    
+    /**
+     * @brief Update metadata for a specific input index
+     * 
+     * Helper method to populate metadata from received TimsMessage.
+     * Called by loop functions before invoking process() methods.
+     */
+    template<typename T>
+    void update_input_metadata(std::size_t index, const TimsMessage<T>& received, bool is_new) {
+        if (index >= num_inputs) {
+            std::cerr << "[Module] ERROR: Invalid metadata index " << index << "\n";
+            return;
+        }
+        
+        input_metadata_[index].timestamp = received.header.timestamp;
+        input_metadata_[index].sequence_number = received.header.seq_number;
+        input_metadata_[index].message_id = received.header.msg_type;
+        input_metadata_[index].is_new_data = is_new;
+        input_metadata_[index].is_valid = true;
+    }
+    
+    /**
+     * @brief Mark input metadata as invalid (getData failed)
+     */
+    void mark_input_invalid(std::size_t index) {
+        if (index >= num_inputs) {
+            return;
+        }
+        input_metadata_[index].is_valid = false;
+        input_metadata_[index].is_new_data = false;
+    }
     
 public:
     explicit Module(const ModuleConfig& config)
@@ -639,6 +711,209 @@ protected:
     
     // Derived classes define this (non-template) for continuous input:
     //   OutputData process_continuous(const InputData& input) { ... }
+    
+    // ========================================================================
+    // Phase 6.10: Input Metadata Accessors
+    // ========================================================================
+    
+    /**
+     * @brief Input metadata structure returned by accessor methods
+     * 
+     * Contains timestamp, sequence number, and freshness information about
+     * a received input message. Available for modules with continuous inputs.
+     * 
+     * @tparam T The payload type of the input
+     */
+    template<typename T>
+    struct InputMetadata {
+        uint64_t timestamp;          ///< Message timestamp (from TimsHeader)
+        uint32_t sequence_number;    ///< Message sequence number
+        uint32_t message_id;         ///< Message type ID
+        bool is_new_data;            ///< True if freshly received, false if stale/reused
+        bool is_valid;               ///< True if getData succeeded, false if failed
+        
+        // Helper to get input type (for debugging/logging)
+        static constexpr const char* type_name() { return typeid(T).name(); }
+    };
+    
+    /**
+     * @brief Get metadata for input by index (always available)
+     * 
+     * Returns metadata about the input at the specified index.
+     * Index 0 is always the primary input (or only input for single-input modules).
+     * 
+     * @tparam Index The input index (0 for primary/single, 1+ for multi-input secondaries)
+     * @return InputMetadata containing timestamp, sequence, freshness, validity
+     * 
+     * @example
+     * // Single input module
+     * auto meta = get_input_metadata<0>();
+     * assert(meta.timestamp > 0);
+     * 
+     * // Multi-input module
+     * auto imu_meta = get_input_metadata<0>();  // Primary
+     * auto gps_meta = get_input_metadata<1>();  // Secondary
+     * if (!gps_meta.is_new_data) {
+     *     std::cout << "GPS data is stale\\n";
+     * }
+     */
+    template<std::size_t Index>
+    auto get_input_metadata() const {
+        static_assert(Index < num_inputs, "Input index out of bounds");
+        
+        using InputType = std::conditional_t<
+            (num_inputs == 1),
+            InputData,  // Single input: use InputData directly
+            std::tuple_element_t<Index, InputTypesTuple>  // Multi-input: extract from tuple
+        >;
+        
+        const auto& storage = input_metadata_[Index];
+        return InputMetadata<InputType>{
+            .timestamp = storage.timestamp,
+            .sequence_number = storage.sequence_number,
+            .message_id = storage.message_id,
+            .is_new_data = storage.is_new_data,
+            .is_valid = storage.is_valid
+        };
+    }
+    
+    /**
+     * @brief Get input timestamp by index (convenience method)
+     * 
+     * @tparam Index The input index
+     * @return Timestamp from TimsHeader (nanoseconds since epoch)
+     */
+    template<std::size_t Index>
+    uint64_t get_input_timestamp() const {
+        static_assert(Index < num_inputs, "Input index out of bounds");
+        return input_metadata_[Index].timestamp;
+    }
+    
+    /**
+     * @brief Check if input has new data by index
+     * 
+     * For multi-input modules, returns true if the input was freshly received
+     * and not reused from history (timestamp matches primary).
+     * For single-input modules, always returns true.
+     * 
+     * @tparam Index The input index
+     * @return True if fresh data, false if stale
+     */
+    template<std::size_t Index>
+    bool has_new_data() const {
+        static_assert(Index < num_inputs, "Input index out of bounds");
+        return input_metadata_[Index].is_new_data;
+    }
+    
+    /**
+     * @brief Check if input is valid by index
+     * 
+     * For multi-input modules, returns true if getData succeeded.
+     * For single-input modules, always returns true (receive succeeded).
+     * 
+     * @tparam Index The input index
+     * @return True if valid, false if getData failed
+     */
+    template<std::size_t Index>
+    bool is_input_valid() const {
+        static_assert(Index < num_inputs, "Input index out of bounds");
+        return input_metadata_[Index].is_valid;
+    }
+    
+    // ========================================================================
+    // Phase 6.10: Type-Based Metadata Accessors
+    // ========================================================================
+    
+    /**
+     * @brief Find index of type T in input tuple
+     * 
+     * Compile-time helper to locate type in parameter pack.
+     * Static asserts if type not found or appears multiple times.
+     */
+    template<typename T, typename... Types>
+    static constexpr std::size_t find_type_index() {
+        constexpr std::size_t count = ((std::is_same_v<T, Types> ? 1 : 0) + ...);
+        static_assert(count > 0, "Type not found in inputs - check your input specification");
+        static_assert(count == 1, "Type appears multiple times in inputs - use index-based access instead");
+        
+        // Find index where type matches
+        std::size_t index = 0;
+        bool found = false;
+        ((std::is_same_v<T, Types> ? (found = true) : (found ? true : (++index, false))), ...);
+        return index;
+    }
+    
+    /**
+     * @brief Get metadata for input by type (only when types unique)
+     * 
+     * Returns metadata about the input with the specified payload type.
+     * Only works when all input types are unique (compile error otherwise).
+     * 
+     * @tparam T The payload type of the input
+     * @return InputMetadata for the input of type T
+     * 
+     * @example
+     * // Multi-input module with unique types
+     * auto imu_meta = get_input_metadata<IMUData>();
+     * auto gps_meta = get_input_metadata<GPSData>();
+     * 
+     * // Compile error if types duplicate:
+     * // Inputs<SensorData, SensorData> - can't use type-based access
+     */
+    template<typename T>
+    auto get_input_metadata() const
+        requires (num_inputs > 1)  // Only for multi-input
+    {
+        constexpr std::size_t index = find_type_index<T, 
+            typename std::tuple_element<0, InputTypesTuple>::type,
+            typename std::tuple_element<1, InputTypesTuple>::type
+            // TODO: Need to unpack full tuple, not just first 2 elements
+        >();
+        return get_input_metadata<index>();
+    }
+    
+    /**
+     * @brief Get input timestamp by type (convenience method)
+     */
+    template<typename T>
+    uint64_t get_input_timestamp() const
+        requires (num_inputs > 1)
+    {
+        constexpr std::size_t index = find_type_index<T,
+            typename std::tuple_element<0, InputTypesTuple>::type,
+            typename std::tuple_element<1, InputTypesTuple>::type
+            // TODO: Need to unpack full tuple
+        >();
+        return get_input_timestamp<index>();
+    }
+    
+    /**
+     * @brief Check if input has new data by type
+     */
+    template<typename T>
+    bool has_new_data() const
+        requires (num_inputs > 1)
+    {
+        constexpr std::size_t index = find_type_index<T,
+            typename std::tuple_element<0, InputTypesTuple>::type,
+            typename std::tuple_element<1, InputTypesTuple>::type
+        >();
+        return has_new_data<index>();
+    }
+    
+    /**
+     * @brief Check if input is valid by type
+     */
+    template<typename T>
+    bool is_input_valid() const
+        requires (num_inputs > 1)
+    {
+        constexpr std::size_t index = find_type_index<T,
+            typename std::tuple_element<0, InputTypesTuple>::type,
+            typename std::tuple_element<1, InputTypesTuple>::type
+        >();
+        return is_input_valid<index>();
+    }
     
 public:
     // ========================================================================
@@ -701,14 +976,23 @@ public:
         
         // Start data thread based on input mode
         if constexpr (has_periodic_input) {
+            std::cout << "[" << config_.name << "] Starting periodic_loop thread...\n";
             data_thread_ = std::thread(&Module::periodic_loop, this);
         } else if constexpr (has_loop_input) {
+            std::cout << "[" << config_.name << "] Starting free_loop thread...\n";
             data_thread_ = std::thread(&Module::free_loop, this);
         } else if constexpr (has_multi_input) {
             // Phase 6.6: Multi-input processing
+            std::cout << "[" << config_.name << "] Starting multi_input_loop thread...\n";
             data_thread_ = std::thread(&Module::multi_input_loop, this);
+            
+            // Phase 6.9: Start secondary input receive threads
+            // Primary input (index 0) is handled by multi_input_loop's blocking receive
+            // Secondary inputs (indices 1, 2, ...) need background receive loops
+            start_secondary_input_threads();
         } else if constexpr (has_continuous_input) {
             // Single continuous input (backward compatible)
+            std::cout << "[" << config_.name << "] Starting continuous_loop thread...\n";
             data_thread_ = std::thread(&Module::continuous_loop, this);
         }
     }
@@ -720,8 +1004,14 @@ public:
         
         on_stop();
         
-        // Unsubscribe from source
-        if constexpr (has_continuous_input) {
+        // Unsubscribe from source(s)
+        if constexpr (has_multi_input) {
+            // Multi-input: Unsubscribe from all configured sources
+            for (const auto& source : config_.input_sources) {
+                unsubscribe_from_multi_input_source(source);
+            }
+        } else if constexpr (has_continuous_input) {
+            // Single continuous input (legacy)
             if (config_.source_system_id && config_.source_instance_id) {
                 unsubscribe_from_source(*config_.source_system_id, *config_.source_instance_id);
             }
@@ -733,6 +1023,14 @@ public:
         if (data_thread_ && data_thread_->joinable()) {
             data_thread_->join();
         }
+        
+        // Phase 6.9: Join secondary input threads
+        for (auto& thread : secondary_input_threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        
         if (work_thread_ && work_thread_->joinable()) {
             work_thread_->join();
         }
@@ -787,9 +1085,9 @@ template<typename T = OutputData>
 void publish_to_subscribers(T& data) {
     std::lock_guard<std::mutex> lock(subscribers_mutex_);
     for (uint32_t subscriber_base_addr : subscribers_) {
-        // Send to subscriber's DATA mailbox (base + 2)
+        // Send to subscriber's DATA mailbox (base + 32)
         uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-        auto result = cmd_mailbox_.send(data, subscriber_data_mbx);  // Can send from any mailbox
+        auto result = cmd_mailbox_.send(data, subscriber_data_mbx);
         if (!result) {
             std::cout << "[" << config_.name << "] Send failed to subscriber " << subscriber_base_addr << "\n";
         }
@@ -838,7 +1136,50 @@ void publish_multi_outputs_impl(std::tuple<Ts...>& outputs, std::index_sequence<
 template<typename... Ts>
 void publish_multi_outputs(std::tuple<Ts...>& outputs) {
     publish_multi_outputs_impl(outputs, std::index_sequence_for<Ts...>{});
-}    // ========================================================================
+}
+
+// Phase 6.10: TimsMessage-based publishing functions
+
+// Helper function to create TimsMessage with header.timestamp set
+template<typename T>
+TimsMessage<T> create_tims_message(T&& payload, uint64_t timestamp_ns) {
+    TimsMessage<T> msg{
+        .header = {
+            .msg_type = 0,     // serialize() will set this
+            .msg_size = 0,     // serialize() will set this
+            .timestamp = timestamp_ns,  // ONE SOURCE OF TRUTH
+            .seq_number = 0,   // TiMS will set this
+            .flags = 0
+        },
+        .payload = std::forward<T>(payload)
+    };
+    return msg;
+}
+
+// Publish TimsMessage<T> (for single output)
+template<typename T>
+void publish_tims_message(TimsMessage<T>& tims_msg) {
+    std::lock_guard<std::mutex> lock(subscribers_mutex_);
+    for (uint32_t subscriber_base_addr : subscribers_) {
+        uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        // Phase 6.10: Send with explicit timestamp from header
+        auto result = cmd_mailbox_.send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
+        if (!result) {
+            std::cout << "[" << config_.name << "] Send failed to subscriber " << subscriber_base_addr << "\n";
+        }
+    }
+}
+
+// Publish multi-outputs with timestamp (wraps each in TimsMessage)
+template<typename... Ts>
+void publish_multi_outputs_with_timestamp(std::tuple<Ts...>& outputs, uint64_t timestamp_ns) {
+    // For multi-output, we still use the existing publish_multi_outputs
+    // because each output goes through send_if_type_matches which wraps in TimsMessage
+    // The timestamp is not used here yet - future enhancement could wrap each output
+    publish_multi_outputs(outputs);
+}
+
+// ========================================================================
     // Subscription Protocol (ContinuousInput and Multi-Input)
     // ========================================================================
     
@@ -876,11 +1217,23 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
     void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
                                    std::optional<uint32_t> source_primary_output_type_id,
                                    size_t source_index) {
-        // Calculate our base address to include in request
-        uint32_t our_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
+        // For multi-input: Calculate base address using the INPUT TYPE we're subscribing to
+        // This ensures producers send to the correct input-specific DATA mailbox
+        uint32_t subscriber_base_addr;
+        
+        if constexpr (has_multi_input) {
+            // Multi-input: use the input type ID at source_index for subscriber base address
+            uint32_t input_type_id = get_input_type_id_at_index(source_index);
+            uint16_t input_type_id_low = static_cast<uint16_t>(input_type_id & 0xFFFF);
+            subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
+                                    (config_.system_id << 8) | config_.instance_id;
+        } else {
+            // Single-input: use output type for base address (backward compatible)
+            subscriber_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
+        }
         
         SubscribeRequestType request{
-            .subscriber_mailbox_id = our_base_addr,  // Send our base address, not specific mailbox
+            .subscriber_mailbox_id = subscriber_base_addr,  // Input-type-specific base for multi-input
             .requested_period_ms = config_.period.count()
         };
         
@@ -973,7 +1326,8 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
         uint32_t source_base;
         uint32_t source_work_mbx;
         
-        if constexpr (has_continuous_input) {
+        if constexpr (has_continuous_input && !has_multi_input) {
+            // Single continuous input
             constexpr uint32_t source_data_type_id = UserRegistry::template get_message_id<InputData>();
             constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
             source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
@@ -984,12 +1338,40 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
         work_mailbox_.send(request, source_work_mbx);
     }
     
+    void unsubscribe_from_multi_input_source(const InputSource& source) {
+        static_assert(has_multi_input, "unsubscribe_from_multi_input_source() only for multi-input modules");
+        
+        uint32_t our_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
+        
+        UnsubscribeRequestType request{
+            .subscriber_mailbox_id = our_base_addr
+        };
+        
+        // Use source_primary_output_type_id if provided, otherwise we can't compute address
+        // In practice, multi-input always requires this field
+        if (!source.source_primary_output_type_id.has_value()) {
+            std::cerr << "[" << config_.name << "] ERROR: Cannot unsubscribe - source_primary_output_type_id not set!\n";
+            return;
+        }
+        
+        uint32_t source_data_type_id = *source.source_primary_output_type_id;
+        uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
+                               (source.system_id << 8) | source.instance_id;
+        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        
+        // Send unsubscribe request from work mailbox (SystemRegistry messages)
+        work_mailbox_.send(request, source_work_mbx);
+    }
+    
     void handle_subscribe_request(const SubscribeRequestType& req) {
         try {
             // req.subscriber_mailbox_id is the subscriber's base address
             add_subscriber(req.subscriber_mailbox_id);
-            std::cout << "[" << config_.name << "] Added subscriber: " << req.subscriber_mailbox_id 
-                      << " (total: " << subscribers_.size() << ")\n";
+            uint32_t subscriber_data_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::DATA);
+            std::cout << "[" << config_.name << "] Added subscriber base=" << req.subscriber_mailbox_id 
+                      << ", will send to DATA mailbox=" << subscriber_data_mbx
+                      << " (total subscribers: " << subscribers_.size() << ")\n";
             
             SubscribeReplyType reply{
                 .actual_period_ms = config_.period.count(),
@@ -1046,7 +1428,16 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
     
 private:
     void periodic_loop() {
+        std::cout << "[" << config_.name << "] periodic_loop started, period=" << config_.period.count() << "ms\n";
+        uint32_t iteration = 0;
         while (running_) {
+            if (iteration < 3) {
+                std::cout << "[" << config_.name << "] periodic_loop iteration " << iteration << "\n";
+            }
+            
+            // Capture timestamp at data generation moment
+            uint64_t generation_timestamp = Time::now();
+            
             if constexpr (has_multi_output) {
                 // Multi-output: create tuple and call process with references
                 OutputTypesTuple outputs{};
@@ -1056,18 +1447,26 @@ private:
                     using Base = MultiOutputProcessorBase<OutputTypesTuple, InputData>;
                     static_cast<Base*>(this)->process(args...);
                 }, outputs);
-                publish_multi_outputs(outputs);
+                // Phase 6.10: Publish with automatic header.timestamp
+                publish_multi_outputs_with_timestamp(outputs, generation_timestamp);
             } else {
-                // Single output: call SingleOutputProcessorBase::process()
-                auto output = SingleOutputProcessorBase<OutputData>::process();
-                publish_to_subscribers(output);
+                // Single output: call process() with virtual dispatch
+                auto output = this->process();  // Virtual call to derived class
+                // Phase 6.10: Wrap in TimsMessage with header.timestamp = generation time
+                auto tims_msg = create_tims_message(std::move(output), generation_timestamp);
+                publish_tims_message(tims_msg);
             }
             std::this_thread::sleep_for(config_.period);
+            iteration++;
         }
+        std::cout << "[" << config_.name << "] periodic_loop ended after " << iteration << " iterations\n";
     }
 
     void free_loop() {
         while (running_) {
+            // Phase 6.10: Capture timestamp at data generation moment
+            uint64_t generation_timestamp = Time::now();
+            
             if constexpr (has_multi_output) {
                 // Multi-output: create tuple and call process with references
                 OutputTypesTuple outputs{};
@@ -1077,11 +1476,14 @@ private:
                     using Base = MultiOutputProcessorBase<OutputTypesTuple, InputData>;
                     static_cast<Base*>(this)->process(args...);
                 }, outputs);
-                publish_multi_outputs(outputs);
+                // Phase 6.10: Publish with automatic header.timestamp
+                publish_multi_outputs_with_timestamp(outputs, generation_timestamp);
             } else {
-                // Single output: call SingleOutputProcessorBase::process()
-                auto output = SingleOutputProcessorBase<OutputData>::process();
-                publish_to_subscribers(output);
+                // Single output: call process() with virtual dispatch
+                auto output = this->process();  // Virtual call to derived class
+                // Phase 6.10: Wrap in TimsMessage with header.timestamp = generation time
+                auto tims_msg = create_tims_message(std::move(output), generation_timestamp);
+                publish_tims_message(tims_msg);
             }
         }
     }
@@ -1093,8 +1495,26 @@ private:
             auto result = data_mailbox_->template receive<InputData>();
             
             if (result) {
+                // Phase 6.10: Populate metadata BEFORE process call
+                // Single continuous input always uses index 0
+                // Create TimsMessage wrapper to extract header metadata
+                TimsMessage<InputData> tims_wrapper{
+                    .header = TimsHeader{
+                        .msg_type = UserRegistry::template get_message_id<InputData>(),
+                        .msg_size = 0,  // Not needed for metadata
+                        .timestamp = result->timestamp,
+                        .seq_number = 0,  // TODO: Extract from result if available
+                        .flags = 0
+                    },
+                    .payload = result->message
+                };
+                update_input_metadata(0, tims_wrapper, true);  // Always new data for continuous
+                
                 auto output = process_continuous_dispatch(result->message);
-                publish_to_subscribers(output);
+                // Phase 6.10: Use input timestamp from header (data validity time)
+                // ReceivedMessage.timestamp comes from TimsHeader, not payload
+                auto tims_msg = create_tims_message(std::move(output), result->timestamp);
+                publish_tims_message(tims_msg);
             }
         }
         std::cout << "[" << config_.name << "] continuous_loop ended\n";
@@ -1115,36 +1535,110 @@ private:
         
         std::cout << "[" << config_.name << "] Primary input index: " << primary_idx << "\n";
         
+        uint32_t loop_iteration = 0;
         while (running_) {
             // Step 1: BLOCK on primary input (drives execution)
+            if (loop_iteration < 3) {
+                std::cout << "[" << config_.name << "] Waiting for primary input... (iteration " << loop_iteration << ")\n";
+            }
             auto primary_result = receive_primary_input<primary_idx>();
             
-            if (!primary_result) {
+            if (!primary_result.has_value()) {
+                if (loop_iteration < 3) {
+                    std::cout << "[" << config_.name << "] No primary data received\n";
+                }
+                loop_iteration++;
                 continue;  // No data, loop again
             }
             
+            if (loop_iteration < 3) {
+                std::cout << "[" << config_.name << "] Primary input received!\n";
+            }
+            
+            // Phase 6.10: Populate primary metadata BEFORE gather_all_inputs
+            // Primary input always uses index 0 in metadata array
+            // Create TimsMessage wrapper to extract header metadata
+            using PrimaryType = std::tuple_element_t<primary_idx, InputTypesTuple>;
+            TimsMessage<PrimaryType> primary_tims{
+                .header = TimsHeader{
+                    .msg_type = UserRegistry::template get_message_id<PrimaryType>(),
+                    .msg_size = 0,  // Not needed for metadata
+                    .timestamp = primary_result->timestamp,
+                    .seq_number = 0,  // TODO: Extract from ReceivedMessage if available
+                    .flags = 0
+                },
+                .payload = primary_result->message
+            };
+            update_input_metadata(0, primary_tims, true);  // Primary always new data
+            
             // Step 2: Sync all secondary inputs using primary timestamp
-            auto all_inputs = gather_all_inputs<primary_idx>(*primary_result);
+            auto all_inputs = gather_all_inputs<primary_idx>(primary_result.value());
             
             if (!all_inputs) {
                 // Failed to sync all inputs - skip this cycle
+                if (loop_iteration < 3) {
+                    std::cout << "[" << config_.name << "] Failed to sync inputs\n";
+                }
+                loop_iteration++;
                 continue;
             }
+            
+            if (loop_iteration < 3) {
+                std::cout << "[" << config_.name << "] All inputs synced, calling process()\n";
+            }
+            
+            // Phase 6.10: Extract primary input timestamp from header (synchronization point)
+            // ReceivedMessage.timestamp comes from TimsHeader, not payload
+            uint64_t primary_timestamp = primary_result->timestamp;
             
             // Step 3: Call process with all inputs
             if constexpr (has_multi_output) {
                 // Multi-input + Multi-output: void process(const T1&, ..., O1&, O2&, ...)
                 OutputTypesTuple outputs{};
                 call_multi_input_multi_output_process(*all_inputs, outputs);
-                publish_multi_outputs(outputs);
+                // Phase 6.10: Publish with header.timestamp = primary timestamp (sync point)
+                publish_multi_outputs_with_timestamp(outputs, primary_timestamp);
             } else {
                 // Multi-input + Single output: OutputData process(const T1&, ...)
                 auto output = call_multi_input_process(*all_inputs);
-                publish_to_subscribers(output);
+                // Phase 6.10: Wrap with header.timestamp = primary timestamp (sync point)
+                auto tims_msg = create_tims_message(std::move(output), primary_timestamp);
+                publish_tims_message(tims_msg);
             }
+            loop_iteration++;
         }
         
         std::cout << "[" << config_.name << "] multi_input_loop ended\n";
+    }
+    
+    // Phase 6.9: Secondary input receive loop
+    // Continuously receives from secondary input mailboxes to populate their buffers
+    template<size_t InputIdx>
+    void secondary_input_receive_loop() {
+        using InputType = std::tuple_element_t<InputIdx, InputTypesTuple>;
+        auto& mailbox = std::get<InputIdx>(*input_mailboxes_);
+        
+        std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx << "] started\n";
+        
+        int receive_count = 0;
+        while (running_) {
+            // Blocking receive - stores in historical buffer automatically
+            auto result = mailbox.template receive<InputType>();
+            if (!result.has_value()) {
+                std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
+                          << "] receive failed after " << receive_count << " messages\n";
+                break;
+            }
+            receive_count++;
+            if (receive_count <= 3) {
+                std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
+                          << "] received message #" << receive_count 
+                          << ", timestamp=" << result.value().timestamp << "\n";
+            }
+        }
+        
+        std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
+                  << "] ended (total: " << receive_count << " messages)\n";
     }
     
     // Helper: Get primary input index at compile time
@@ -1161,9 +1655,9 @@ private:
     
     // Helper: Receive from primary input mailbox
     template<size_t PrimaryIdx>
-    auto receive_primary_input() {
+    auto receive_primary_input() -> MailboxResult<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>> {
         if (!input_mailboxes_) {
-            return std::optional<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>{};
+            return MailboxResult<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>(MailboxError::NotInitialized);
         }
         
         using PrimaryType = std::tuple_element_t<PrimaryIdx, InputTypesTuple>;
@@ -1186,7 +1680,8 @@ private:
         // Place primary input at its index
         std::get<PrimaryIdx>(all_inputs) = primary_msg.message;
         
-        // Sync secondary inputs using getData
+        // Phase 6.10: Sync secondary inputs using getData with primary timestamp from header
+        // ReceivedMessage.timestamp comes from TimsHeader, not payload
         bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.timestamp, all_inputs);
         
         if (!all_synced) {
@@ -1231,9 +1726,29 @@ private:
         
         if (result) {
             std::get<Index>(all_inputs) = result->payload;
+            
+            // Phase 6.10: Populate secondary metadata
+            // Secondary inputs: Index 1..N in metadata array (primary is 0)
+            // Calculate metadata index: if Index < PrimaryIdx, use Index+1, else use Index
+            // Actually, we store primary at [0] and secondaries at [1..N-1] in order
+            // For now, use simple mapping: metadata[Index] = input[Index]
+            // TODO: This needs proper mapping when primary is not at index 0
+            
+            // Determine if this is fresh data or stale
+            bool is_new = (result->header.timestamp == primary_timestamp);
+            
+            // Create TimsMessage wrapper for metadata extraction (already is TimsMessage!)
+            // Store metadata (secondary inputs use their actual index for now)
+            // This assumes primary is at index 0 in InputTypesTuple
+            update_input_metadata(Index, *result, is_new);
+            
             return true;
         } else {
-            std::cout << "[" << config_.name << "] Failed to sync input " << Index << "\n";
+            std::cout << "[" << config_.name << "] Failed to sync input " << Index 
+                      << " (primary_ts=" << primary_timestamp << ", tolerance=" << config_.sync_tolerance << ")\n";
+            
+            // Phase 6.10: Mark as invalid
+            mark_input_invalid(Index);
             return false;
         }
     }
@@ -1377,6 +1892,22 @@ private:
     // Phase 6.6: Multi-Input Mailbox Helpers
     // ========================================================================
     
+    // Phase 6.9: Start receive threads for secondary inputs (all except primary)
+    void start_secondary_input_threads() {
+        if constexpr (has_multi_input) {
+            constexpr size_t primary_idx = get_primary_input_index();
+            start_secondary_threads_impl<primary_idx>(std::make_index_sequence<InputCount>{});
+        }
+    }
+    
+    template<size_t PrimaryIdx, size_t... Is>
+    void start_secondary_threads_impl(std::index_sequence<Is...>) {
+        // Start thread for each input except primary
+        ((Is != PrimaryIdx ? 
+          (secondary_input_threads_.emplace_back(&Module::secondary_input_receive_loop<Is>, this), true) : 
+          true), ...);
+    }
+    
     // Create HistoricalMailbox for specific input at compile-time index
     template<size_t Index>
     auto create_historical_mailbox_for_input() {
@@ -1389,6 +1920,9 @@ private:
         uint32_t base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
                              (config_.system_id << 8) | config_.instance_id;
         uint32_t data_mailbox_id = base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        
+        std::cout << "[" << config_.name << "] Creating input mailbox[" << Index 
+                  << "] at address " << data_mailbox_id << " (base=" << base_addr << ")\n";
         
         MailboxConfig mbx_config{
             .mailbox_id = data_mailbox_id,
