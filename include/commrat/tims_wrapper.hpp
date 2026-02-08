@@ -1,11 +1,11 @@
 #pragma once
 
 #include "messages.hpp"
+#include "timestamp.hpp"
 #include <memory>
 #include <string>
 #include <functional>
 #include <optional>
-#include <chrono>
 #include <atomic>
 #include <span>
 #include <array>
@@ -80,7 +80,7 @@ public:
     
     // Receive a message with compile-time type safety and SeRTial deserialization
     template<typename T>
-    std::optional<T> receive(std::chrono::milliseconds timeout = std::chrono::milliseconds(0)) {
+    std::optional<T> receive(Milliseconds timeout = Milliseconds(0)) {
         static_assert(is_commrat_message_v<T>, "T must be a CommRaT message type");
         
         if (!is_initialized_) {
@@ -117,13 +117,13 @@ public:
     
     // Modern C++ interface using std::span<std::byte>
     // Casting to void* happens here at the TiMS boundary
-    ssize_t receive_raw_bytes(std::span<std::byte> buffer, std::chrono::milliseconds timeout) {
+    ssize_t receive_raw_bytes(std::span<std::byte> buffer, Milliseconds timeout) {
         return receive_raw(buffer.data(), buffer.size(), timeout);
     }
     
 private:
     TimsResult send_raw(const void* data, size_t size, uint32_t dest_mailbox_id);
-    ssize_t receive_raw(void* buffer, size_t buffer_size, std::chrono::milliseconds timeout);
+    ssize_t receive_raw(void* buffer, size_t buffer_size, Milliseconds timeout);
     
     TimsConfig config_;
     int tims_fd_; // TIMS file descriptor

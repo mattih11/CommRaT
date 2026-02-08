@@ -86,6 +86,10 @@ add_executable(test_primary_input test/test_primary_input.cpp)
 target_link_libraries(test_primary_input PRIVATE commrat)
 target_include_directories(test_primary_input PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+add_executable(test_timestamped_ring_buffer test/test_timestamped_ring_buffer.cpp)
+target_link_libraries(test_timestamped_ring_buffer PRIVATE commrat)
+target_include_directories(test_timestamped_ring_buffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 # Install targets
 install(TARGETS commrat
     EXPORT CommRaTTargets

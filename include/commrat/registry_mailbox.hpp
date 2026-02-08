@@ -2,7 +2,7 @@
 
 #include "mailbox.hpp"
 #include "message_registry.hpp"
-#include <thread>
+#include "threading.hpp"
 
 namespace commrat {
 

@@ -67,6 +67,50 @@ constexpr functions           // Compile-time computation
 Templates with static_assert  // Compile-time validation
 ```
 
+### Threading and Timestamp Abstractions
+
+**ALWAYS use CommRaT's unified abstractions** instead of raw std:: types - NO EXCEPTIONS:
+
+```cpp
+// ❌ NEVER USE raw std types - even in public APIs:
+#include <thread>
+#include <mutex>
+#include <shared_mutex>
+#include <chrono>
+
+std::thread my_thread;
+std::mutex my_mutex;
+std::shared_mutex my_shared_mutex;
+std::lock_guard<std::mutex> lock(mtx);
+std::chrono::steady_clock::now();
+std::chrono::milliseconds timeout(100);
+std::this_thread::sleep_for(ms);
+
+// ✅ ALWAYS USE CommRaT abstractions:
+#include <commrat/threading.hpp>
+#include <commrat/timestamp.hpp>
+
+Thread my_thread;                    // Wrapper with realtime priorities
+Mutex my_mutex;                      // Priority-inheritance support
+SharedMutex my_shared_mutex;         // Reader-writer lock
+Lock lock(mtx);                      // RAII lock guard
+SharedLock lock(shared_mtx);         // Shared (read) lock
+UniqueLockShared lock(shared_mtx);   // Unique (write) lock on SharedMutex
+Timestamp ts = Time::now();          // Get current timestamp (ns since epoch)
+Duration timeout = Milliseconds(100); // Type-safe duration
+Time::sleep(Milliseconds(10));       // Sleep (realtime-compatible)
+
+// Why NO exceptions?
+// - Realtime kernel syscalls (SCHED_FIFO, SCHED_RR) require consistent API
+// - Priority-inheritance mutexes need special pthread calls
+// - Alternative clock sources (CLOCK_MONOTONIC, PTP, TSC) not in std::chrono
+// - std::thread doesn't support realtime thread attributes
+// - Must control thread affinity and CPU pinning
+// - Need deterministic timing guarantees across entire codebase
+
+// NOTE: Only timestamp.hpp and threading.hpp themselves include std headers
+// (they are the abstraction layer). All other code uses the abstractions.
+
 ### Template Metaprogramming
 
 CommRaT heavily uses **compile-time dispatch** via templates:
