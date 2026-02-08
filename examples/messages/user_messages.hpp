@@ -5,7 +5,7 @@
 namespace user_app {
 
 // ============================================================================
-// User Payload Definitions (Plain Data Structures)
+// Payload Definitions (Plain POD Structs)
 // ============================================================================
 
 struct TemperatureData {
@@ -28,9 +28,10 @@ struct PoseData {
 };
 
 // ============================================================================
-// Application Definition - CommRaT combines registry with Module/Mailbox
+// Application Definition
 // ============================================================================
 
+// Define your CommRaT application with all message types
 using App = commrat::CommRaT<
     commrat::Message::Data<TemperatureData>,
     commrat::Message::Data<StatusData>,
@@ -39,8 +40,9 @@ using App = commrat::CommRaT<
 >;
 
 // App provides:
-//   App::Module<Output<T>, InputSpec>  - Module template
-//   App::Mailbox<T>                     - Mailbox template
-//   App::serialize/deserialize          - Serialization
+//   App::Module<OutputSpec, InputSpec, ...Commands>
+//   App::Mailbox<T>
+//   App::serialize(msg) / deserialize<T>(data)
+//   App::get_message_id<T>()
 
 } // namespace user_app

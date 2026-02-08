@@ -28,7 +28,7 @@ void signal_handler(int signal) {
 
 class SensorModule : public ExampleApp::Module<Output<TemperatureData>, PeriodicInput> {
 public:
-    using ExampleApp::Module<Output<TemperatureData>, PeriodicInput>::Module;  // Inherit constructor
+    explicit SensorModule(const ModuleConfig& config) : ExampleApp::Module<Output<TemperatureData>, PeriodicInput>(config) {}
     
 protected:
     TemperatureData process() override {
@@ -52,9 +52,9 @@ protected:
 
 class FilterModule : public ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>> {
 public:
-    using ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>>::Module;  // Inherit constructor
+    explicit FilterModule(const ModuleConfig& config) : ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>>(config) {}
     
-private:
+protected:
     static constexpr size_t HISTORY_SIZE = 5;
     std::array<float, HISTORY_SIZE> history_{};
     size_t history_index_{0};

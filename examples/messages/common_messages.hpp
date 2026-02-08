@@ -10,7 +10,7 @@
 namespace example_messages {
 
 // ============================================================================
-// Payload Definitions
+// Payload Definitions (Plain POD Structs)
 // ============================================================================
 
 struct StatusData {
@@ -39,10 +39,10 @@ struct PoseData {
 };
 
 // ============================================================================
-// CommRaT Application Definition - Combines messages with Module/Mailbox
+// Application Definition
 // ============================================================================
 
-// Define the CommRaT application with your messages
+// Define your CommRaT application with all message types
 using ExampleApp = commrat::CommRaT<
     commrat::Message::Data<StatusData>,
     commrat::Message::Data<CounterData>,
@@ -50,13 +50,13 @@ using ExampleApp = commrat::CommRaT<
     commrat::Message::Data<PoseData>
 >;
 
-// Now you can use:
-//   ExampleApp::Module<Output<T>, InputSpec>  - Module template
-//   ExampleApp::Mailbox<T>                     - Mailbox template
-//   ExampleApp::serialize(msg)                 - Serialization
-//   ExampleApp::deserialize<T>(data)           - Deserialization
+// ExampleApp provides:
+//   ExampleApp::Module<OutputSpec, InputSpec, ...Commands>
+//   ExampleApp::Mailbox<T>
+//   ExampleApp::serialize(msg) / deserialize<T>(data)
+//   ExampleApp::get_message_id<T>()
 
-// Convenient re-exports for this namespace
+// Convenient template aliases for this namespace
 template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
 using Module = ExampleApp::Module<OutputSpec, InputSpec, CommandTypes...>;
 

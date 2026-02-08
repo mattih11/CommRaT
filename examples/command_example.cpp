@@ -52,13 +52,9 @@ namespace user_app {
 class CommandableSensor : public ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, 
                                                        ResetCmd, CalibrateCmd, SetModeCmd> {
 public:
-    using Module::Module;  // Inherit constructor
+    explicit CommandableSensor(const ModuleConfig& config) 
+        : ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>(config) {}
     
-private:
-    float calibration_offset_ = 0.0f;
-    uint32_t mode_ = 0;
-    int counter_ = 0;
-
 protected:
     TemperatureData process() override {
         float raw_temp = 20.0f + std::sin(counter_++ * 0.1f) * 5.0f;
@@ -99,6 +95,11 @@ protected:
         
         mode_ = cmd.mode;
     }
+
+private:
+    float calibration_offset_ = 0.0f;
+    uint32_t mode_ = 0;
+    int counter_ = 0;
 };
 
 // ============================================================================

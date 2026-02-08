@@ -1,20 +1,17 @@
 #pragma once
 
 #include "user_messages.hpp"
-#include <commrat/commrat.hpp>
 
 /**
  * @file messages.hpp
- * @brief Application-specific type aliases - include this in your modules!
+ * @brief Convenient namespace aliases for clean module code
  * 
- * This file provides clean Module and Mailbox aliases configured with your
- * application's message registry. System messages are automatically included.
- * 
- * Usage in your module code:
+ * Usage:
  * @code
  * #include "messages/messages.hpp"
+ * using namespace user_app;
  * 
- * class SensorModule : public Module<TempData, PeriodicInput> {
+ * class SensorModule : public Module<Output<TempData>, PeriodicInput> {
  *     TempData process() override { return read_sensor(); }
  * };
  * @endcode
@@ -22,24 +19,21 @@
 
 namespace user_app {
 
-// ============================================================================
-// Convenient Aliases - Direct Access to App Components
-// ============================================================================
-
-// Module and Mailbox aliases for cleaner syntax in this namespace
+// Module template alias (cleaner than writing App::Module everywhere)
 template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
 using Module = App::Module<OutputSpec, InputSpec, CommandTypes...>;
 
+// Mailbox template alias
 template<typename PayloadT>
 using Mailbox = App::Mailbox<PayloadT>;
 
-// I/O specifications
+// Re-export I/O specifications
 using commrat::Output;
+using commrat::Outputs;
 using commrat::Input;
+using commrat::Inputs;
 using commrat::PeriodicInput;
 using commrat::LoopInput;
-
-// Config types
 using commrat::ModuleConfig;
 
 } // namespace user_app
