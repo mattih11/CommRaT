@@ -289,13 +289,13 @@ public:
             tolerance = default_tolerance_;
         }
         
-        // Tolerance is in milliseconds, convert to match timestamp units
-        // (timestamps are uint64_t but unit depends on usage - could be ns, ms, etc.)
-        uint64_t tolerance_units = static_cast<uint64_t>(tolerance.count());
+        // Convert tolerance from milliseconds to nanoseconds
+        // Timestamps are in nanoseconds (from Time::now()), so tolerance must match
+        uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
         
         // Quick bounds check (handle underflow for low timestamps)
-        uint64_t lower_bound = (timestamp >= tolerance_units) ? (timestamp - tolerance_units) : 0;
-        uint64_t upper_bound = timestamp + tolerance_units;
+        uint64_t lower_bound = (timestamp >= tolerance_ns) ? (timestamp - tolerance_ns) : 0;
+        uint64_t upper_bound = timestamp + tolerance_ns;
         if (upper_bound < timestamp) {  // Overflow check
             upper_bound = UINT64_MAX;
         }
@@ -307,15 +307,15 @@ public:
         // Dispatch to mode-specific implementation
         switch (mode) {
             case InterpolationMode::NEAREST:
-                return getData_nearest(timestamp, tolerance_units);
+                return getData_nearest(timestamp, tolerance_ns);
             case InterpolationMode::BEFORE:
-                return getData_before(timestamp, tolerance_units);
+                return getData_before(timestamp, tolerance_ns);
             case InterpolationMode::AFTER:
-                return getData_after(timestamp, tolerance_units);
+                return getData_after(timestamp, tolerance_ns);
             case InterpolationMode::INTERPOLATE:
                 // Future: Linear interpolation between messages
                 // For now, fall back to NEAREST
-                return getData_nearest(timestamp, tolerance_units);
+                return getData_nearest(timestamp, tolerance_ns);
         }
         
         return std::nullopt;
@@ -343,7 +343,7 @@ private:
      * @brief Find message with timestamp closest to requested
      * @note Assumes lock is held (called from getData)
      */
-    std::optional<T> getData_nearest(uint64_t timestamp, uint64_t tolerance_units) const {
+    std::optional<T> getData_nearest(uint64_t timestamp, uint64_t tolerance_ns) const {
         if (buffer_.empty()) {
             return std::nullopt;
         }
@@ -360,7 +360,7 @@ private:
             }
         }
         
-        if (best_diff <= tolerance_units) {
+        if (best_diff <= tolerance_ns) {
             return buffer_[best_idx];
         }
         
