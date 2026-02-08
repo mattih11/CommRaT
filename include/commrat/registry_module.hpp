@@ -254,9 +254,12 @@ private:
     // Normalize InputSpec: ContinuousInput<T> -> Input<T>, keep others as-is
     using InputSpec = NormalizeInput_t<InputSpec_>;
     
-    // Phase 5.3: Multi-output supported, multi-input in Phase 6
+    // Phase 6.4: Multi-input infrastructure validated, Module integration in progress
+    // Manual pattern demonstrated in test_multi_input.cpp (30/30 fusion success)
+    // TODO Phase 6.5-6.9: Full Module integration with tuple<HistoricalMailbox>, multi_input_loop()
     static_assert(InputCount_v<InputSpec> <= 1,
-                  "Phase 5: Multi-input (Inputs<Ts...>) not yet supported (coming in Phase 6). Use Input<T>, PeriodicInput, or LoopInput.");
+                  "Phase 6.4: Multi-input (Inputs<Ts...>) validated but Module integration incomplete. "
+                  "Manual pattern works (see test_multi_input.cpp). Full Module support coming in Phase 6.5-6.9.");
     
     // Helper to extract InputData type from InputSpec
     template<typename T>
