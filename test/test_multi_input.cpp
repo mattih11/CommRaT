@@ -43,94 +43,126 @@ using namespace commrat;
 int main() {
     std::cout << "=== Phase 6.4 Multi-Input Module Tests ===\n";
     
-    // Test 1: Manual multi-input synchronization using HistoricalMailbox
-    std::cout << "\nTest 1: Manual multi-input synchronization\n";
+    // Test 1: Manual multi-input synchronization using separate HistoricalMailboxes
+    std::cout << "\nTest 1: Manual multi-input synchronization (separate mailboxes)\n";
     {
-        // Single producer sending both IMU and GPS
-        MailboxConfig producer_config{
+        // IMU producer and consumer (fast stream - primary)
+        MailboxConfig imu_prod_config{
             .mailbox_id = 601,
             .max_message_size = 1024,
-            .mailbox_name = "sensor_producer"
+            .mailbox_name = "imu_producer"
         };
         
-        // Single consumer receiving both types (simulates fusion module)
-        MailboxConfig consumer_config{
+        MailboxConfig imu_cons_config{
             .mailbox_id = 602,
             .max_message_size = 1024,
-            .mailbox_name = "fusion_consumer"
+            .mailbox_name = "imu_consumer"
         };
         
-        HistoricalMailbox<TestRegistry, 100> producer(producer_config, Milliseconds(50));
-        HistoricalMailbox<TestRegistry, 100> consumer(consumer_config, Milliseconds(50));
+        // GPS producer and consumer (slow stream - secondary)
+        MailboxConfig gps_prod_config{
+            .mailbox_id = 701,
+            .max_message_size = 1024,
+            .mailbox_name = "gps_producer"
+        };
         
-        producer.start();
-        consumer.start();
+        MailboxConfig gps_cons_config{
+            .mailbox_id = 702,
+            .max_message_size = 1024,
+            .mailbox_name = "gps_consumer"
+        };
         
-        // Send interleaved IMU (fast) and GPS (slow) data
-        // Pattern: 10 IMU @ 10ms intervals, then 1 GPS
-        std::vector<uint64_t> imu_timestamps;
-        std::vector<uint64_t> gps_timestamps;
+        // Create separate mailboxes for each input type
+        HistoricalMailbox<TestRegistry, 100> imu_producer(imu_prod_config);
+        HistoricalMailbox<TestRegistry, 100> imu_consumer(imu_cons_config, Milliseconds(50));
+        HistoricalMailbox<TestRegistry, 100> gps_producer(gps_prod_config);
+        HistoricalMailbox<TestRegistry, 100> gps_consumer(gps_cons_config, Milliseconds(100));
         
-        for (int i = 0; i < 3; ++i) {  // 3 GPS cycles
+        imu_producer.start();
+        imu_consumer.start();
+        gps_producer.start();
+        gps_consumer.start();
+        
+        // Send IMU at 100Hz (10ms intervals) and GPS at 10Hz (100ms intervals)
+        // Interleaved pattern: 10 IMU, then 1 GPS
+        for (int i = 0; i < 3; ++i) {  // 3 GPS messages
             // Send 10 IMU messages
             for (int j = 0; j < 10; ++j) {
                 IMUData imu{0, static_cast<float>(i*10 + j), 0, 0, 0, 0, 0};
-                producer.send(imu, 602);
-                Time::sleep(Milliseconds(5));  // 5ms spacing
+                imu_producer.send(imu, 602);
+                Time::sleep(Milliseconds(10));
             }
             
             // Send 1 GPS message
             GPSData gps{0, 37.7749 + i*0.0001, -122.4194, 100.0};
-            producer.send(gps, 602);
-            Time::sleep(Milliseconds(5));
+            gps_producer.send(gps, 702);
         }
         
-        // Receive and store all messages in history
-        for (int i = 0; i < 33; ++i) {  // 30 IMU + 3 GPS
-            // Try receiving as IMU first
-            auto imu_result = consumer.receive<IMUData>();
-            if (imu_result) {
-                imu_timestamps.push_back(imu_result->timestamp);
-                continue;
+        // Receive all GPS messages into history (build up secondary input buffer)
+        int gps_count = 0;
+        for (int i = 0; i < 3; ++i) {
+            auto gps_result = gps_consumer.receive<GPSData>();
+            if (gps_result) {
+                gps_count++;
+            } else {
+                break;
+            }
+        }
+        
+        std::cout << "  INFO: Received " << gps_count << " GPS messages into history\n";
+        
+        // Now fusion loop: Block on IMU (primary), getData on GPS (secondary)
+        int fusion_count = 0;
+        int imu_count = 0;
+        
+        for (int i = 0; i < 30; ++i) {  // 30 IMU messages
+            auto imu_result = imu_consumer.receive<IMUData>();
+            if (!imu_result) {
+                break;
             }
             
-            // Try receiving as GPS
-            auto gps_result = consumer.receive<GPSData>();
-            if (gps_result) {
-                gps_timestamps.push_back(gps_result->timestamp);
-            }
-        }
-        
-        std::cout << "  INFO: Received " << imu_timestamps.size() << " IMU, " 
-                  << gps_timestamps.size() << " GPS messages\n";
-        
-        if (imu_timestamps.empty() || gps_timestamps.empty()) {
-            std::cerr << "  FAIL: Didn't receive messages\n";
-            return 1;
-        }
-        
-        // Now simulate fusion: For each IMU timestamp, try to getData GPS
-        int fusion_count = 0;
-        for (uint64_t imu_ts : imu_timestamps) {
-            auto gps_result = consumer.getData<GPSData>(imu_ts, Milliseconds(100));
+            imu_count++;
+            
+            // Synchronize GPS to IMU timestamp
+            auto gps_result = gps_consumer.getData<GPSData>(imu_result->timestamp, Milliseconds(100));
             
             if (gps_result) {
                 fusion_count++;
+                
+                // Simulate fusion (would call process() in real module)
+                [[maybe_unused]] FusedData fused;
+                fused.timestamp = imu_result->timestamp;
+                fused.position_x = static_cast<float>(gps_result->payload.latitude);
+                fused.position_y = static_cast<float>(gps_result->payload.longitude);
+                fused.position_z = static_cast<float>(gps_result->payload.altitude);
+                fused.velocity_x = imu_result->message.accel_x;
+                fused.velocity_y = 0.0f;
+                fused.velocity_z = 0.0f;
+                // Would publish: publish_to_subscribers(fused)
             }
         }
         
-        std::cout << "  INFO: Successfully fused " << fusion_count << "/" << imu_timestamps.size() 
+        std::cout << "  INFO: Processed " << imu_count << " IMU messages\n";
+        std::cout << "  INFO: Successfully fused " << fusion_count << "/" << imu_count 
                   << " IMU messages with GPS\n";
         
         if (fusion_count == 0) {
-            std::cerr << "  FAIL: No fusion occurred\n";
+            std::cerr << "  FAIL: No fusion occurred (GPS never synchronized)\n";
+            return 1;
+        }
+        
+        // Expect most IMU messages to fuse (GPS at 10Hz, IMU at 100Hz, 100ms tolerance)
+        if (fusion_count < 10) {
+            std::cerr << "  FAIL: Too few fusions (" << fusion_count << " < 10)\n";
             return 1;
         }
         
         std::cout << "  PASS: Manual multi-input synchronization working\n";
         
-        producer.stop();
-        consumer.stop();
+        imu_producer.stop();
+        imu_consumer.stop();
+        gps_producer.stop();
+        gps_consumer.stop();
     }
     
     std::cout << "\n=== All Phase 6.4 Tests Passed! ===\n";
