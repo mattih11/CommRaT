@@ -6,7 +6,7 @@
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Phase 4 Complete](https://img.shields.io/badge/Phase-4%20Complete-green.svg)](docs/README.md)
+[![Phase 5.3 Complete](https://img.shields.io/badge/Phase-5.3%20Complete-green.svg)](docs/README.md)
 
 A modern C++20 communication framework that combines **RACK's TiMS IPC** message service with **SeRTial's** zero-allocation serialization, providing compile-time safe, real-time capable messaging with templated message types and a powerful mailbox interface for efficient type dispatch.
 
@@ -14,16 +14,17 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 
 ## Features
 
+- **Multi-Output Modules** ⭐ NEW (Phase 5.3): Produce multiple message types simultaneously with type-specific delivery
 - **Ultra-Clean User Interface**: Define messages ONCE, use payload types everywhere (no MessageDefinition in user code)
-- **Payload-Only API**: Module<OutputData, InputMode> - users never see TimsMessage wrappers or message IDs
-- **Auto-Subscription**: ContinuousInput<PayloadT> automatically handles subscription protocol
+- **Payload-Only API**: Module<OutputSpec, InputSpec> with Output<T>/Outputs<T, U, V> specification
+- **Auto-Subscription**: Input<PayloadT> automatically handles subscription protocol with type filtering
 - **Variadic Commands**: Module<..., Cmd1, Cmd2, Cmd3> with type-safe on_command() handlers
 - **System Messages Auto-Included**: CombinedRegistry automatically adds subscription protocol messages
 - **Compile-Time Message IDs**: 0xPSMM format (Prefix, SubPrefix, Message ID) with auto-increment
 - **Modern C++20**: Full template metaprogramming with concepts, `std::span`, and type safety
 - **Zero-Allocation Serialization**: Stack-allocated `std::byte` buffers via SeRTial with compile-time size computation
 - **Compile-Time Type Safety**: Templated message types with static validation and collision detection
-- **Module Framework**: RAII-based Module<> with PeriodicInput/LoopInput/ContinuousInput modes
+- **Module Framework**: RAII-based Module<> with PeriodicInput/LoopInput/Input<T> modes
 - **Message Registry**: Compile-time type registry for zero-overhead message dispatch
 - **Runtime Visitor Pattern**: Efficient runtime dispatch without virtual functions (receive_any)
 - **SeRTial Integration**: Automatic serialization using `fixed_vector`, `fixed_string`, and `buffer_type`
@@ -82,7 +83,7 @@ using Module = commrat::Module<AppRegistry, OutputData, InputMode, Commands...>;
 **Step 2: Create Modules**
 ```cpp
 // Producer: publishes temperature every 500ms
-class SensorModule : public Module<TemperatureData, PeriodicInput> {
+class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
 protected:
     TemperatureData process() override {
         return {.temperature_celsius = read_sensor()};
@@ -90,11 +91,22 @@ protected:
 };
 
 // Consumer: processes incoming temperature data
-class MonitorModule : public Module<StatusData, ContinuousInput<TemperatureData>> {
+class MonitorModule : public Module<Output<StatusData>, Input<TemperatureData>> {
 protected:
     StatusData process_continuous(const TemperatureData& input) override {
         std::cout << "Temperature: " << input.temperature_celsius << "°C\n";
         return calculate_status(input);
+    }
+};
+
+// Multi-Output Producer: generates multiple message types simultaneously (Phase 5.3)
+class SensorFusion : public Module<Outputs<RawData, FilteredData, Diagnostics>, PeriodicInput> {
+protected:
+    void process(RawData& raw, FilteredData& filtered, Diagnostics& diag) override {
+        raw = read_sensors();
+        filtered = apply_filter(raw);
+        diag = compute_diagnostics(raw, filtered);
+        // Each subscriber receives ONLY their type (type-specific filtering)
     }
 };
 ```
@@ -119,7 +131,7 @@ int main() {
 
 ## Running Examples
 
-All examples demonstrate Phase 4 features with clean, professional output:
+All examples demonstrate Phase 5 features with clean, professional output:
 
 ```bash
 cd build
@@ -135,6 +147,12 @@ cd build
 
 # Maximum throughput demo (~200K-400K iter/sec)
 ./example_loop_mode
+
+# Multi-output with 2 types (Phase 5.3)
+./example_multi_output_runtime
+
+# Advanced sensor fusion with 3 outputs (Phase 5.3)
+./example_sensor_fusion
 ```
 
 **See [examples/](examples/) directory for source code.**
