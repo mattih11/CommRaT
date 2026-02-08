@@ -1,6 +1,7 @@
 #pragma once
 
 #include "commrat/registry_mailbox.hpp"
+#include "commrat/historical_mailbox.hpp"
 #include "commrat/subscription_messages.hpp"
 #include "commrat/system_registry.hpp"
 #include "commrat/io_spec.hpp"
@@ -283,14 +284,10 @@ private:
     // Normalize InputSpec: ContinuousInput<T> -> Input<T>, keep others as-is
     using InputSpec = NormalizeInput_t<InputSpec_>;
     
-    // Phase 6.4: Multi-input infrastructure validated, Module integration in progress
-    // Manual pattern demonstrated in test_multi_input.cpp (30/30 fusion success)
-    // TODO Phase 6.5-6.9: Full Module integration with tuple<HistoricalMailbox>, multi_input_loop()
-    static_assert(InputCount_v<InputSpec> <= 1,
-                  "Phase 6.4: Multi-input (Inputs<Ts...>) validated but Module integration incomplete. "
-                  "Manual pattern works (see test_multi_input.cpp). Full Module support coming in Phase 6.5-6.9.");
+    // Phase 6.6: Multi-input Module integration in progress
+    // Phase 6.5 complete: InputSource, ModuleConfig extended
     
-    // Helper to extract InputData type from InputSpec
+    // Helper to extract InputData type from InputSpec (single input)
     template<typename T>
     struct ExtractInputData {
         using type = void;
@@ -300,6 +297,26 @@ private:
     struct ExtractInputData<Input<T>> {
         using type = T;
     };
+    
+    // Helper to extract input types tuple from InputSpec
+    template<typename T>
+    struct ExtractInputTypes {
+        using type = std::tuple<>;  // No inputs
+    };
+    
+    template<typename T>
+    struct ExtractInputTypes<Input<T>> {
+        using type = std::tuple<T>;  // Single input
+    };
+    
+    template<typename... Ts>
+    struct ExtractInputTypes<Inputs<Ts...>> {
+        using type = std::tuple<Ts...>;  // Multi-input
+    };
+    
+    using InputTypesTuple = typename ExtractInputTypes<InputSpec>::type;
+    static constexpr size_t InputCount = std::tuple_size_v<InputTypesTuple>;
+    static constexpr bool has_multi_input = InputCount > 1;
     
     // Helper to extract OutputData type from OutputSpec
     template<typename T>
@@ -389,8 +406,27 @@ private:
 protected:
     ModuleConfig config_;
     CmdMailbox cmd_mailbox_;    // base + 0: Receives user commands
-    WorkMailbox work_mailbox_;  // base + 1: Handles subscription protocol
-    std::optional<DataMailbox> data_mailbox_;  // base + 2: Receives input data (only for ContinuousInput)
+    WorkMailbox work_mailbox_;  // base + 16: Handles subscription protocol
+    
+    // Phase 6.6: Multi-input support
+    // Single-input mode (backward compatible)
+    std::optional<DataMailbox> data_mailbox_;  // base + 32: Receives input data (only for single ContinuousInput)
+    
+    // Multi-input mode (Phase 6.6) - one HistoricalMailbox per input type
+    // Tuple index corresponds to position in Inputs<T1, T2, ...>
+    // Example: Inputs<IMU, GPS> → tuple<HistoricalMailbox<..., IMU>, HistoricalMailbox<..., GPS>>
+    // Only populated if has_multi_input == true
+    using HistoricalMailboxTuple = std::tuple<>;  // Will be specialized below
+    std::optional<HistoricalMailboxTuple> input_mailboxes_;
+    
+    // Subscription tracking (Phase 6.6)
+    struct SubscriptionState {
+        bool subscribed{false};
+        bool reply_received{false};
+        uint32_t actual_period_ms{0};
+    };
+    std::vector<SubscriptionState> input_subscriptions_;  // One per input source
+    std::mutex subscription_mutex_;
     
     std::atomic<bool> running_;
     
