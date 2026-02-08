@@ -9,7 +9,7 @@
  * - Tolerance-based matching
  */
 
-#include <commrat/historical_mailbox.hpp>
+#include <commrat/mailbox/historical_mailbox.hpp>
 #include <commrat/commrat.hpp>
 #include <iostream>
 #include <vector>

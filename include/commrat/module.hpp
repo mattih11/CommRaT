@@ -1,6 +1,6 @@
 #pragma once
 
-#include "commrat/mailbox.hpp"
+#include "commrat/mailbox/mailbox.hpp"
 #include "commrat/messages.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/platform/threading.hpp"
