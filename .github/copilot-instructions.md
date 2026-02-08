@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on top of TiMS (TIMS Interprocess Message System). It provides a modern, type-safe, compile-time message passing system with zero runtime overhead.
 
-**Current Status**: Phase 5.3 In Progress (Multi-output signature generation complete, tests added)  
-**Next Evolution**: Phase 5.4 - Testing and examples, then Phase 6 - Multi-input with synchronized getData
+**Current Status**: Phase 5.3 COMPLETE! Multi-output fully functional with type-specific filtering  
+**Next Evolution**: Phase 5.4 - Documentation and examples, then Phase 6 - Multi-input with synchronized getData
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, registries, and type safety computed at compile time
@@ -272,6 +272,57 @@ protected:
     }
 };
 ```
+
+**Key Insights:**
+- **Virtual dispatch required**: process_continuous must be virtual for derived class overrides to work
+- **Template shadowing pitfall**: Template functions in derived classes shadow base class virtuals - avoid this
+- **Void reference problem**: Cannot have `const void&` parameter → use helper base class specialization
+- **Override keyword mandatory**: Use `override` for compile-time validation that virtual function exists in base
+- **Helper outside Module**: Place ContinuousProcessorBase outside Module class for clean inheritance
+
+### Type-Specific Multi-Output Publishing (Phase 5.3)
+
+**Problem**: Multi-output producers generate multiple message types. How do subscribers receive only their desired type?
+
+**Solution**: Type filtering based on subscriber base address
+
+```cpp
+// Subscriber's base address encodes their expected message type
+// Format: [data_type_id_low16:16][system_id:8][instance_id:8]
+
+// Extract subscriber's expected type from address
+uint16_t subscriber_type_id_low = extract_message_type_from_address(subscriber_base_addr);
+
+// Only send outputs that match subscriber's type
+template<typename OutputType>
+void send_if_type_matches(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
+    constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
+    constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
+    
+    if (output_type_id_low == subscriber_type_id_low) {
+        cmd_mailbox_.send(output, dest_mailbox);  // Type matches - deliver!
+    }
+}
+```
+
+**Multi-Output Producer Subscription**:
+
+```cpp
+// Problem: Producer's base address uses FIRST output type (TemperatureData)
+// But PressureData subscriber calculates address using PressureData → wrong address!
+
+// Solution: source_primary_output_type_id in ModuleConfig
+ModuleConfig pressure_receiver_config{
+    .name = "PressureReceiver",
+    .system_id = 30,
+    .instance_id = 1,
+    .source_system_id = 10,
+    .source_instance_id = 1,
+    .source_primary_output_type_id = MyApp::get_message_id<TemperatureData>()  // Producer's primary type
+};
+```
+
+**Result**: Clean type-specific delivery - each subscriber receives ONLY their subscribed message type!
 
 **Key Insights:**
 - **Virtual dispatch required**: process_continuous must be virtual for derived class overrides to work

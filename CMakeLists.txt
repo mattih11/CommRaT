@@ -65,6 +65,10 @@ add_executable(example_multi_output_runtime examples/multi_output_runtime.cpp)
 target_link_libraries(example_multi_output_runtime PRIVATE commrat)
 target_include_directories(example_multi_output_runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+add_executable(example_sensor_fusion examples/multi_output_sensor_fusion.cpp)
+target_link_libraries(example_sensor_fusion PRIVATE commrat)
+target_include_directories(example_sensor_fusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 # Test applications
 add_executable(test_io_spec test/test_io_spec.cpp)
 target_link_libraries(test_io_spec PRIVATE commrat)
