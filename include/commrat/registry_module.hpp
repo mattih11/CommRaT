@@ -531,8 +531,12 @@ public:
         // Give threads time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         
-        // Subscribe to source if continuous input
-        if constexpr (has_continuous_input) {
+        // Subscribe to source(s)
+        if constexpr (has_multi_input) {
+            // Phase 6.6: Multi-input subscription
+            subscribe_to_all_sources();
+        } else if constexpr (has_continuous_input) {
+            // Single-input (backward compatible)
             if (config_.source_system_id && config_.source_instance_id) {
                 subscribe_to_source(*config_.source_system_id, *config_.source_instance_id);
             }
@@ -674,12 +678,43 @@ template<typename... Ts>
 void publish_multi_outputs(std::tuple<Ts...>& outputs) {
     publish_multi_outputs_impl(outputs, std::index_sequence_for<Ts...>{});
 }    // ========================================================================
-    // Subscription Protocol (ContinuousInput)
+    // Subscription Protocol (ContinuousInput and Multi-Input)
     // ========================================================================
     
-    void subscribe_to_source(uint8_t source_system_id, uint8_t source_instance_id) {
-        static_assert(has_continuous_input, "subscribe_to_source() only available for continuous input modules");
+    // Phase 6.6: Multi-input subscription
+    void subscribe_to_all_sources() {
+        static_assert(has_continuous_input || has_multi_input, 
+                      "subscribe_to_all_sources() only for continuous or multi-input modules");
         
+        if constexpr (has_multi_input) {
+            // Multi-input: subscribe to each source in input_sources
+            if (config_.input_sources.empty()) {
+                std::cerr << "[" << config_.name << "] ERROR: Multi-input module but input_sources is empty!\n";
+                return;
+            }
+            
+            std::lock_guard<std::mutex> lock(subscription_mutex_);
+            input_subscriptions_.resize(config_.input_sources.size());
+            
+            for (size_t i = 0; i < config_.input_sources.size(); ++i) {
+                const auto& source = config_.input_sources[i];
+                subscribe_to_source_impl(source.system_id, source.instance_id, 
+                                          source.source_primary_output_type_id, i);
+            }
+        } else if constexpr (has_continuous_input) {
+            // Single-input: use legacy config fields
+            if (config_.source_system_id && config_.source_instance_id) {
+                input_subscriptions_.resize(1);
+                subscribe_to_source_impl(*config_.source_system_id, *config_.source_instance_id,
+                                          config_.source_primary_output_type_id, 0);
+            }
+        }
+    }
+    
+    // Internal implementation: send SubscribeRequest to one source
+    void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
+                                   std::optional<uint32_t> source_primary_output_type_id,
+                                   size_t source_index) {
         // Calculate our base address to include in request
         uint32_t our_base_addr = calculate_base_address(config_.system_id, config_.instance_id);
         
@@ -689,27 +724,29 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
         };
         
         // Calculate source module's WORK mailbox address
-        // For multi-output producers, use the provided primary type ID
-        // Otherwise, use InputData type (works for single-output producers)
-        uint32_t source_base;
-        uint32_t source_work_mbx;
+        uint32_t source_data_type_id;
         
-        if constexpr (has_continuous_input) {
-            uint32_t source_data_type_id;
-            if (config_.source_primary_output_type_id) {
-                // Multi-output producer: use the provided primary output type ID
-                source_data_type_id = *config_.source_primary_output_type_id;
-            } else {
-                // Single-output producer: calculate from InputData type
-                source_data_type_id = UserRegistry::template get_message_id<InputData>();
-            }
-            uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-            source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
-            source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        if (source_primary_output_type_id) {
+            // Multi-output producer: use the provided primary output type ID
+            source_data_type_id = *source_primary_output_type_id;
+        } else if constexpr (has_multi_input) {
+            // Multi-input: use the input type at source_index
+            source_data_type_id = get_input_type_id_at_index(source_index);
+        } else if constexpr (has_continuous_input) {
+            // Single-input: use InputData type
+            source_data_type_id = UserRegistry::template get_message_id<InputData>();
+        } else {
+            static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");
+            return;
         }
         
-        std::cout << "[" << config_.name << "] Sending SubscribeRequest to source WORK mailbox " 
-                  << source_work_mbx << "\n";
+        uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
+                                (source_system_id << 8) | source_instance_id;
+        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        
+        std::cout << "[" << config_.name << "] Sending SubscribeRequest[" << source_index 
+                  << "] to source WORK mailbox " << source_work_mbx << "\n";
         
         // Retry a few times in case the producer's mailbox isn't ready yet
         int max_retries = 5;
@@ -717,7 +754,13 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
             // Send subscribe request from work mailbox (SystemRegistry messages)
             auto result = work_mailbox_.send(request, source_work_mbx);
             if (result) {
-                std::cout << "[" << config_.name << "] SubscribeRequest sent successfully\n";
+                std::cout << "[" << config_.name << "] SubscribeRequest[" << source_index 
+                          << "] sent successfully\n";
+                // Mark subscription as sent (reply not yet received)
+                if (source_index < input_subscriptions_.size()) {
+                    input_subscriptions_[source_index].subscribed = true;
+                    input_subscriptions_[source_index].reply_received = false;
+                }
                 return;
             }
             
@@ -728,8 +771,32 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
             }
         }
         
-        std::cout << "[" << config_.name << "] Failed to send SubscribeRequest after " 
-                  << max_retries << " attempts!\n";
+        std::cout << "[" << config_.name << "] Failed to send SubscribeRequest[" << source_index
+                  << "] after " << max_retries << " attempts!\n";
+    }
+    
+    // Helper: Get message ID for input type at runtime index
+    template<size_t... Is>
+    uint32_t get_input_type_id_at_index_impl(size_t index, std::index_sequence<Is...>) const {
+        uint32_t result = 0;
+        ((index == Is ? (result = UserRegistry::template get_message_id<std::tuple_element_t<Is, InputTypesTuple>>(), true) : false) || ...);
+        return result;
+    }
+    
+    uint32_t get_input_type_id_at_index(size_t index) const {
+        if constexpr (has_multi_input) {
+            return get_input_type_id_at_index_impl(index, std::make_index_sequence<InputCount>{});
+        } else {
+            return UserRegistry::template get_message_id<InputData>();
+        }
+    }
+    
+    // Legacy single-input wrapper (backward compatible)
+    void subscribe_to_source(uint8_t source_system_id, uint8_t source_instance_id) {
+        static_assert(has_continuous_input, "subscribe_to_source() only available for continuous input modules");
+        input_subscriptions_.resize(1);
+        subscribe_to_source_impl(source_system_id, source_instance_id, 
+                                  config_.source_primary_output_type_id, 0);
     }
     
     void unsubscribe_from_source(uint8_t source_system_id, uint8_t source_instance_id) {
@@ -783,6 +850,24 @@ void publish_multi_outputs(std::tuple<Ts...>& outputs) {
             
             uint32_t subscriber_work_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::WORK);
             work_mailbox_.send(reply, subscriber_work_mbx);
+        }
+    }
+    
+    void handle_subscribe_reply(const SubscribeReplyType& reply) {
+        std::lock_guard<std::mutex> lock(subscription_mutex_);
+        
+        // Phase 6.6: Mark subscription as complete
+        // For now, mark the first non-replied subscription
+        // TODO: Need to track which reply corresponds to which source
+        for (auto& sub : input_subscriptions_) {
+            if (sub.subscribed && !sub.reply_received) {
+                sub.reply_received = true;
+                sub.actual_period_ms = reply.actual_period_ms;
+                std::cout << "[" << config_.name << "] SubscribeReply received: "
+                          << (reply.success ? "SUCCESS" : "FAILED")
+                          << ", actual_period_ms=" << reply.actual_period_ms << "\n";
+                return;
+            }
         }
     }
     
@@ -893,6 +978,9 @@ private:
                 if constexpr (std::is_same_v<MsgType, SubscribeRequestType>) {
                     std::cout << "[" << config_.name << "] Handling SubscribeRequest\n";
                     handle_subscribe_request(msg);
+                } else if constexpr (std::is_same_v<MsgType, SubscribeReplyType>) {
+                    std::cout << "[" << config_.name << "] Handling SubscribeReply\n";
+                    handle_subscribe_reply(msg);
                 } else if constexpr (std::is_same_v<MsgType, UnsubscribeRequestType>) {
                     std::cout << "[" << config_.name << "] Handling UnsubscribeRequest\n";
                     handle_unsubscribe_request(msg);
