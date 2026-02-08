@@ -103,8 +103,8 @@ struct ModuleConfig {
  * Timestamps are stored ONLY in TimsHeader.timestamp, never in payload.
  * Module automatically wraps payloads in TimsMessage and sets header.timestamp:
  * - PeriodicInput/LoopInput: timestamp = Time::now() (data generation time)
- * - Multi-input: timestamp = primary_input ReceivedMessage.timestamp (sync point)
- * - ContinuousInput: timestamp = input ReceivedMessage.timestamp (propagation)
+ * - Multi-input: timestamp = primary_input.header.timestamp (sync point)
+ * - ContinuousInput: timestamp = input.header.timestamp (propagation)
  * 
  * Users never deal with timestamps - messages are clean data structures.
  */
@@ -1497,23 +1497,13 @@ private:
             if (result) {
                 // Phase 6.10: Populate metadata BEFORE process call
                 // Single continuous input always uses index 0
-                // Create TimsMessage wrapper to extract header metadata
-                TimsMessage<InputData> tims_wrapper{
-                    .header = TimsHeader{
-                        .msg_type = UserRegistry::template get_message_id<InputData>(),
-                        .msg_size = 0,  // Not needed for metadata
-                        .timestamp = result->timestamp,
-                        .seq_number = 0,  // TODO: Extract from result if available
-                        .flags = 0
-                    },
-                    .payload = result->message
-                };
-                update_input_metadata(0, tims_wrapper, true);  // Always new data for continuous
+                // result is TimsMessage<InputData> - use directly
+                update_input_metadata(0, result.value(), true);  // Always new data for continuous
                 
-                auto output = process_continuous_dispatch(result->message);
+                auto output = process_continuous_dispatch(result->payload);
                 // Phase 6.10: Use input timestamp from header (data validity time)
-                // ReceivedMessage.timestamp comes from TimsHeader, not payload
-                auto tims_msg = create_tims_message(std::move(output), result->timestamp);
+                // TimsMessage.header.timestamp is the authoritative timestamp
+                auto tims_msg = create_tims_message(std::move(output), result->header.timestamp);
                 publish_tims_message(tims_msg);
             }
         }
@@ -1557,19 +1547,8 @@ private:
             
             // Phase 6.10: Populate primary metadata BEFORE gather_all_inputs
             // Primary input always uses index 0 in metadata array
-            // Create TimsMessage wrapper to extract header metadata
-            using PrimaryType = std::tuple_element_t<primary_idx, InputTypesTuple>;
-            TimsMessage<PrimaryType> primary_tims{
-                .header = TimsHeader{
-                    .msg_type = UserRegistry::template get_message_id<PrimaryType>(),
-                    .msg_size = 0,  // Not needed for metadata
-                    .timestamp = primary_result->timestamp,
-                    .seq_number = 0,  // TODO: Extract from ReceivedMessage if available
-                    .flags = 0
-                },
-                .payload = primary_result->message
-            };
-            update_input_metadata(0, primary_tims, true);  // Primary always new data
+            // primary_result is TimsMessage<PrimaryType> - use directly
+            update_input_metadata(0, primary_result.value(), true);  // Primary always new data
             
             // Step 2: Sync all secondary inputs using primary timestamp
             auto all_inputs = gather_all_inputs<primary_idx>(primary_result.value());
@@ -1588,8 +1567,8 @@ private:
             }
             
             // Phase 6.10: Extract primary input timestamp from header (synchronization point)
-            // ReceivedMessage.timestamp comes from TimsHeader, not payload
-            uint64_t primary_timestamp = primary_result->timestamp;
+            // TimsMessage.header.timestamp is the authoritative timestamp
+            uint64_t primary_timestamp = primary_result->header.timestamp;
             
             // Step 3: Call process with all inputs
             if constexpr (has_multi_output) {
@@ -1633,7 +1612,7 @@ private:
             if (receive_count <= 3) {
                 std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
                           << "] received message #" << receive_count 
-                          << ", timestamp=" << result.value().timestamp << "\n";
+                          << ", timestamp=" << result.value().header.timestamp << "\n";
             }
         }
         
@@ -1655,9 +1634,9 @@ private:
     
     // Helper: Receive from primary input mailbox
     template<size_t PrimaryIdx>
-    auto receive_primary_input() -> MailboxResult<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>> {
+    auto receive_primary_input() -> MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>> {
         if (!input_mailboxes_) {
-            return MailboxResult<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>(MailboxError::NotInitialized);
+            return MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>(MailboxError::NotInitialized);
         }
         
         using PrimaryType = std::tuple_element_t<PrimaryIdx, InputTypesTuple>;
@@ -1678,11 +1657,11 @@ private:
         InputTypesTuple all_inputs{};
         
         // Place primary input at its index
-        std::get<PrimaryIdx>(all_inputs) = primary_msg.message;
+        std::get<PrimaryIdx>(all_inputs) = primary_msg.payload;
         
         // Phase 6.10: Sync secondary inputs using getData with primary timestamp from header
-        // ReceivedMessage.timestamp comes from TimsHeader, not payload
-        bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.timestamp, all_inputs);
+        // TimsMessage.header.timestamp is the authoritative timestamp
+        bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.header.timestamp, all_inputs);
         
         if (!all_synced) {
             return std::nullopt;
@@ -1786,9 +1765,9 @@ private:
         while (running_) {
             // Use receive_any with visitor pattern on cmd_mailbox
             // BLOCKING receive - waits indefinitely for user commands
-            auto visitor = [this](auto&& received_msg) {
-                // received_msg is ReceivedMessage<PayloadT>, extract payload
-                auto& msg = received_msg.message;
+            auto visitor = [this](auto&& tims_msg) {
+                // tims_msg is TimsMessage<PayloadT>, extract payload
+                auto& msg = tims_msg.payload;
                 using MsgType = std::decay_t<decltype(msg)>;
                 
                 std::cout << "[" << config_.name << "] Received command in command_loop\n";
@@ -1811,9 +1790,9 @@ private:
             // Use receive_any with visitor pattern on work_mailbox
             // BLOCKING receive - waits indefinitely for subscription messages
             std::cout << "[" << config_.name << "] work_loop: waiting for message...\n" << std::flush;
-            auto visitor = [this](auto&& received_msg) {
-                // received_msg is ReceivedMessage<PayloadT>, extract payload
-                auto& msg = received_msg.message;
+            auto visitor = [this](auto&& tims_msg) {
+                // tims_msg is TimsMessage<PayloadT>, extract payload
+                auto& msg = tims_msg.payload;
                 using MsgType = std::decay_t<decltype(msg)>;
                 
                 // Handle subscription protocol

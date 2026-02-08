@@ -17,32 +17,27 @@
 // ============================================================================
 
 struct IMUData {
-    uint64_t timestamp{0};
     float accel_x{0.0f}, accel_y{0.0f}, accel_z{0.0f};
     float gyro_x{0.0f}, gyro_y{0.0f}, gyro_z{0.0f};
 };
 
 struct GPSData {
-    uint64_t timestamp{0};
     double latitude{0.0};
     double longitude{0.0};
     float altitude{0.0f};
 };
 
 struct LidarData {
-    uint64_t timestamp{0};
     float distance{0.0f};
     uint32_t intensity{0};
 };
 
 struct FusedData {
-    uint64_t timestamp{0};
     float position_x{0.0f}, position_y{0.0f}, position_z{0.0f};
     float velocity_x{0.0f}, velocity_y{0.0f}, velocity_z{0.0f};
 };
 
 struct DiagnosticsData {
-    uint64_t timestamp{0};
     float sync_quality{0.0f};
     uint32_t sync_failures{0};
 };
@@ -74,7 +69,6 @@ protected:
     FusedData process(const IMUData& imu, const GPSData& gps) override {
         // Should compile - primary is first input
         return FusedData{
-            .timestamp = imu.timestamp,
             .position_x = static_cast<float>(gps.latitude),
             .position_y = static_cast<float>(gps.longitude)
         };
@@ -97,7 +91,6 @@ protected:
     FusedData process(const IMUData& imu, const GPSData& gps) override {
         // Should compile - primary is second input
         return FusedData{
-            .timestamp = gps.timestamp,
             .position_x = static_cast<float>(gps.latitude),
             .velocity_x = imu.accel_x
         };
@@ -120,7 +113,6 @@ protected:
     FusedData process(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {
         // Should compile - GPS drives rate, IMU and Lidar sync via getData
         return FusedData{
-            .timestamp = gps.timestamp,
             .position_x = static_cast<float>(gps.latitude),
             .position_z = lidar.distance,
             .velocity_x = imu.accel_x
@@ -144,7 +136,6 @@ protected:
     FusedData process(const IMUData& imu, const GPSData& gps) override {
         // Should compile - first input (IMU) implicitly primary
         return FusedData{
-            .timestamp = imu.timestamp,
             .velocity_y = imu.accel_y
         };
     }
@@ -166,11 +157,9 @@ protected:
     void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, 
                  FusedData& fused, DiagnosticsData& diag) override {
         // Should compile - multi-input + multi-output signature
-        fused.timestamp = imu.timestamp;
         fused.position_x = static_cast<float>(gps.latitude);
         fused.position_z = lidar.distance;
         
-        diag.timestamp = imu.timestamp;
         diag.sync_quality = 0.95f;
         diag.sync_failures = 0;
     }

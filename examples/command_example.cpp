@@ -69,10 +69,7 @@ protected:
                   << " (offset=" << calibration_offset_ << ")\n";
         
         return TemperatureData{
-            .temperature_celsius = calibrated_temp,
-            .timestamp_ms = static_cast<uint64_t>(
-                std::chrono::system_clock::now().time_since_epoch().count()
-            )
+            .temperature_celsius = calibrated_temp
         };
     }
     

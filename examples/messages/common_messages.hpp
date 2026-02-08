@@ -14,7 +14,6 @@ namespace example_messages {
 // ============================================================================
 
 struct StatusData {
-    uint64_t timestamp{0};
     uint32_t counter{0};
     float cpu_load{0.0f};
     float memory_usage{0.0f};
@@ -25,14 +24,12 @@ struct CounterData {
 };
 
 struct TemperatureData {
-    uint64_t timestamp{0};
     uint32_t sensor_id{0};
     float temperature_c{0.0f};
     float confidence{0.0f};
 };
 
 struct PoseData {
-    uint64_t timestamp{0};
     float x{0.0f};
     float y{0.0f};
     float theta{0.0f};

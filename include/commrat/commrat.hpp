@@ -98,6 +98,18 @@ public:
      */
     template<typename PayloadT>
     using Mailbox = RegistryMailbox<Registry>;
+    
+    /**
+     * @brief HistoricalMailbox template - mailbox with time-synchronized getData()
+     * 
+     * For modules that need to synchronize inputs by timestamp (Phase 6):
+     *   MyApp::HistoricalMailbox<100> history{config, tolerance};
+     *   auto data = history.getData<SensorData>(timestamp);
+     * 
+     * @tparam HistorySize Number of messages to buffer per type
+     */
+    template<std::size_t HistorySize>
+    using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;
 };
 
 } // namespace commrat

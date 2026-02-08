@@ -16,7 +16,7 @@
  * - Checker receives messages with correct timestamps
  * 
  * ARCHITECTURE NOTE:
- * This test requires access to ReceivedMessage.timestamp in process_continuous().
+ * This test uses Phase 6.10 metadata accessors to verify timestamp propagation.
  * Current API only provides payload: process_continuous(const T& input)
  * Solution needed: Accessor function to get last received message metadata
  */

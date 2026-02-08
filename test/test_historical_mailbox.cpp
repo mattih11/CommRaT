@@ -1,6 +1,10 @@
 /**
  * @file test_historical_mailbox.cpp
- * @brief Test suite for HistoricalMailbox (Phase 6.3)
+ * @brief Test suite for HistoricalMailbox (Phase 6.3 + Phase 6.10)
+ * 
+ * Phase 6.10: Timestamps stored ONLY in TimsHeader, not in payloads.
+ * HistoricalMailbox automatically extracts TimsMessage.header.timestamp
+ * and stores in history buffer for getData() synchronization.
  */
 
 #include <commrat/historical_mailbox.hpp>
@@ -9,15 +13,13 @@
 #include <thread>
 #include <atomic>
 
-// Test message types
+// Test message types (NO timestamp fields - Phase 6.10)
 struct SensorData {
-    uint64_t timestamp;
     uint32_t sensor_id;
     float value;
 };
 
 struct ControlData {
-    uint64_t timestamp;
     float setpoint;
 };
 
@@ -30,7 +32,8 @@ using TestRegistry = commrat::MessageRegistry<
 using namespace commrat;
 
 int main() {
-    std::cout << "=== Phase 6.3 HistoricalMailbox Tests ===\n\n";
+    std::cout << "=== Phase 6.3/6.10 HistoricalMailbox Tests ===\n";
+    std::cout << "Architecture: Timestamps in TimsHeader only\n\n";
     
     // Test 1: Basic construction
     std::cout << "Test 1: Construction and initialization\n";
@@ -43,11 +46,11 @@ int main() {
         
         HistoricalMailbox<TestRegistry, 50> mailbox(config, Milliseconds(50));
         
-        std::cout << "  PASS: HistoricalMailbox constructed successfully\n";
+        std::cout << "  ✓ HistoricalMailbox constructed successfully\n";
     }
     
     // Test 2: Receive and automatic history storage
-    std::cout << "\nTest 2: Receive with automatic history storage\n";
+    std::cout << "\nTest 2: Receive with automatic history storage (header timestamp)\n";
     {
         MailboxConfig config1{
             .mailbox_id = 101,
@@ -67,52 +70,53 @@ int main() {
         sender_mbx.start();
         receiver_mbx.start();
         
-        // Send a message
-        SensorData sensor{1000, 42, 25.5f};
+        // Send a message (TiMS assigns header timestamp)
+        SensorData sensor{42, 25.5f};
         auto send_result = sender_mbx.send(sensor, 102);
         
         if (!send_result) {
-            std::cerr << "  FAIL: Send failed\n";
+            std::cerr << "  ✗ FAIL: Send failed\n";
             return 1;
         }
         
-        // Receive should store in history
+        // Receive should store in history with TiMS header timestamp
         auto recv_result = receiver_mbx.receive<SensorData>();
         
         if (!recv_result) {
-            std::cerr << "  FAIL: Receive failed\n";
+            std::cerr << "  ✗ FAIL: Receive failed\n";
             return 1;
         }
         
-        // Verify received data
-        if (recv_result.value().message.timestamp != 1000 ||
-            recv_result.value().message.sensor_id != 42) {
-            std::cerr << "  FAIL: Received data mismatch\n";
+        // Verify received data (TimsMessage.header.timestamp from TimsHeader)
+        if (recv_result.value().payload.sensor_id != 42) {
+            std::cerr << "  ✗ FAIL: Received data mismatch\n";
             return 1;
         }
         
-        // Verify stored in history - use TIMS header timestamp (not payload timestamp)
-        uint64_t tims_timestamp = recv_result.value().timestamp;
+        // Verify stored in history - use TimsMessage.header.timestamp (from TimsHeader)
+        uint64_t tims_timestamp = recv_result.value().header.timestamp;
+        std::cout << "  TiMS assigned timestamp: " << tims_timestamp << " ns\n";
+        
         auto history_result = receiver_mbx.getData<SensorData>(tims_timestamp);
         
         if (!history_result) {
-            std::cerr << "  FAIL: getData failed - message not in history\n";
+            std::cerr << "  ✗ FAIL: getData failed - message not in history\n";
             return 1;
         }
         
-        if (history_result->payload.sensor_id != 42) {
-            std::cerr << "  FAIL: History data mismatch\n";
+        if (history_result->payload.sensor_id != 42 || history_result->payload.value != 25.5f) {
+            std::cerr << "  ✗ FAIL: History data mismatch\n";
             return 1;
         }
         
-        std::cout << "  PASS: Receive automatically stores in history\n";
+        std::cout << "  ✓ Receive automatically stores with TimsHeader.timestamp\n";
         
         sender_mbx.stop();
         receiver_mbx.stop();
     }
     
-    // Test 3: getData with NEAREST mode
-    std::cout << "\nTest 3: getData with multiple messages (NEAREST)\n";
+    // Test 3: getData with NEAREST mode (using TiMS timestamps)
+    std::cout << "\nTest 3: getData with multiple messages (NEAREST, TiMS timestamps)\n";
     {
         MailboxConfig config1{
             .mailbox_id = 201,
@@ -132,42 +136,44 @@ int main() {
         producer.start();
         consumer.start();
         
-        // Send messages with spacing between them (TIMS assigns timestamps)
+        // Send messages with time spacing (TiMS assigns timestamps)
         for (int i = 0; i < 5; ++i) {
-            SensorData sensor{0, static_cast<uint32_t>(i), static_cast<float>(i * 10.0f)};
+            SensorData sensor{static_cast<uint32_t>(i), static_cast<float>(i * 10.0f)};
             producer.send(sensor, 202);
-            Time::sleep(Milliseconds(100));  // 100ms spacing
+            Time::sleep(Milliseconds(100));  // 100ms spacing for distinct timestamps
         }
         
-        // Receive all messages to populate history and capture TIMS timestamps
+        // Receive all messages to populate history and capture TiMS timestamps
         std::vector<uint64_t> tims_timestamps;
         for (int i = 0; i < 5; ++i) {
             auto result = consumer.receive<SensorData>();
             if (!result) {
-                std::cerr << "  FAIL: Failed to receive message " << i << "\n";
+                std::cerr << "  ✗ FAIL: Failed to receive message " << i << "\n";
                 return 1;
             }
-            tims_timestamps.push_back(result->timestamp);
+            tims_timestamps.push_back(result->header.timestamp);
         }
+        
+        std::cout << "  Captured TiMS timestamps (ns): ";
+        for (auto ts : tims_timestamps) std::cout << ts << " ";
+        std::cout << "\n";
         
         // Check timestamp range in buffer
         auto range = consumer.getTimestampRange<SensorData>();
+        std::cout << "  Timestamp range: [" << range.first << ", " << range.second << "]\n";
         
         // Test getData with timestamps between messages
-        // Query for midpoint between first and second message
         uint64_t midpoint1 = (tims_timestamps[0] + tims_timestamps[1]) / 2;
         auto result1 = consumer.getData<SensorData>(midpoint1);
         if (!result1) {
-            std::cerr << "  FAIL: getData(midpoint=" << midpoint1 << ") returned nullopt\n";
-            std::cerr << "  Range: [" << range.first << ", " << range.second << "]\n";
-            std::cerr << "  Timestamps: [" << tims_timestamps[0] << ", " << tims_timestamps[1] << "]\n";
+            std::cerr << "  ✗ FAIL: getData(midpoint=" << midpoint1 << ") returned nullopt\n";
             return 1;
         }
         
         // Verify it's one of the two nearest messages
         if (result1->header.timestamp != tims_timestamps[0] && 
             result1->header.timestamp != tims_timestamps[1]) {
-            std::cerr << "  FAIL: getData returned wrong message (timestamp=" 
+            std::cerr << "  ✗ FAIL: getData returned wrong message (timestamp=" 
                       << result1->header.timestamp << ")\n";
             return 1;
         }
@@ -176,19 +182,17 @@ int main() {
         uint64_t midpoint2 = (tims_timestamps[3] + tims_timestamps[4]) / 2;
         auto result2 = consumer.getData<SensorData>(midpoint2);
         if (!result2) {
-            std::cerr << "  FAIL: getData(midpoint2=" << midpoint2 << ") returned nullopt\n";
+            std::cerr << "  ✗ FAIL: getData(midpoint2=" << midpoint2 << ") returned nullopt\n";
             return 1;
         }
         
-        // Verify it's one of the two nearest messages
         if (result2->header.timestamp != tims_timestamps[3] && 
             result2->header.timestamp != tims_timestamps[4]) {
-            std::cerr << "  FAIL: getData returned wrong message (timestamp=" 
-                      << result2->header.timestamp << ")\n";
+            std::cerr << "  ✗ FAIL: getData returned wrong message\n";
             return 1;
         }
         
-        std::cout << "  PASS: getData NEAREST mode working correctly\n";
+        std::cout << "  ✓ getData NEAREST mode working with TiMS timestamps\n";
         
         producer.stop();
         consumer.stop();
@@ -215,39 +219,39 @@ int main() {
         source.start();
         sink.start();
         
-        // Send message (TIMS assigns timestamp)
-        SensorData sensor{0, 1, 100.0f};
+        // Send message (TiMS assigns timestamp)
+        SensorData sensor{1, 100.0f};
         source.send(sensor, 302);
         
         auto recv_result = sink.receive<SensorData>();
         if (!recv_result) {
-            std::cerr << "  FAIL: Failed to receive\n";
+            std::cerr << "  ✗ FAIL: Failed to receive\n";
             return 1;
         }
-        uint64_t msg_timestamp = recv_result->timestamp;
+        uint64_t msg_timestamp = recv_result->header.timestamp;
         
         // Within tolerance (10ms away, tolerance is 20ms)
         auto within = sink.getData<SensorData>(msg_timestamp + 10'000'000);  // +10ms
         if (!within) {
-            std::cerr << "  FAIL: Should find message within tolerance\n";
+            std::cerr << "  ✗ FAIL: Should find message within tolerance\n";
             return 1;
         }
         
         // Outside tolerance (30ms away, tolerance is 20ms)
         auto outside = sink.getData<SensorData>(msg_timestamp + 30'000'000);  // +30ms
         if (outside) {
-            std::cerr << "  FAIL: Should NOT find message outside tolerance\n";
+            std::cerr << "  ✗ FAIL: Should NOT find message outside tolerance\n";
             return 1;
         }
         
         // Override tolerance (allow 50ms)
         auto override_tolerance = sink.getData<SensorData>(msg_timestamp + 30'000'000, Milliseconds(50));
         if (!override_tolerance) {
-            std::cerr << "  FAIL: Should find message with overridden tolerance\n";
+            std::cerr << "  ✗ FAIL: Should find message with overridden tolerance\n";
             return 1;
         }
         
-        std::cout << "  PASS: Tolerance correctly enforced\n";
+        std::cout << "  ✓ Tolerance correctly enforced\n";
         
         source.stop();
         sink.stop();
@@ -275,8 +279,8 @@ int main() {
         receiver.start();
         
         // Send both message types
-        SensorData sensor{2000, 10, 50.0f};
-        ControlData control{2050, 75.0f};
+        SensorData sensor{10, 50.0f};
+        ControlData control{75.0f};
         
         sender.send(sensor, 402);
         sender.send(control, 402);
@@ -286,25 +290,30 @@ int main() {
         auto control_recv = receiver.receive<ControlData>();
         
         if (!sensor_recv || !control_recv) {
-            std::cerr << "  FAIL: Failed to receive messages\n";
+            std::cerr << "  ✗ FAIL: Failed to receive messages\n";
             return 1;
         }
         
-        // getData for each type
-        auto sensor_get = receiver.getData<SensorData>(2000);
-        auto control_get = receiver.getData<ControlData>(2050);
+        // getData for each type using their TiMS timestamps
+        auto sensor_get = receiver.getData<SensorData>(sensor_recv->header.timestamp);
+        auto control_get = receiver.getData<ControlData>(control_recv->header.timestamp);
         
         if (!sensor_get || !control_get) {
-            std::cerr << "  FAIL: getData failed for one of the types\n";
+            std::cerr << "  ✗ FAIL: getData failed for one of the types\n";
             return 1;
         }
         
-        if (sensor_get->payload.sensor_id != 10 || control_get->payload.setpoint != 75.0f) {
-            std::cerr << "  FAIL: Data mismatch\n";
+        if (sensor_get->payload.sensor_id != 10 || sensor_get->payload.value != 50.0f) {
+            std::cerr << "  ✗ FAIL: SensorData mismatch\n";
             return 1;
         }
         
-        std::cout << "  PASS: Multiple message types handled correctly\n";
+        if (control_get->payload.setpoint != 75.0f) {
+            std::cerr << "  ✗ FAIL: ControlData mismatch\n";
+            return 1;
+        }
+        
+        std::cout << "  ✓ Multiple message types handled correctly\n";
         
         sender.stop();
         receiver.stop();
@@ -337,49 +346,49 @@ int main() {
         // Empty buffer
         auto [old1, new1] = receiver.getTimestampRange<SensorData>();
         if (old1 != 0 || new1 != 0) {
-            std::cerr << "  FAIL: Empty buffer should return {0, 0}\n";
+            std::cerr << "  ✗ FAIL: Empty buffer should return {0, 0}\n";
             return 1;
         }
         
         // Send and receive 3 messages to populate history
         std::vector<uint64_t> timestamps;
         for (int i = 0; i < 3; ++i) {
-            SensorData sensor{0, static_cast<uint32_t>(i), static_cast<float>(i)};
+            SensorData sensor{static_cast<uint32_t>(i), static_cast<float>(i)};
             sender.send(sensor, 502);
+            Time::sleep(Milliseconds(10));  // Ensure distinct timestamps
         }
         
         for (int i = 0; i < 3; ++i) {
             auto result = receiver.receive<SensorData>();
             if (!result) {
-                std::cerr << "  FAIL: Failed to receive message " << i << "\n";
+                std::cerr << "  ✗ FAIL: Failed to receive message " << i << "\n";
                 return 1;
             }
-            timestamps.push_back(result->timestamp);
+            timestamps.push_back(result->header.timestamp);
         }
         
-        // Check range matches actual received timestamps
+        // Check range matches actual received TiMS timestamps
         auto [oldest, newest] = receiver.getTimestampRange<SensorData>();
         if (oldest != timestamps[0] || newest != timestamps[2]) {
-            std::cerr << "  FAIL: Range should be [" << timestamps[0] << ", " << timestamps[2] 
+            std::cerr << "  ✗ FAIL: Range should be [" << timestamps[0] << ", " << timestamps[2] 
                       << "], got [" << oldest << ", " << newest << "]\n";
             return 1;
         }
         
-        std::cout << "  PASS: Timestamp range tracking working\n";
+        std::cout << "  ✓ Timestamp range tracking working\n";
         
         sender.stop();
         receiver.stop();
     }
     
-    std::cout << "\n=== All Phase 6.3 Tests Passed! ===\n\n";
-    std::cout << "Phase 6.3 Complete: HistoricalMailbox ready\n";
-    std::cout << "Features validated:\n";
+    std::cout << "\n=== All Phase 6.3/6.10 Tests Passed! ===\n\n";
+    std::cout << "HistoricalMailbox validated:\n";
     std::cout << "  ✓ Automatic history storage on receive\n";
+    std::cout << "  ✓ TimsHeader.timestamp used (NO payload timestamps)\n";
     std::cout << "  ✓ getData with NEAREST interpolation\n";
     std::cout << "  ✓ Tolerance-based matching\n";
     std::cout << "  ✓ Multiple message types per mailbox\n";
     std::cout << "  ✓ Timestamp range tracking\n\n";
-    std::cout << "Next: Implement Multi-input Module base class (Phase 6.4)\n";
     
     return 0;
 }

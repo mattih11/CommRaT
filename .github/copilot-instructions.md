@@ -944,7 +944,6 @@ if (!result) {
 - Static analysis for real-time safety
 
 ### Technical Debt
-- ReceivedMessage<T> should be replaced with TimsMessage<T> (cleaner architecture)
 - Command dispatch (on_command overloads) needs improvement
 - Legacy MessageService being phased out
 - Type-based metadata accessors need full tuple unpacking (currently limited to 2 types)

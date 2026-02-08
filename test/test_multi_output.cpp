@@ -14,17 +14,14 @@ using namespace commrat;
 
 // Test message types
 struct DataA {
-    uint64_t timestamp;
     float value_a;
 };
 
 struct DataB {
-    uint64_t timestamp;
     float value_b;
 };
 
 struct InputData {
-    uint64_t timestamp;
     float input_value;
 };
 
@@ -48,11 +45,9 @@ public:
     void process(DataA& out1, DataB& out2) override {
         process_call_count++;
         out1 = DataA{
-            .timestamp = static_cast<uint64_t>(1000 + process_call_count),
             .value_a = 10.0f + process_call_count
         };
         out2 = DataB{
-            .timestamp = static_cast<uint64_t>(1000 + process_call_count),
             .value_b = 20.0f + process_call_count
         };
     }
@@ -97,11 +92,9 @@ public:
     void process_continuous(const InputData& input, DataA& out1, DataB& out2) override {
         process_call_count++;
         out1 = DataA{
-            .timestamp = input.timestamp,
             .value_a = input.input_value * 1.5f
         };
         out2 = DataB{
-            .timestamp = input.timestamp,
             .value_b = input.input_value * 2.0f
         };
     }
@@ -122,7 +115,7 @@ void test_multi_output_continuous() {
     MultiOutputContinuousModule module(config);
     
     // Test direct call
-    InputData input{.timestamp = 5000, .input_value = 10.0f};
+    InputData input{.input_value = 10.0f};
     DataA a{};
     DataB b{};
     module.process_continuous(input, a, b);

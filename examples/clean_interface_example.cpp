@@ -43,10 +43,7 @@ protected:
         std::cout << "[Producer] Temperature: " << temp << "°C\n";
         
         return TemperatureData{
-            .temperature_celsius = temp,
-            .timestamp_ms = static_cast<uint64_t>(
-                std::chrono::system_clock::now().time_since_epoch().count()
-            )
+            .temperature_celsius = temp
         };
     }
 };
@@ -86,8 +83,7 @@ protected:
                   << input.temperature_celsius << "°C)\n";
         
         return TemperatureData{
-            .temperature_celsius = filtered,
-            .timestamp_ms = input.timestamp_ms
+            .temperature_celsius = filtered
         };
     }
 };
