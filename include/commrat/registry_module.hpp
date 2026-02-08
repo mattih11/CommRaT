@@ -336,6 +336,17 @@ struct ResolveMultiInputBase {
     using type = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
 };
 
+// Specialization for multi-output case (Outputs<Ts...>)
+template<typename InputSpec_, typename... OutputTypes>
+struct ResolveMultiInputBase<InputSpec_, Outputs<OutputTypes...>> {
+    using NormalizedInput = typename NormalizeInput<InputSpec_>::Type;
+    using InputTypesTuple = typename ExtractInputTypes<NormalizedInput>::type;
+    using OutputData = std::tuple<OutputTypes...>;  // Multi-output uses tuple
+    static constexpr std::size_t InputCount = std::tuple_size_v<InputTypesTuple>;
+    
+    using type = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
+};
+
 template<typename UserRegistry,
          typename OutputSpec_,
          typename InputSpec_,
@@ -423,6 +434,22 @@ private:
     struct ExtractPrimaryPayloadHelper<First, Rest...> : ExtractPrimaryPayloadHelper<Rest...> {};
     
     using PrimaryPayloadType = typename ExtractPrimaryPayloadHelper<CommandTypes...>::type;
+    
+    // Compile-time validation: If PrimaryInput<T> specified, T must be in Inputs<...>
+    // For multi-input modules with explicit PrimaryInput, validate the type is in the inputs list
+    template<typename Dummy = void>
+    struct ValidatePrimaryInputImpl {
+        static constexpr bool check() {
+            if constexpr (has_primary_input_spec && has_multi_input) {
+                // This will trigger PrimaryInputIndex's static_assert if type not found
+                return PrimaryInputIndex_v<PrimaryPayloadType, InputTypesTuple> >= 0;
+            }
+            return true;
+        }
+        static constexpr bool value = check();
+    };
+    static_assert(ValidatePrimaryInputImpl<>::value, 
+                  "PrimaryInput validation failed - see error above for details");
     
     // Helper to extract OutputData type from OutputSpec
     template<typename T>

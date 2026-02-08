@@ -104,6 +104,11 @@ add_executable(test_multi_input_module test/test_multi_input_module.cpp)
 target_link_libraries(test_multi_input_module PRIVATE commrat)
 target_include_directories(test_multi_input_module PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+# Phase 6.8: Multi-input compilation tests (type safety validation)
+add_executable(test_multi_input_compilation test/test_multi_input_compilation.cpp)
+target_link_libraries(test_multi_input_compilation PRIVATE commrat)
+target_include_directories(test_multi_input_compilation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 
 # Install targets
 install(TARGETS commrat
