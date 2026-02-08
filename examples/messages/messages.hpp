@@ -11,21 +11,14 @@
  * #include "messages/messages.hpp"
  * using namespace user_app;
  * 
- * class SensorModule : public Module<Output<TempData>, PeriodicInput> {
+ * class SensorModule : public App::Module<Output<TempData>, PeriodicInput> {
+ *     explicit SensorModule(const ModuleConfig& config) : App::Module<Output<TempData>, PeriodicInput>(config) {}
  *     TempData process() override { return read_sensor(); }
  * };
  * @endcode
  */
 
 namespace user_app {
-
-// Module template alias (cleaner than writing App::Module everywhere)
-template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
-using Module = App::Module<OutputSpec, InputSpec, CommandTypes...>;
-
-// Mailbox template alias
-template<typename PayloadT>
-using Mailbox = App::Mailbox<PayloadT>;
 
 // Re-export I/O specifications
 using commrat::Output;

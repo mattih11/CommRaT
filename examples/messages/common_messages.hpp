@@ -56,14 +56,7 @@ using ExampleApp = commrat::CommRaT<
 //   ExampleApp::serialize(msg) / deserialize<T>(data)
 //   ExampleApp::get_message_id<T>()
 
-// Convenient template aliases for this namespace
-template<typename OutputSpec, typename InputSpec, typename... CommandTypes>
-using Module = ExampleApp::Module<OutputSpec, InputSpec, CommandTypes...>;
-
-template<typename PayloadT>
-using Mailbox = ExampleApp::Mailbox<PayloadT>;
-
-// Re-export I/O specifications
+// Re-export I/O specifications for convenience
 using commrat::Output;
 using commrat::Outputs;
 using commrat::Input;
