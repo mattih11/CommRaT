@@ -571,7 +571,11 @@ public:
             data_thread_ = std::thread(&Module::periodic_loop, this);
         } else if constexpr (has_loop_input) {
             data_thread_ = std::thread(&Module::free_loop, this);
+        } else if constexpr (has_multi_input) {
+            // Phase 6.6: Multi-input processing
+            data_thread_ = std::thread(&Module::multi_input_loop, this);
         } else if constexpr (has_continuous_input) {
+            // Single continuous input (backward compatible)
             data_thread_ = std::thread(&Module::continuous_loop, this);
         }
     }
@@ -961,6 +965,134 @@ private:
             }
         }
         std::cout << "[" << config_.name << "] continuous_loop ended\n";
+    }
+    
+    // ========================================================================
+    // Phase 6.6: Multi-Input Processing Loop
+    // ========================================================================
+    
+    void multi_input_loop() {
+        static_assert(has_multi_input, "multi_input_loop only for multi-input modules");
+        
+        std::cout << "[" << config_.name << "] multi_input_loop started (" << InputCount << " inputs)\n";
+        
+        // Identify primary input index from InputSpec
+        // InputSpec should be Inputs<T1, T2, ...> with PrimaryInput<Tprimary> specified
+        constexpr size_t primary_idx = get_primary_input_index();
+        
+        std::cout << "[" << config_.name << "] Primary input index: " << primary_idx << "\n";
+        
+        while (running_) {
+            // Step 1: BLOCK on primary input (drives execution)
+            auto primary_result = receive_primary_input<primary_idx>();
+            
+            if (!primary_result) {
+                continue;  // No data, loop again
+            }
+            
+            // Step 2: Sync all secondary inputs using primary timestamp
+            auto all_inputs = gather_all_inputs<primary_idx>(*primary_result);
+            
+            if (!all_inputs) {
+                // Failed to sync all inputs - skip this cycle
+                continue;
+            }
+            
+            // Step 3: Call process with all inputs (TODO Phase 6.7)
+            // For now, just log success
+            std::cout << "[" << config_.name << "] Successfully gathered all " << InputCount << " inputs\n";
+            
+            // TODO Phase 6.7: Call multi-input process signature
+            // TODO Phase 6.7: Publish outputs
+        }
+        
+        std::cout << "[" << config_.name << "] multi_input_loop ended\n";
+    }
+    
+    // Helper: Get primary input index at compile time
+    static constexpr size_t get_primary_input_index() {
+        // TODO Phase 6.7: Extract from PrimaryInput<T> in InputSpec
+        // For now, assume first input is primary
+        return 0;
+    }
+    
+    // Helper: Receive from primary input mailbox
+    template<size_t PrimaryIdx>
+    auto receive_primary_input() {
+        if (!input_mailboxes_) {
+            return std::optional<ReceivedMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>{};
+        }
+        
+        using PrimaryType = std::tuple_element_t<PrimaryIdx, InputTypesTuple>;
+        auto& primary_mailbox = std::get<PrimaryIdx>(*input_mailboxes_);
+        
+        // BLOCKING receive - drives execution rate
+        return primary_mailbox.template receive<PrimaryType>();
+    }
+    
+    // Helper: Gather all inputs synchronized to primary timestamp
+    template<size_t PrimaryIdx, typename PrimaryMsgType>
+    std::optional<InputTypesTuple> gather_all_inputs(const PrimaryMsgType& primary_msg) {
+        if (!input_mailboxes_) {
+            return std::nullopt;
+        }
+        
+        // Create tuple to hold all inputs
+        InputTypesTuple all_inputs{};
+        
+        // Place primary input at its index
+        std::get<PrimaryIdx>(all_inputs) = primary_msg.message;
+        
+        // Sync secondary inputs using getData
+        bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.timestamp, all_inputs);
+        
+        if (!all_synced) {
+            return std::nullopt;
+        }
+        
+        return all_inputs;
+    }
+    
+    // Helper: Sync all secondary inputs via getData
+    template<size_t PrimaryIdx>
+    bool sync_secondary_inputs(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
+        return sync_secondary_inputs_impl<PrimaryIdx>(primary_timestamp, all_inputs, 
+                                                       std::make_index_sequence<InputCount>{});
+    }
+    
+    template<size_t PrimaryIdx, size_t... Is>
+    bool sync_secondary_inputs_impl(uint64_t primary_timestamp, InputTypesTuple& all_inputs,
+                                     std::index_sequence<Is...>) {
+        // For each input index (except primary), call getData
+        bool all_success = true;
+        
+        // Fold expression: process each secondary input
+        ((Is != PrimaryIdx ? 
+          (all_success = sync_input_at_index<Is>(primary_timestamp, all_inputs) && all_success) : 
+          true), ...);
+        
+        return all_success;
+    }
+    
+    template<size_t Index>
+    bool sync_input_at_index(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
+        using InputType = std::tuple_element_t<Index, InputTypesTuple>;
+        auto& mailbox = std::get<Index>(*input_mailboxes_);
+        
+        // Non-blocking getData with tolerance
+        auto result = mailbox.template getData<InputType>(
+            primary_timestamp,
+            config_.sync_tolerance,
+            InterpolationMode::NEAREST
+        );
+        
+        if (result) {
+            std::get<Index>(all_inputs) = result->payload;
+            return true;
+        } else {
+            std::cout << "[" << config_.name << "] Failed to sync input " << Index << "\n";
+            return false;
+        }
     }
     
     void command_loop() {
