@@ -5,15 +5,37 @@
 
 ---
 
-## 📚 Documentation Structure
+## Quick Links
 
-### Active Documentation
+- **[Getting Started](GETTING_STARTED.md)** - Installation and first program
+- **[User Guide](USER_GUIDE.md)** - Comprehensive guide (under development)
+- **[API Reference](API_REFERENCE.md)** - API overview (under development)
+- **[Examples](EXAMPLES.md)** - Annotated examples (under development)
+- **[Architecture](ARCHITECTURE.md)** - System design overview (under development)
 
-- **[ARCHITECTURE_ANALYSIS.md](work/ARCHITECTURE_ANALYSIS.md)** - Architecture assessment and Phase 5/6 roadmap
-- **[FIXES_APPLIED.md](work/FIXES_APPLIED.md)** - Historical bug fixes and solutions
-- **[IO_SYNC_STRATEGY.md](work/IO_SYNC_STRATEGY.md)** - Multi-input synchronization strategy (Phase 6)
-- **[RACK_ANALYSIS.md](work/RACK_ANALYSIS.md)** - RACK getData mechanism analysis
-- **[SERTIAL_RINGBUFFER_REQUEST.md](work/SERTIAL_RINGBUFFER_REQUEST.md)** - RingBuffer specification for SeRTial
+See **[DOCUMENTATION_STRATEGY.md](DOCUMENTATION_STRATEGY.md)** and **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** for documentation roadmap.
+
+---
+
+## Documentation Structure
+
+### User Documentation
+
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Comprehensive user guide (in progress)
+- **[API_REFERENCE.md](API_REFERENCE.md)** - High-level API overview (in progress)
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - User-friendly architecture explanation (in progress)
+- **[EXAMPLES.md](EXAMPLES.md)** - Annotated example catalog (in progress)
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start guide
+- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Version migration paths (planned)
+- **[FAQ.md](FAQ.md)** - Frequently asked questions (planned)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines (planned)
+
+### Internal Documentation
+
+- **[internal/](internal/)** - Design decisions, phase history, refactoring notes
+  - **[design_decisions/](internal/design_decisions/)** - Why technical choices were made
+  - **[phase_history/](internal/phase_history/)** - Development timeline and evolution
+  - **[refactoring/](internal/refactoring/)** - Major refactoring documentation
 
 ### Visual Assets
 
@@ -22,7 +44,7 @@
 
 ### Archived Documentation
 
-See `archive/` directory for historical design documents and validation logs from earlier phases.
+See `archive/` directory for historical design documents from earlier development phases.
 
 ---
 
