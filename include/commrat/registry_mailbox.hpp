@@ -163,7 +163,7 @@ public:
      */
     template<typename PayloadT>
         requires is_registered<PayloadT>
-    auto receive() -> MailboxResult<ReceivedMessage<PayloadT>> {
+    auto receive() -> MailboxResult<TimsMessage<PayloadT>> {
         return mailbox_.template receive<PayloadT>();
     }
     
@@ -172,7 +172,7 @@ public:
      */
     template<typename PayloadT>
         requires is_registered<PayloadT>
-    auto try_receive() -> MailboxResult<ReceivedMessage<PayloadT>> {
+    auto try_receive() -> MailboxResult<TimsMessage<PayloadT>> {
         return mailbox_.template try_receive<PayloadT>();
     }
     
@@ -181,7 +181,7 @@ public:
      */
     template<typename PayloadT>
         requires is_registered<PayloadT>
-    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<ReceivedMessage<PayloadT>> {
+    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<TimsMessage<PayloadT>> {
         return mailbox_.template receive_for<PayloadT>(timeout);
     }
     
@@ -212,17 +212,10 @@ public:
                 bool handled = Registry::visit(
                     static_cast<uint32_t>(result->type),
                     std::span{result->buffer.data(), result->buffer.size()},
-                    [&](auto& deserialized_msg) {
+                    [&](auto& tims_msg) {
                         // Registry::visit deserializes to TimsMessage<PayloadT>
-                        using MsgType = std::remove_reference_t<decltype(deserialized_msg)>;
-                        using PayloadT = typename MsgType::payload_type;
-                        
-                        ReceivedMessage<PayloadT> msg{
-                            .message = std::move(deserialized_msg.payload),
-                            .timestamp = result->timestamp,
-                            .sequence_number = 0  // TiMS doesn't expose in current API
-                        };
-                        visitor(msg);
+                        // Pass it directly to visitor
+                        visitor(tims_msg);
                     }
                 );
                 

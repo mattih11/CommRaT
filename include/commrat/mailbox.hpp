@@ -130,26 +130,6 @@ struct RawReceivedMessage {
     
     RawReceivedMessage() : type(0), sender_id(0), size(0), timestamp(0), header{0} {}
 };
-
-// ============================================================================
-// Received Message Wrapper
-// ============================================================================
-
-template<typename T>
-struct ReceivedMessage {
-    T message;
-    
-    // Metadata from message header
-    uint64_t timestamp;
-    uint32_t sequence_number;
-    
-    // Accessor for payload
-    const T& operator*() const { return message; }
-    T& operator*() { return message; }
-    const T* operator->() const { return &message; }
-    T* operator->() { return &message; }
-};
-
 // ============================================================================
 // Mailbox Configuration
 // ============================================================================
@@ -369,7 +349,7 @@ public:
      */
     template<typename T>
         requires is_registered<T>
-    auto receive() -> MailboxResult<ReceivedMessage<T>> {
+    auto receive() -> MailboxResult<TimsMessage<T>> {
         if (!running_) {
             return MailboxError::NotRunning;
         }
@@ -391,14 +371,8 @@ public:
             return MailboxError::SerializationError;
         }
         
-        // Wrap in ReceivedMessage with metadata from header
-        ReceivedMessage<T> received{
-            .message = std::move(result->payload),
-            .timestamp = result->header.timestamp,
-            .sequence_number = result->header.seq_number
-        };
-        
-        return received;
+        // Return TimsMessage directly - no need for wrapper
+        return std::move(*result);
     }
     
     /**
@@ -409,7 +383,7 @@ public:
      */
     template<typename T>
         requires is_registered<T>
-    auto try_receive() -> std::optional<ReceivedMessage<T>> {
+    auto try_receive() -> std::optional<TimsMessage<T>> {
         // Use -1 to indicate non-blocking mode (TIMS_NONBLOCK)
         // This gets converted to -1ns which TiMS recognizes
         auto result = receive_for<T>(std::chrono::milliseconds(-1));
@@ -428,7 +402,7 @@ public:
      */
     template<typename T>
         requires is_registered<T>
-    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<ReceivedMessage<T>> {
+    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<TimsMessage<T>> {
         if (!running_) {
             return MailboxError::NotRunning;
         }
@@ -454,14 +428,8 @@ public:
             return MailboxError::SerializationError;
         }
         
-        // Wrap in ReceivedMessage with metadata from header
-        ReceivedMessage<T> received{
-            .message = std::move(result->payload),
-            .timestamp = result->header.timestamp,
-            .sequence_number = result->header.seq_number
-        };
-        
-        return received;
+        // Return TimsMessage directly - no need for wrapper
+        return std::move(*result);
     }
     
     /**
@@ -528,7 +496,7 @@ public:
      * @code
      * mailbox.receive_any([](auto&& msg) {
      *     using T = std::decay_t<decltype(msg)>;
-     *     if constexpr (std::is_same_v<T, ReceivedMessage<StatusMessage>>) {
+     *     if constexpr (std::is_same_v<T, TimsMessage<StatusMessage>>) {
      *         std::cout << "Status: " << msg->payload.status_code << "\n";
      *     }
      * });
@@ -562,17 +530,9 @@ public:
         // Use registry to dispatch based on runtime type
         bool success = Registry::visit(msg_type, 
             std::span<const std::byte>(buffer.data(), bytes),
-            [&visitor, &header](auto&& tims_msg) {
-                // tims_msg is TimsMessage<PayloadT>, extract the payload
-                using TimsMsgType = std::decay_t<decltype(tims_msg)>;
-                using PayloadType = typename TimsMsgType::payload_type;
-                
-                ReceivedMessage<PayloadType> received{
-                    .message = std::move(tims_msg.payload),
-                    .timestamp = tims_msg.header.timestamp,
-                    .sequence_number = tims_msg.header.seq_number
-                };
-                std::forward<Visitor>(visitor)(received);
+            [&visitor](auto&& tims_msg) {
+                // Visitor receives TimsMessage<PayloadType> directly
+                std::forward<Visitor>(visitor)(std::forward<decltype(tims_msg)>(tims_msg));
             });
         
         if (!success) {

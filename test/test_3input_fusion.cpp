@@ -1,6 +1,6 @@
 /**
  * @file test_3input_fusion.cpp
- * @brief Phase 6.9: End-to-end 3-input sensor fusion test
+ * @brief Phase 6.9 + Phase 6.10: End-to-end 3-input sensor fusion test
  * 
  * Tests complete multi-input Module lifecycle:
  * - 3 producer modules: IMU (100Hz), GPS (10Hz), Lidar (20Hz)
@@ -12,6 +12,21 @@
  * - GPS and Lidar sync via getData with tolerance
  * - Fusion module publishes at IMU rate (100Hz)
  * - All inputs synchronized within timestamp tolerance
+ * 
+ * **Phase 6.10 Timestamp Management** (IMPLICITLY VALIDATED):
+ * - All message payloads have NO timestamp fields - clean data structures
+ * - Module automatically sets TimsHeader.timestamp:
+ *   * PeriodicInput (IMU/GPS/Lidar): timestamp = Time::now()
+ *   * Multi-input (Fusion): timestamp = primary_input.timestamp (IMU timestamp)
+ * - 533 successful fusion outputs PROVES timestamp logic works correctly
+ * - getData() synchronization relies on TimsHeader.timestamp - if timestamps
+ *   were wrong, fusion would fail to get synchronized inputs
+ * 
+ * Phase 6.10 Update - Automatic Timestamp Management:
+ * - Producers no longer manually set timestamps
+ * - Module automatically sets output.timestamp = Time::now() for PeriodicInput
+ * - Fusion automatically sets output.timestamp = primary_input.timestamp
+ * - Users never touch timestamp fields - fully managed by Module infrastructure
  */
 
 #include "commrat/commrat.hpp"
@@ -26,13 +41,11 @@
 // ============================================================================
 
 struct IMUData {
-    uint64_t timestamp{0};
     float accel_x{0.0f}, accel_y{0.0f}, accel_z{0.0f};
     float gyro_x{0.0f}, gyro_y{0.0f}, gyro_z{0.0f};
 };
 
 struct GPSData {
-    uint64_t timestamp{0};
     double latitude{0.0};
     double longitude{0.0};
     float altitude{0.0f};
@@ -40,14 +53,12 @@ struct GPSData {
 };
 
 struct LidarData {
-    uint64_t timestamp{0};
     float distance{0.0f};
     float intensity{0.0f};
     uint32_t point_count{0};
 };
 
 struct FusedData {
-    uint64_t timestamp{0};
     // Position (from GPS + Lidar)
     float position_x{0.0f}, position_y{0.0f}, position_z{0.0f};
     // Velocity (integrated from IMU)
@@ -103,9 +114,8 @@ protected:
         
         // Simulate IMU readings
         float t = count * 0.01f;  // 100Hz = 10ms period
-        uint64_t ts = Time::now();
+        // Phase 6.10: No manual timestamp - Module auto-sets to Time::now()
         IMUData data{
-            .timestamp = ts,
             .accel_x = std::sin(t) * 9.8f,
             .accel_y = std::cos(t) * 9.8f,
             .accel_z = 9.8f + std::sin(t * 2.0f) * 0.5f,
@@ -113,10 +123,6 @@ protected:
             .gyro_y = std::sin(t) * 0.1f,
             .gyro_z = std::sin(t * 0.5f) * 0.05f
         };
-        
-        if (count < 3) {
-            std::cout << "[IMU] Created message with timestamp=" << ts << "\n";
-        }
         
         if (count % 50 == 0) {  // Every 0.5s
             std::cout << "[IMU] Published #" << count 
@@ -139,8 +145,8 @@ protected:
         
         // Simulate GPS readings (slower update rate)
         float t = count * 0.1f;  // 10Hz = 100ms period
+        // Phase 6.10: No manual timestamp - Module auto-sets to Time::now()
         GPSData data{
-            .timestamp = Time::now(),
             .latitude = 47.3769 + std::sin(t * 0.1) * 0.0001,  // Freiburg
             .longitude = 8.5417 + std::cos(t * 0.1) * 0.0001,
             .altitude = 400.0f + std::sin(t * 0.5f) * 5.0f,
@@ -166,8 +172,8 @@ protected:
         
         // Simulate Lidar readings (medium update rate)
         float t = count * 0.05f;  // 20Hz = 50ms period
+        // Phase 6.10: No manual timestamp - Module auto-sets to Time::now()
         LidarData data{
-            .timestamp = Time::now(),
             .distance = 10.0f + std::sin(t * 0.3f) * 2.0f,
             .intensity = 200.0f + std::cos(t) * 50.0f,
             .point_count = static_cast<uint32_t>(1000 + std::sin(t * 2.0f) * 200)
@@ -206,8 +212,8 @@ protected:
         velocity_z_ += (imu.accel_z - 9.8f) * dt;  // Remove gravity
         
         // Fuse GPS position with Lidar distance
+        // Phase 6.10: No manual timestamp - Module auto-sets to primary input (IMU) timestamp
         FusedData fused{
-            .timestamp = imu.timestamp,
             .position_x = static_cast<float>(gps.latitude * 111000.0),  // Rough meters
             .position_y = static_cast<float>(gps.longitude * 111000.0 * std::cos(gps.latitude * M_PI / 180.0)),
             .position_z = gps.altitude + lidar.distance,

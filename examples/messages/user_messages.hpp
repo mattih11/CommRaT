@@ -10,7 +10,6 @@ namespace user_app {
 
 struct TemperatureData {
     float temperature_celsius{0.0f};
-    uint64_t timestamp_ms{0};
 };
 
 struct StatusData {

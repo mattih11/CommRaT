@@ -125,7 +125,7 @@ public:
      * @note Automatically stores in history for future getData() queries
      */
     template<typename T>
-    auto receive() -> MailboxResult<ReceivedMessage<T>> {
+    auto receive() -> MailboxResult<TimsMessage<T>> {
         
         // Receive from underlying mailbox
         auto result = mailbox_.template receive<T>();
@@ -220,7 +220,7 @@ public:
      * @brief Get mailbox ID
      */
     uint32_t get_mailbox_id() const {
-        return mailbox_.get_mailbox_id();
+        return mailbox_.mailbox_id();
     }
     
     /**
@@ -239,18 +239,12 @@ private:
      * @brief Store received message in history buffer
      */
     template<typename T>
-    void store_in_history(const ReceivedMessage<T>& received) {
+    void store_in_history(const TimsMessage<T>& tims_msg) {
         auto& buffer = get_history_buffer<T>();
         
-        // Create TimsMessage from ReceivedMessage components
-        TimsMessage<T> tims_msg;
-        // CRITICAL: Use payload timestamp, not ReceivedMessage wrapper timestamp (which is 0)
-        // The payload contains the actual timestamp set by the producer
-        tims_msg.header.timestamp = received.message.timestamp;
-        tims_msg.header.seq_number = received.sequence_number;
-        tims_msg.payload = received.message;
-        
-        buffer.push(std::move(tims_msg));
+        // Store TimsMessage directly - no conversion needed!
+        // Phase 6.10: Timestamp is in header (tims_msg.header.timestamp)
+        buffer.push(tims_msg);
     }
     
     /**

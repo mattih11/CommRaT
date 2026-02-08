@@ -24,18 +24,15 @@ using namespace std::chrono_literals;
 // ============================================================================
 
 struct IMUData {
-    uint64_t timestamp;
     float accel_x, accel_y, accel_z;
     float gyro_x, gyro_y, gyro_z;
 };
 
 struct GPSData {
-    uint64_t timestamp;
     double latitude, longitude, altitude;
 };
 
 struct FusedData {
-    uint64_t timestamp;
     float position_x, position_y, position_z;
     float velocity_x, velocity_y, velocity_z;
 };
@@ -58,7 +55,6 @@ class IMUModule : public TestApp::Module<Output<IMUData>, PeriodicInput> {
 protected:
     IMUData process() override {
         return IMUData{
-            .timestamp = static_cast<uint64_t>(++counter_),
             .accel_x = 1.0f, .accel_y = 0.0f, .accel_z = 9.81f,
             .gyro_x = 0.0f, .gyro_y = 0.0f, .gyro_z = 0.0f
         };
@@ -72,7 +68,6 @@ class GPSModule : public TestApp::Module<Output<GPSData>, PeriodicInput> {
 protected:
     GPSData process() override {
         return GPSData{
-            .timestamp = static_cast<uint64_t>(++counter_),
             .latitude = 37.7749,
             .longitude = -122.4194,
             .altitude = 100.0
@@ -98,7 +93,6 @@ protected:
     FusedData process(const IMUData& imu, const GPSData& gps) override {
         // Fusion logic
         return FusedData{
-            .timestamp = imu.timestamp,
             .position_x = static_cast<float>(gps.latitude),
             .position_y = static_cast<float>(gps.longitude),
             .position_z = static_cast<float>(gps.altitude),

@@ -22,24 +22,20 @@ using namespace commrat;
 // ============================================================================
 
 struct SensorData {
-    uint64_t timestamp;
     uint32_t sensor_id;
     float value;
 };
 
 struct FilteredData {
-    uint64_t timestamp;
     float filtered_value;
 };
 
 struct DiagnosticsData {
-    uint64_t timestamp;
     uint32_t error_count;
     float cpu_usage;
 };
 
 struct CommandData {
-    uint64_t timestamp;
     uint32_t command_id;
 };
 
@@ -67,7 +63,6 @@ public:
     SensorData process() override {
         process_call_count++;
         return SensorData{
-            .timestamp = static_cast<uint64_t>(1000 + process_call_count),
             .sensor_id = 42,
             .value = 20.5f + process_call_count
         };
@@ -112,7 +107,6 @@ public:
     FilteredData process() override {
         process_call_count++;
         return FilteredData{
-            .timestamp = static_cast<uint64_t>(2000 + process_call_count),
             .filtered_value = 15.3f + process_call_count
         };
     }
@@ -134,7 +128,7 @@ void test_loop_single_output() {
     LoopSingleOutputModule module(config);
     
     auto result = module.process();
-    assert(result.timestamp == 2001);
+    assert(result.filtered_value == 16.3f);  // 15.3 + process_call_count(1)
     assert(module.process_call_count == 1);
     
     std::cout << "  ✓ process() signature correct: FilteredData process()\n";
@@ -154,7 +148,6 @@ public:
     FilteredData process_continuous(const SensorData& input) override {
         process_call_count++;
         return FilteredData{
-            .timestamp = input.timestamp,
             .filtered_value = input.value * 0.9f  // Simple filter
         };
     }
@@ -177,9 +170,8 @@ void test_continuous_single_output() {
     
     ContinuousSingleOutputModule module(config);
     
-    SensorData input{.timestamp = 3000, .sensor_id = 42, .value = 25.0f};
+    SensorData input{.sensor_id = 42, .value = 25.0f};
     auto result = module.process_continuous(input);
-    assert(result.timestamp == 3000);
     assert(result.filtered_value == 22.5f);  // 25.0 * 0.9
     assert(module.process_call_count == 1);
     
@@ -200,7 +192,6 @@ public:
     SensorData process() override {
         process_call_count++;
         return SensorData{
-            .timestamp = static_cast<uint64_t>(4000 + process_call_count),
             .sensor_id = 99,
             .value = 10.0f
         };

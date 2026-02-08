@@ -39,10 +39,6 @@ protected:
         std::cout << "[Producer] Published temperature: " << temp << "°C\n";
         
         return TemperatureData{
-            .timestamp = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()
-                ).count()),
             .sensor_id = config_.instance_id,
             .temperature_c = temp,
             .confidence = 1.0f
@@ -79,7 +75,6 @@ protected:
                   << "→ Filtered: " << filtered << "°C\n";
         
         return TemperatureData{
-            .timestamp = input.timestamp,
             .sensor_id = input.sensor_id,
             .temperature_c = filtered,
             .confidence = input.confidence

@@ -24,7 +24,6 @@ using namespace commrat;
 // ============================================================================
 
 struct CounterData {
-    uint64_t timestamp;
     uint64_t value;
     uint64_t iterations_per_second;
 };
@@ -58,7 +57,6 @@ public:
 protected:
     CounterData process() override {
         CounterData output;
-        output.timestamp = get_timestamp();
         output.value = value_++;
         
         // Calculate throughput every second

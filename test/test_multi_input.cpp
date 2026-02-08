@@ -16,18 +16,15 @@
 
 // Test message types
 struct IMUData {
-    uint64_t timestamp;
     float accel_x, accel_y, accel_z;
     float gyro_x, gyro_y, gyro_z;
 };
 
 struct GPSData {
-    uint64_t timestamp;
     double latitude, longitude, altitude;
 };
 
 struct FusedData {
-    uint64_t timestamp;
     float position_x, position_y, position_z;
     float velocity_x, velocity_y, velocity_z;
 };
@@ -88,13 +85,13 @@ int main() {
         for (int i = 0; i < 3; ++i) {  // 3 GPS messages
             // Send 10 IMU messages
             for (int j = 0; j < 10; ++j) {
-                IMUData imu{0, static_cast<float>(i*10 + j), 0, 0, 0, 0, 0};
+                IMUData imu{static_cast<float>(i*10 + j), 0, 0, 0, 0, 0};
                 imu_producer.send(imu, 602);
                 Time::sleep(Milliseconds(10));
             }
             
             // Send 1 GPS message
-            GPSData gps{0, 37.7749 + i*0.0001, -122.4194, 100.0};
+            GPSData gps{37.7749 + i*0.0001, -122.4194, 100.0};
             gps_producer.send(gps, 702);
         }
         
@@ -124,18 +121,17 @@ int main() {
             imu_count++;
             
             // Synchronize GPS to IMU timestamp
-            auto gps_result = gps_consumer.getData<GPSData>(imu_result->timestamp, Milliseconds(100));
+            auto gps_result = gps_consumer.getData<GPSData>(imu_result->header.timestamp, Milliseconds(100));
             
             if (gps_result) {
                 fusion_count++;
                 
                 // Simulate fusion (would call process() in real module)
                 [[maybe_unused]] FusedData fused;
-                fused.timestamp = imu_result->timestamp;
                 fused.position_x = static_cast<float>(gps_result->payload.latitude);
                 fused.position_y = static_cast<float>(gps_result->payload.longitude);
                 fused.position_z = static_cast<float>(gps_result->payload.altitude);
-                fused.velocity_x = imu_result->message.accel_x;
+                fused.velocity_x = imu_result->payload.accel_x;
                 fused.velocity_y = 0.0f;
                 fused.velocity_z = 0.0f;
                 // Would publish: publish_to_subscribers(fused)

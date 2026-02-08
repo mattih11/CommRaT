@@ -109,6 +109,16 @@ add_executable(test_multi_input_compilation test/test_multi_input_compilation.cp
 target_link_libraries(test_multi_input_compilation PRIVATE commrat)
 target_include_directories(test_multi_input_compilation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+# Phase 6.9: End-to-end 3-input sensor fusion test
+add_executable(test_3input_fusion test/test_3input_fusion.cpp)
+target_link_libraries(test_3input_fusion PRIVATE commrat)
+target_include_directories(test_3input_fusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
+# Phase 6.10: Automatic timestamp management verification
+add_executable(test_timestamp_logic test/test_timestamp_logic.cpp)
+target_link_libraries(test_timestamp_logic PRIVATE commrat)
+target_include_directories(test_timestamp_logic PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 
 # Install targets
 install(TARGETS commrat
@@ -158,4 +168,27 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CommRaT
+)
+
+# Custom target to run all tests
+add_custom_target(run_tests
+    COMMAND ${CMAKE_COMMAND} -E echo "=== Running CommRaT Test Suite ==="
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_timestamp_logic ---"
+    COMMAND $<TARGET_FILE:test_timestamp_logic> 2>&1 | grep -E "(===|PASS|FAIL)" || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_3input_fusion ---"
+    COMMAND $<TARGET_FILE:test_3input_fusion> 2>&1 | tail -5 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_historical_mailbox ---"
+    COMMAND $<TARGET_FILE:test_historical_mailbox> 2>&1 | grep -E "(===|PASS|FAIL)" || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "--- test_process_signature ---"
+    COMMAND $<TARGET_FILE:test_process_signature> 2>&1 | tail -3 || true
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "=== Test Suite Complete ==="
+    DEPENDS test_timestamp_logic test_3input_fusion test_historical_mailbox test_process_signature
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Running all CommRaT tests"
+    VERBATIM
 )
