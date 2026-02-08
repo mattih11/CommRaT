@@ -16,6 +16,16 @@
 
 #include <commrat/commrat.hpp>
 #include <iostream>
+#include <csignal>
+#include <atomic>
+
+// Signal handler for clean shutdown
+std::atomic<bool> shutdown_requested{false};
+void signal_handler(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        shutdown_requested.store(true);
+    }
+}
 
 //-----------------------------------------------------------------------------
 // STEP 1: Define your message structure
@@ -44,8 +54,8 @@ struct CounterMessage {
  * This registers all message types used in your application.
  * CommRaT validates uniqueness, assigns IDs, and generates serialization.
  */
-using HelloApp = CommRaT<
-    Message::Data<CounterMessage>  // Register CounterMessage as data type
+using HelloApp = commrat::CommRaT<
+    commrat::Message::Data<CounterMessage>  // Register CounterMessage as data type
 >;
 
 //-----------------------------------------------------------------------------
@@ -62,15 +72,15 @@ using HelloApp = CommRaT<
  * Override process() to generate data.
  */
 class CounterModule : public HelloApp::Module<
-    Output<CounterMessage>,  // What this module produces
-    PeriodicInput            // How it generates data (timer-driven)
+    commrat::Output<CounterMessage>,  // What this module produces
+    commrat::PeriodicInput            // How it generates data (timer-driven)
 > {
 public:
     /**
      * Constructor
      * @param config Module configuration (system_id, period, etc.)
      */
-    explicit CounterModule(const ModuleConfig& config)
+    explicit CounterModule(const commrat::ModuleConfig& config)
         : Module(config)
         , counter_(0)
     {
@@ -98,8 +108,8 @@ protected:
      */
     CounterMessage process() override {
         CounterMessage msg{
-            .timestamp = Time::now(),  // Current time in nanoseconds
-            .count = counter_++        // Increment counter
+            .timestamp = commrat::Time::now(),  // Current time in nanoseconds
+            .count = counter_++                  // Increment counter
         };
         
         std::cout << "[Counter] Generated: count=" << msg.count << "\n";
@@ -120,21 +130,21 @@ private:
  * DisplayModule - Receives and displays counter values
  * 
  * Template parameters:
- * - Output<void>: This module has no output (sink/monitor)
+ * - Output<CounterMessage>: Returns the same message (pass-through sink)
  * - Input<CounterMessage>: Receives CounterMessage (event-driven)
  * 
  * Override process_continuous() to handle incoming messages.
  */
 class DisplayModule : public HelloApp::Module<
-    Output<void>,             // No output (this is a sink)
-    Input<CounterMessage>     // What this module receives
+    commrat::Output<CounterMessage>,     // Pass-through output
+    commrat::Input<CounterMessage>       // What this module receives
 > {
 public:
     /**
      * Constructor
      * @param config Module configuration (system_id, source_system_id, etc.)
      */
-    explicit DisplayModule(const ModuleConfig& config)
+    explicit DisplayModule(const commrat::ModuleConfig& config)
         : Module(config)
         , message_count_(0)
     {
@@ -158,8 +168,9 @@ protected:
      * - Use 'override' keyword (it's virtual)
      * 
      * @param msg The received CounterMessage
+     * @return The same message (pass-through for sink behavior)
      */
-    void process_continuous(const CounterMessage& msg) override {
+    CounterMessage process_continuous(const CounterMessage& msg) override {
         message_count_++;
         
         // Display the received counter value
@@ -170,6 +181,8 @@ protected:
         // - Check thresholds
         // - Accumulate statistics
         // - etc.
+        
+        return msg;  // Pass through (not published since no subscribers)
     }
 
 private:
@@ -181,30 +194,26 @@ private:
 //-----------------------------------------------------------------------------
 
 int main() {
-    std::cout << "=== Hello CommRaT ===\n\n";
+    // Register signal handlers for clean shutdown
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
     
-    //-------------------------------------------------------------------------
-    // Initialize TiMS messaging layer
-    //-------------------------------------------------------------------------
-    if (!tims::init()) {
-        std::cerr << "ERROR: Failed to initialize TiMS\n";
-        return 1;
-    }
+    std::cout << "=== Hello CommRaT ===\n\n";
     
     //-------------------------------------------------------------------------
     // Configure the counter module (producer)
     //-------------------------------------------------------------------------
-    ModuleConfig counter_config{
-        .name = "Counter",           // Human-readable name (for debugging)
-        .system_id = 10,             // Unique system ID (must be unique)
-        .instance_id = 1,            // Instance within system
-        .period = Milliseconds(100)  // Generate message every 100ms (10Hz)
+    commrat::ModuleConfig counter_config{
+        .name = "Counter",                        // Human-readable name (for debugging)
+        .system_id = 10,                          // Unique system ID (must be unique)
+        .instance_id = 1,                         // Instance within system
+        .period = commrat::Milliseconds(100)      // Generate message every 100ms (10Hz)
     };
     
     //-------------------------------------------------------------------------
     // Configure the display module (consumer)
     //-------------------------------------------------------------------------
-    ModuleConfig display_config{
+    commrat::ModuleConfig display_config{
         .name = "Display",           // Human-readable name
         .system_id = 20,             // Different system ID (must differ from producer)
         .instance_id = 1,            // Instance within system
@@ -227,13 +236,22 @@ int main() {
     // - data_thread_ (PeriodicInput timer or ContinuousInput receiver)
     
     counter.start();  // Begins generating counter values
+    
+    // Give producer time to initialize before consumer subscribes
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
     display.start();  // Subscribes to counter and begins receiving
     
     //-------------------------------------------------------------------------
-    // Let the system run for 3 seconds
+    // Run until Ctrl+C or 30 messages (approximately 3 seconds)
     //-------------------------------------------------------------------------
-    std::cout << "\nRunning for 3 seconds...\n\n";
-    Time::sleep(Seconds(3));
+    std::cout << "\nRunning... (Press Ctrl+C to stop)\n\n";
+    
+    int seconds = 0;
+    while (!shutdown_requested.load() && seconds < 3) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        seconds++;
+    }
     
     //-------------------------------------------------------------------------
     // Clean shutdown
@@ -241,11 +259,8 @@ int main() {
     std::cout << "\nShutting down...\n";
     
     // stop() signals threads to exit and waits for them to join
-    counter.stop();
     display.stop();
-    
-    // Cleanup TiMS
-    tims::cleanup();
+    counter.stop();
     
     std::cout << "Done!\n";
     return 0;

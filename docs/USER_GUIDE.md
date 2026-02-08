@@ -469,6 +469,16 @@ Create `temperature_system.cpp`:
 ```cpp
 #include <commrat/commrat.hpp>
 #include <iostream>
+#include <csignal>
+#include <atomic>
+
+// Signal handler for clean shutdown
+std::atomic<bool> shutdown_requested{false};
+void signal_handler(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        shutdown_requested.store(true);
+    }
+}
 
 // Step 1: Define your data structure (plain POD type)
 struct TemperatureReading {
@@ -479,8 +489,8 @@ struct TemperatureReading {
 };
 
 // Step 2: Define your application with all message types
-using TempApp = CommRaT<
-    Message::Data<TemperatureReading>  // Register our message type
+using TempApp = commrat::CommRaT<
+    commrat::Message::Data<TemperatureReading>  // Register our message type
 >;
 
 // Application is now ready! TempApp provides:
@@ -502,11 +512,11 @@ A producer generates data periodically:
 ```cpp
 // Step 3: Create a producer module
 class TemperatureSensor : public TempApp::Module<
-    Output<TemperatureReading>,  // This module outputs TemperatureReading
-    PeriodicInput                // Runs periodically (no input data)
+    commrat::Output<TemperatureReading>,  // This module outputs TemperatureReading
+    commrat::PeriodicInput                // Runs periodically (no input data)
 > {
 public:
-    TemperatureSensor(const ModuleConfig& config, uint32_t sensor_id)
+    TemperatureSensor(const commrat::ModuleConfig& config, uint32_t sensor_id)
         : Module(config)
         , sensor_id_(sensor_id)
     {
@@ -521,7 +531,7 @@ protected:
         float humidity = 40.0f + (rand() % 200) / 10.0f;  // 40-60%
         
         TemperatureReading reading{
-            .timestamp = Time::now(),
+            .timestamp = commrat::Time::now(),
             .sensor_id = sensor_id_,
             .temperature_c = temp,
             .humidity_percent = humidity
@@ -551,11 +561,11 @@ A consumer receives and processes data:
 ```cpp
 // Step 4: Create a consumer module
 class TemperatureMonitor : public TempApp::Module<
-    Output<void>,                     // No output (monitor only)
-    Input<TemperatureReading>         // Receives TemperatureReading
+    commrat::Output<TemperatureReading>,     // Pass through output
+    commrat::Input<TemperatureReading>        // Receives TemperatureReading
 > {
 public:
-    TemperatureMonitor(const ModuleConfig& config)
+    TemperatureMonitor(const commrat::ModuleConfig& config)
         : Module(config)
         , count_(0)
     {
@@ -564,7 +574,7 @@ public:
 
 protected:
     // Called for each received TemperatureReading
-    void process_continuous(const TemperatureReading& reading) override {
+    TemperatureReading process_continuous(const TemperatureReading& reading) override {
         count_++;
         
         std::cout << "[Monitor] #" << count_ 
@@ -576,6 +586,8 @@ protected:
         if (reading.temperature_c > 28.0f) {
             std::cout << "  WARNING: High temperature!\n";
         }
+        
+        return reading;  // Pass through
     }
 
 private:
@@ -584,7 +596,7 @@ private:
 ```
 
 **Key points:**
-- Inherits from `TempApp::Module<Output<void>, Input<TemperatureReading>>`
+- Inherits from `TempApp::Module<Output<TemperatureReading>, Input<TemperatureReading>>`
 - Overrides `process_continuous(const TemperatureReading&)` 
 - Called automatically for **each received message**
 - Blocks efficiently (0% CPU when no messages)
@@ -595,24 +607,22 @@ Now create the main function to configure and run both modules:
 
 ```cpp
 int main() {
+    // Register signal handlers
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+    
     std::cout << "=== CommRaT Temperature System ===\n\n";
     
-    // Initialize TiMS messaging layer
-    if (!tims::init()) {
-        std::cerr << "Failed to initialize TiMS\n";
-        return 1;
-    }
-    
     // Step 5: Configure the sensor (producer)
-    ModuleConfig sensor_config{
+    commrat::ModuleConfig sensor_config{
         .name = "TempSensor",
         .system_id = 10,           // Unique system ID
         .instance_id = 1,          // Instance within system
-        .period = Milliseconds(100) // Generate reading every 100ms (10Hz)
+        .period = commrat::Milliseconds(100) // Generate reading every 100ms (10Hz)
     };
     
     // Step 6: Configure the monitor (consumer)
-    ModuleConfig monitor_config{
+    commrat::ModuleConfig monitor_config{
         .name = "TempMonitor",
         .system_id = 20,           // Different system ID
         .instance_id = 1,
@@ -625,18 +635,25 @@ int main() {
     TemperatureMonitor monitor(monitor_config);
     
     sensor.start();   // Spawns threads, begins generating
+    
+    // Give producer time to initialize
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
     monitor.start();  // Spawns threads, subscribes to sensor
     
-    // Let it run for 5 seconds
-    std::cout << "\nRunning for 5 seconds...\n\n";
-    Time::sleep(Seconds(5));
+    // Run until signal or timeout
+    std::cout << "\nRunning... (Press Ctrl+C to stop)\n\n";
+    int seconds = 0;
+    while (!shutdown_requested.load() && seconds < 5) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        seconds++;
+    }
     
     // Step 8: Clean shutdown
     std::cout << "\nShutting down...\n";
-    sensor.stop();
     monitor.stop();
+    sensor.stop();
     
-    tims::cleanup();
     std::cout << "Done!\n";
     return 0;
 }
@@ -1276,5 +1293,98 @@ IMUSensor (10ms) → IMUFilter → PoseFusion ← GPSData
 6. **Choose based on requirements**: Timing constraints → Periodic, React to events → Continuous
 
 **Next:** Section 5 dives deep into I/O specifications for advanced patterns.
+
+---
+
+## 5. I/O Specifications
+
+CommRaT modules are defined by their **input and output specifications**. These determine what data a module produces, consumes, and how it interacts with other modules.
+
+### 5.1 Output Specifications
+
+- **Output<T>**: Module produces a single message type T.
+- **Outputs<T, U, ...>**: Module produces multiple message types (multi-output).
+- **Output<void>**: Module produces no output (sink/monitor).
+
+**Examples:**
+```cpp
+class Producer : public MyApp::Module<Output<DataA>, PeriodicInput> { ... };
+class Splitter : public MyApp::Module<Outputs<DataA, DataB>, Input<CombinedData>> { ... };
+class Logger : public MyApp::Module<Output<void>, Input<DataA>> { ... };
+```
+
+### 5.2 Input Specifications
+
+- **PeriodicInput**: No input, generates data periodically.
+- **Input<T>**: Receives a single message type T (continuous input).
+- **Inputs<T, U, ...>**: Receives multiple message types (multi-input fusion).
+- **LoopInput**: No input, runs as fast as possible.
+
+**Examples:**
+```cpp
+class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> { ... };
+class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> { ... };
+class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>> { ... };
+class StressTest : public MyApp::Module<Output<Data>, LoopInput> { ... };
+```
+
+### 5.3 Combining Inputs and Outputs
+
+You can combine input and output specs for advanced patterns:
+- **Generator**: Output<T>, PeriodicInput
+- **Transformer**: Output<T>, Input<U>
+- **Sink**: Output<void>, Input<T>
+- **Multi-output**: Outputs<T, U>, Input<V>
+- **Multi-input fusion**: Output<T>, Inputs<U, V, W>
+
+**Example: Multi-output producer**
+```cpp
+class MultiProducer : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
+protected:
+    void process(DataA& outA, DataB& outB) override {
+        outA = generate_a();
+        outB = generate_b();
+    }
+};
+```
+
+**Example: Multi-input fusion**
+```cpp
+class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>> {
+protected:
+    FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+        return fuse(imu, gps);
+    }
+};
+```
+
+### 5.4 Input Metadata and Accessors
+
+For each input, CommRaT provides metadata accessors:
+- `get_input_metadata<Index>()` - Get metadata for input at index
+- `get_input_metadata<Type>()` - Get metadata for input of unique type
+- `get_input_timestamp<Index>()` - Get timestamp for input
+- `has_new_data<Index>()` - Check freshness
+- `is_input_valid<Index>()` - Check validity
+
+**Example:**
+```cpp
+uint64_t imu_ts = get_input_timestamp<IMUData>();
+bool gps_fresh = has_new_data<1>();
+```
+
+### 5.5 Real-Time Safety in I/O Specs
+
+- All input/output specs are validated at compile time
+- No dynamic allocation in hot paths
+- Type mismatches are compile errors
+- Multi-output and multi-input patterns are deterministic
+
+### Key Takeaways
+
+1. **Output/Input specs** define module data flow
+2. **Multi-output** and **multi-input** enable advanced pipelines
+3. **Metadata accessors** provide timestamps, freshness, validity
+4. **Compile-time validation** ensures correctness and real-time safety
 
 ---

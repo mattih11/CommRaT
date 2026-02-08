@@ -48,7 +48,7 @@ make
 [Counter] Starting counter at 0
 [Display] Ready to receive counter values
 
-Running for 3 seconds...
+Running... (Press Ctrl+C to stop)
 
 [Counter] Generated: count=0
 [Display] Received: count=0
@@ -56,15 +56,13 @@ Running for 3 seconds...
 [Display] Received: count=1
 [Counter] Generated: count=2
 [Display] Received: count=2
-[Counter] Generated: count=3
-[Display] Received: count=3
 ...
 [Counter] Generated: count=29
 [Display] Received: count=29
 
 Shutting down...
-[Counter] Stopped at count=30
 [Display] Received 30 messages total
+[Counter] Stopped at count=30
 Done!
 ```
 
@@ -195,7 +193,7 @@ display_config.source_system_id = 99;  // Won't receive messages!
 **Mistake 2: Missing period**
 ```cpp
 // ERROR: PeriodicInput requires period
-counter_config.period = Duration(0);  // Invalid!
+counter_config.period = commrat::Duration(0);  // Invalid!
 ```
 
 **Mistake 3: Forgetting override**
