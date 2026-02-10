@@ -12,6 +12,7 @@
 #include "commrat/module/traits/type_extraction.hpp"
 #include "commrat/module/traits/processor_bases.hpp"
 #include "commrat/module/traits/multi_input_resolver.hpp"
+#include "commrat/module/traits/module_types.hpp"  // Phase 1: Extracted type computations
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/module/helpers/tims_helpers.hpp"
 #include "commrat/module/metadata/input_metadata.hpp"
@@ -109,74 +110,40 @@ class Module
     friend class InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     
 private:
-    // Normalize OutputSpec: raw type T -> Output<T>
-    using OutputSpec = NormalizeOutput_t<OutputSpec_>;
+    // ========================================================================
+    // Type Definitions (Phase 1: Extracted to module_types.hpp)
+    // ========================================================================
     
-    // Normalize InputSpec: ContinuousInput<T> -> Input<T>, keep others as-is
-    using InputSpec = NormalizeInput_t<InputSpec_>;
+    // Import all type computations from module_traits::ModuleTypes
+    using ModuleTypes = module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>;
     
-    // Helper to extract InputData type from InputSpec (single input)
-    template<typename T>
-    struct ExtractInputData {
-        using type = void;
-    };
+    // Normalized specs
+    using OutputSpec = typename ModuleTypes::OutputSpec;
+    using InputSpec = typename ModuleTypes::InputSpec;
     
-    template<typename T>
-    struct ExtractInputData<Input<T>> {
-        using type = T;
-    };
+    // Type tuples
+    using OutputTypesTuple = typename ModuleTypes::OutputTypesTuple;
+    using InputTypesTuple = typename ModuleTypes::InputTypesTuple;
+    using MailboxSetTuple = typename ModuleTypes::MailboxSetTuple;
+    using CommandTuple = typename ModuleTypes::CommandTuple;
+    using CombinedCmdTypes = typename ModuleTypes::CombinedCmdTypes;
+    using DataTypesTuple = typename ModuleTypes::DataTypesTuple;
     
-    // Helper to extract input types tuple from InputSpec
-    template<typename T>
-    struct ExtractInputTypes {
-        using type = std::tuple<>;  // No inputs
-    };
+    // Mailbox types
+    using CmdMailbox = typename ModuleTypes::CmdMailbox;
+    using WorkMailbox = typename ModuleTypes::WorkMailbox;
+    using PublishMailbox = typename ModuleTypes::PublishMailbox;
+    using DataMailbox = typename ModuleTypes::DataMailbox;
     
-    template<typename T>
-    struct ExtractInputTypes<Input<T>> {
-        using type = std::tuple<T>;  // Single input
-    };
-    
-    template<typename... Ts>
-    struct ExtractInputTypes<Inputs<Ts...>> {
-        using type = std::tuple<Ts...>;  // Multi-input
-    };
-    
-    using InputTypesTuple = typename ExtractInputTypes<InputSpec>::type;
-    static constexpr size_t InputCount = std::tuple_size_v<InputTypesTuple>;
-    static constexpr bool has_multi_input = InputCount > 1;
-    
-    // Helper to check if there's an explicit PrimaryInput in CommandTypes
-    // (PrimaryInput is passed as a command type to Module<..., Inputs<>, PrimaryInput<T>>)
-    template<typename...>
-    struct HasPrimaryInputHelper : std::false_type {};
-    
-    template<typename T, typename... Rest>
-    struct HasPrimaryInputHelper<PrimaryInput<T>, Rest...> : std::true_type {};
-    
-    template<typename First, typename... Rest>
-    struct HasPrimaryInputHelper<First, Rest...> : HasPrimaryInputHelper<Rest...> {};
-    
-    static constexpr bool has_primary_input_spec = HasPrimaryInputHelper<CommandTypes...>::value;
-    
-    // Helper to extract primary payload type from CommandTypes
-    template<typename...>
-    struct ExtractPrimaryPayloadHelper {
-        using type = void;
-    };
-    
-    template<typename T, typename... Rest>
-    struct ExtractPrimaryPayloadHelper<PrimaryInput<T>, Rest...> {
-        using type = T;
-    };
-    
-    template<typename First, typename... Rest>
-    struct ExtractPrimaryPayloadHelper<First, Rest...> : ExtractPrimaryPayloadHelper<Rest...> {};
-    
-    using PrimaryPayloadType = typename ExtractPrimaryPayloadHelper<CommandTypes...>::type;
+    // Counts and flags
+    static constexpr size_t num_output_types = ModuleTypes::num_output_types;
+    static constexpr size_t InputCount = ModuleTypes::InputCount;
+    static constexpr bool has_multi_input = ModuleTypes::has_multi_input;
+    static constexpr bool use_mailbox_sets = ModuleTypes::use_mailbox_sets;
+    static constexpr bool has_primary_input_spec = ModuleTypes::has_primary_input_spec;
+    using PrimaryPayloadType = typename ModuleTypes::PrimaryPayloadType;
     
     // Compile-time validation: If PrimaryInput<T> specified, T must be in Inputs<...>
-    // For multi-input modules with explicit PrimaryInput, validate the type is in the inputs list
     template<typename Dummy = void>
     struct ValidatePrimaryInputImpl {
         static constexpr bool check() {
@@ -191,122 +158,16 @@ private:
     static_assert(ValidatePrimaryInputImpl<>::value, 
                   "PrimaryInput validation failed - see error above for details");
     
-    // Helper to extract OutputData type from OutputSpec
-    template<typename T>
-    struct ExtractOutputData {
-        using type = T;  // Raw type passes through
-    };
-    
-    template<typename T>
-    struct ExtractOutputData<Output<T>> {
-        using type = T;
-    };
-    
-    template<typename... Ts>
-    struct ExtractOutputData<Outputs<Ts...>> {
-        using type = void;  // Multi-output: void process(T1& out1, T2& out2, ...)
-    };
-    
-    // Helper to get output types as tuple
-    template<typename T>
-    struct OutputTypes {
-        using type = std::tuple<T>;
-    };
-    
-    template<typename T>
-    struct OutputTypes<Output<T>> {
-        using type = std::tuple<T>;
-    };
-    
-    template<typename... Ts>
-    struct OutputTypes<Outputs<Ts...>> {
-        using type = std::tuple<Ts...>;
-    };
-    
-    using OutputTypesTuple = typename OutputTypes<OutputSpec>::type;
-    static constexpr size_t num_output_types = std::tuple_size_v<OutputTypesTuple>;
-    
-    // Phase 7.4: Generate MailboxSet for each output type
-    template<typename... OutputTypes>
-    struct MakeMailboxSetTuple;
-    
-    template<typename... OutputTypes>
-    struct MakeMailboxSetTuple<std::tuple<OutputTypes...>> {
-        using type = std::tuple<MailboxSet<UserRegistry, OutputTypes, CommandTypes...>...>;
-    };
-    
-    using MailboxSetTuple = typename MakeMailboxSetTuple<OutputTypesTuple>::type;
-    
 public:
-    using OutputData = typename ExtractOutputData<OutputSpec>::type;
-    using InputData = typename ExtractInputData<InputSpec>::type;
+    // Public type aliases (user-visible)
+    using OutputData = typename ModuleTypes::OutputData;
+    using InputData = typename ModuleTypes::InputData;
     
-    static constexpr bool has_continuous_input = HasContinuousInput<InputSpec>;
-    static constexpr bool has_periodic_input = std::is_same_v<InputSpec, PeriodicInput>;
-    static constexpr bool has_loop_input = std::is_same_v<InputSpec, LoopInput>;
-    static constexpr bool has_multi_output = OutputCount_v<OutputSpec> > 1;
-    
-private:
-    // Phase 7.3: Type-optimized mailboxes
-    // CMD mailbox: Commands + Outputs (receives commands, sends outputs to subscribers)
-    template<typename... Ts>
-    struct MakeTypedCmdMailbox;
-    
-    template<typename... Ts>
-    struct MakeTypedCmdMailbox<std::tuple<Ts...>> {
-        using type = std::conditional_t<
-            sizeof...(Ts) == 0,
-            RegistryMailbox<UserRegistry>,  // No types → regular mailbox
-            TypedMailbox<UserRegistry, Ts...>  // Has types → restrict
-        >;
-    };
-    
-    using CommandTuple = std::tuple<CommandTypes...>;
-    using CombinedCmdTypes = decltype(std::tuple_cat(
-        std::declval<CommandTuple>(),
-        std::declval<OutputTypesTuple>()
-    ));
-    
-    using CmdMailbox = typename MakeTypedCmdMailbox<CommandTuple>::type;
-    
-    // WORK mailbox: Subscription protocol (all 4 types from SystemRegistry)
-    using WorkMailbox = RegistryMailbox<SystemRegistry>;
-    
-    // PUBLISH mailbox: Output publishing (producer sends outputs to subscribers)
-    using PublishMailbox = typename MakeTypedCmdMailbox<OutputTypesTuple>::type;
-    
-    // DATA mailbox: Input data types only
-    // Extract payload types from InputSpec and use them to restrict mailbox
-    template<typename T>
-    struct ExtractDataTypes { using type = std::tuple<>; };
-    
-    template<typename T>
-    struct ExtractDataTypes<Input<T>> { using type = std::tuple<T>; };
-    
-    template<typename... Ts>
-    struct ExtractDataTypes<Inputs<Ts...>> { using type = std::tuple<Ts...>; };
-    
-    using DataTypesTuple = typename ExtractDataTypes<InputSpec>::type;
-    
-    // Convert tuple<Ts...> to TypedMailbox<Registry, Ts...>
-    template<typename Tuple>
-    struct MakeTypedDataMailbox;
-    
-    template<typename... Ts>
-    struct MakeTypedDataMailbox<std::tuple<Ts...>> {
-        using type = std::conditional_t<
-            sizeof...(Ts) == 0,
-            RegistryMailbox<UserRegistry>,  // No inputs → regular mailbox
-            TypedMailbox<UserRegistry, Ts...>  // Has inputs → restrict to input types
-        >;
-    };
-    
-    using DataMailbox = typename MakeTypedDataMailbox<DataTypesTuple>::type;
-    
-    // Phase 7.4: Conditional mailbox structure
-    // Single output: Use traditional cmd/work/publish mailboxes
-    // Multiple outputs: Use tuple of MailboxSets (one per output type)
-    static constexpr bool use_mailbox_sets = (num_output_types > 1);
+    // Input mode flags
+    static constexpr bool has_continuous_input = ModuleTypes::has_continuous_input;
+    static constexpr bool has_periodic_input = ModuleTypes::has_periodic_input;
+    static constexpr bool has_loop_input = ModuleTypes::has_loop_input;
+    static constexpr bool has_multi_output = ModuleTypes::has_multi_output;
     
 protected:
     ModuleConfig config_;
