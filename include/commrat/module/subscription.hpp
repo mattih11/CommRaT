@@ -131,6 +131,8 @@ protected:
     RegistryMailbox<SystemRegistry>* work_mailbox_{nullptr};
     std::string module_name_;
     
+    // Helper removed - work_mailbox_ is now properly typed
+    
     /**
      * @brief Calculate base mailbox address for this module
      * Uses output type info to determine address, same as Module class

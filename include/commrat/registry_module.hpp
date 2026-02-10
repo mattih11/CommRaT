@@ -1,6 +1,7 @@
 #pragma once
 
 #include "commrat/mailbox/registry_mailbox.hpp"
+#include "commrat/mailbox/typed_mailbox.hpp"  // Phase 7.3: Type-optimized mailboxes
 #include "commrat/mailbox/historical_mailbox.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
@@ -18,6 +19,7 @@
 #include "commrat/module/subscription.hpp"
 #include "commrat/module/publishing.hpp"
 #include "commrat/module/loops/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
+#include "commrat/module/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -222,6 +224,18 @@ private:
     };
     
     using OutputTypesTuple = typename OutputTypes<OutputSpec>::type;
+    static constexpr size_t num_output_types = std::tuple_size_v<OutputTypesTuple>;
+    
+    // Phase 7.4: Generate MailboxSet for each output type
+    template<typename... OutputTypes>
+    struct MakeMailboxSetTuple;
+    
+    template<typename... OutputTypes>
+    struct MakeMailboxSetTuple<std::tuple<OutputTypes...>> {
+        using type = std::tuple<MailboxSet<UserRegistry, OutputTypes, CommandTypes...>...>;
+    };
+    
+    using MailboxSetTuple = typename MakeMailboxSetTuple<OutputTypesTuple>::type;
     
 public:
     using OutputData = typename ExtractOutputData<OutputSpec>::type;
@@ -233,19 +247,146 @@ public:
     static constexpr bool has_multi_output = OutputCount_v<OutputSpec> > 1;
     
 private:
-    // Type aliases for mailboxes
-    using CmdMailbox = RegistryMailbox<UserRegistry>;  // Command mailbox (user commands only)
-    using WorkMailbox = RegistryMailbox<SystemRegistry>;  // Work mailbox (subscription protocol)
-    using DataMailbox = RegistryMailbox<UserRegistry>;  // Data mailbox (input data)
+    // Phase 7.3: Type-optimized mailboxes
+    // CMD mailbox: Commands + Outputs (receives commands, sends outputs to subscribers)
+    template<typename... Ts>
+    struct MakeTypedCmdMailbox;
+    
+    template<typename... Ts>
+    struct MakeTypedCmdMailbox<std::tuple<Ts...>> {
+        using type = std::conditional_t<
+            sizeof...(Ts) == 0,
+            RegistryMailbox<UserRegistry>,  // No types → regular mailbox
+            TypedMailbox<UserRegistry, Ts...>  // Has types → restrict
+        >;
+    };
+    
+    using CommandTuple = std::tuple<CommandTypes...>;
+    using CombinedCmdTypes = decltype(std::tuple_cat(
+        std::declval<CommandTuple>(),
+        std::declval<OutputTypesTuple>()
+    ));
+    
+    using CmdMailbox = typename MakeTypedCmdMailbox<CommandTuple>::type;
+    
+    // WORK mailbox: Subscription protocol (all 4 types from SystemRegistry)
+    using WorkMailbox = RegistryMailbox<SystemRegistry>;
+    
+    // PUBLISH mailbox: Output publishing (producer sends outputs to subscribers)
+    using PublishMailbox = typename MakeTypedCmdMailbox<OutputTypesTuple>::type;
+    
+    // DATA mailbox: Input data types only
+    // Extract payload types from InputSpec and use them to restrict mailbox
+    template<typename T>
+    struct ExtractDataTypes { using type = std::tuple<>; };
+    
+    template<typename T>
+    struct ExtractDataTypes<Input<T>> { using type = std::tuple<T>; };
+    
+    template<typename... Ts>
+    struct ExtractDataTypes<Inputs<Ts...>> { using type = std::tuple<Ts...>; };
+    
+    using DataTypesTuple = typename ExtractDataTypes<InputSpec>::type;
+    
+    // Convert tuple<Ts...> to TypedMailbox<Registry, Ts...>
+    template<typename Tuple>
+    struct MakeTypedDataMailbox;
+    
+    template<typename... Ts>
+    struct MakeTypedDataMailbox<std::tuple<Ts...>> {
+        using type = std::conditional_t<
+            sizeof...(Ts) == 0,
+            RegistryMailbox<UserRegistry>,  // No inputs → regular mailbox
+            TypedMailbox<UserRegistry, Ts...>  // Has inputs → restrict to input types
+        >;
+    };
+    
+    using DataMailbox = typename MakeTypedDataMailbox<DataTypesTuple>::type;
+    
+    // Phase 7.4: Conditional mailbox structure
+    // Single output: Use traditional cmd/work/publish mailboxes
+    // Multiple outputs: Use tuple of MailboxSets (one per output type)
+    static constexpr bool use_mailbox_sets = (num_output_types > 1);
     
 protected:
     ModuleConfig config_;
-    CmdMailbox cmd_mailbox_;    // base + 0: Receives user commands
-    WorkMailbox work_mailbox_;  // base + 16: Handles subscription protocol
+    
+    // Phase 7.4: Per-output mailbox infrastructure
+    // For single output: Direct mailboxes (backward compatible)
+    // For multi-output: Tuple of MailboxSets (each output at its own base address)
+    std::conditional_t<
+        use_mailbox_sets,
+        MailboxSetTuple,  // Multi-output: tuple of MailboxSets
+        std::tuple<CmdMailbox, WorkMailbox, PublishMailbox>  // Single-output: wrapped in tuple for uniform access
+    > mailbox_infrastructure_;
+    
+    // Helper accessors for single-output case (backward compatible)
+    CmdMailbox& cmd_mailbox() {
+        if constexpr (!use_mailbox_sets) {
+            return std::get<0>(mailbox_infrastructure_);
+        } else {
+            // Multi-output: return first MailboxSet's cmd mailbox
+            return *std::get<0>(mailbox_infrastructure_).cmd;
+        }
+    }
+    
+    WorkMailbox& work_mailbox() {
+        if constexpr (!use_mailbox_sets) {
+            return std::get<1>(mailbox_infrastructure_);
+        } else {
+            // Multi-output: return first MailboxSet's work mailbox
+            return *std::get<0>(mailbox_infrastructure_).work;
+        }
+    }
+    
+    PublishMailbox& publish_mailbox() {
+        static_assert(!use_mailbox_sets, "publish_mailbox() accessor only available for single-output modules. Use get_publish_mailbox_public<Index>() for multi-output");
+        return std::get<2>(mailbox_infrastructure_);
+    }
+    
+    // Multi-output accessor - get specific MailboxSet by index
+    template<std::size_t Index>
+    auto& get_mailbox_set() {
+        static_assert(use_mailbox_sets, "get_mailbox_set() only available for multi-output modules");
+        return std::get<Index>(mailbox_infrastructure_);
+    }
+    
+    // Get publish mailbox by index for multi-output modules
+    template<std::size_t Index>
+    auto& get_publish_mailbox() {
+        if constexpr (use_mailbox_sets) {
+            return *std::get<Index>(mailbox_infrastructure_).publish;
+        } else {
+            static_assert(Index == 0, "Single-output modules only have one publish mailbox (index 0)");
+            return std::get<2>(mailbox_infrastructure_);
+        }
+    }
+    
+    // Get work mailbox by index for multi-output modules
+    template<std::size_t Index>
+    auto& get_work_mailbox() {
+        if constexpr (use_mailbox_sets) {
+            return *std::get<Index>(mailbox_infrastructure_).work;
+        } else {
+            static_assert(Index == 0, "Single-output modules only have one work mailbox (index 0)");
+            return std::get<1>(mailbox_infrastructure_);
+        }
+    }
+    
+    // Get cmd mailbox by index for multi-output modules
+    template<std::size_t Index>
+    auto& get_cmd_mailbox() {
+        if constexpr (use_mailbox_sets) {
+            return *std::get<Index>(mailbox_infrastructure_).cmd;
+        } else {
+            static_assert(Index == 0, "Single-output modules only have one cmd mailbox (index 0)");
+            return std::get<0>(mailbox_infrastructure_);
+        }
+    }
     
     // Phase 6.6: Multi-input support
     // Single-input mode (backward compatible)
-    std::optional<DataMailbox> data_mailbox_;  // base + 32: Receives input data (only for single ContinuousInput)
+    std::optional<DataMailbox> data_mailbox_;  // base + 48: Receives input data (only for single ContinuousInput)
     
     // Multi-input mode (Phase 6.6) - one HistoricalMailbox per input type
     // Tuple index corresponds to position in Inputs<T1, T2, ...>
@@ -282,7 +423,14 @@ protected:
     SubscriptionProtocolType subscription_protocol_;
     
     // Publishing logic (Phase 5: extracted to publishing.hpp)
-    using PublisherType = commrat::Publisher<UserRegistry, OutputData, commrat::SubscriberManager>;
+    // Phase 7.4: Add Module type for multi-output mailbox access
+    using PublisherType = commrat::Publisher<
+        UserRegistry, 
+        OutputData, 
+        commrat::SubscriberManager, 
+        PublishMailbox,
+        Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>  // Module type for get_publish_mailbox<Index>()
+    >;
     PublisherType publisher_;
     
     std::atomic<bool> running_;
@@ -346,27 +494,76 @@ protected:
         input_metadata_[index].is_new_data = false;
     }
     
+    /**
+     * @brief Helper to create mailbox infrastructure (Phase 7.4)
+     * 
+     * Single output: Returns tuple<CmdMailbox, WorkMailbox, PublishMailbox>
+     * Multi-output: Returns tuple<MailboxSet<T1>, MailboxSet<T2>, ...>
+     */
+    static auto create_mailbox_infrastructure(const ModuleConfig& config) {
+        if constexpr (!use_mailbox_sets) {
+            // Single output: Create traditional mailboxes
+            CmdMailbox cmd(MailboxConfig{
+                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
+                    config.system_id, config.instance_id, MailboxType::CMD),
+                .message_slots = config.message_slots,
+                .max_message_size = UserRegistry::max_message_size,
+                .send_priority = static_cast<uint8_t>(config.priority),
+                .realtime = config.realtime,
+                .mailbox_name = config.name + "_cmd"
+            });
+            
+            WorkMailbox work(MailboxConfig{
+                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
+                    config.system_id, config.instance_id, MailboxType::WORK),
+                .message_slots = config.message_slots,
+                .max_message_size = SystemRegistry::max_message_size,
+                .send_priority = static_cast<uint8_t>(config.priority),
+                .realtime = config.realtime,
+                .mailbox_name = config.name + "_work"
+            });
+            
+            PublishMailbox publish(MailboxConfig{
+                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
+                    config.system_id, config.instance_id, MailboxType::PUBLISH),
+                .message_slots = config.message_slots,
+                .max_message_size = UserRegistry::max_message_size,
+                .send_priority = static_cast<uint8_t>(config.priority),
+                .realtime = config.realtime,
+                .mailbox_name = config.name + "_publish"
+            });
+            
+            return std::make_tuple(std::move(cmd), std::move(work), std::move(publish));
+        } else {
+            // Multi-output: Create tuple of MailboxSets
+            return create_mailbox_sets_impl(config, std::make_index_sequence<num_output_types>{});
+        }
+    }
+    
+    /**
+     * @brief Helper to create MailboxSet tuple for multi-output modules
+     */
+    template<std::size_t... Is>
+    static auto create_mailbox_sets_impl(const ModuleConfig& config, std::index_sequence<Is...>) {
+        // Use fold expression to construct tuple with initialized MailboxSets
+        return MailboxSetTuple{create_mailbox_set<Is>(config)...};
+    }
+    
+    /**
+     * @brief Create a single MailboxSet for output type at index I
+     */
+    template<std::size_t I>
+    static auto create_mailbox_set(const ModuleConfig& config) {
+        using OutputType = std::tuple_element_t<I, OutputTypesTuple>;
+        MailboxSet<UserRegistry, OutputType, CommandTypes...> set;
+        set.initialize(config);
+        return set;
+    }
+    
 public:
     explicit Module(const ModuleConfig& config)
         : config_(config)
-        , cmd_mailbox_(MailboxConfig{
-            .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                config.system_id, config.instance_id, MailboxType::CMD),
-            .message_slots = config.message_slots,
-            .max_message_size = UserRegistry::max_message_size,
-            .send_priority = static_cast<uint8_t>(config.priority),
-            .realtime = config.realtime,
-            .mailbox_name = config.name + "_cmd"
-        })
-        , work_mailbox_(MailboxConfig{
-            .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                config.system_id, config.instance_id, MailboxType::WORK),
-            .message_slots = config.message_slots,
-            .max_message_size = SystemRegistry::max_message_size,
-            .send_priority = static_cast<uint8_t>(config.priority),
-            .realtime = config.realtime,
-            .mailbox_name = config.name + "_work"
-        })
+        , mailbox_infrastructure_(create_mailbox_infrastructure(config))
         , data_mailbox_(has_continuous_input && !has_multi_input ? 
             std::make_optional<DataMailbox>(MailboxConfig{
                 .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
@@ -385,12 +582,19 @@ public:
         
         // Initialize subscription protocol
         subscription_protocol_.set_config(&config_);
-        subscription_protocol_.set_work_mailbox(&work_mailbox_);
+        subscription_protocol_.set_work_mailbox(&work_mailbox());
         subscription_protocol_.set_module_name(config.name);
         
         // Initialize publisher
         publisher_.set_subscriber_manager(this);  // Module inherits from SubscriberManager
-        publisher_.set_cmd_mailbox(&cmd_mailbox_);
+        publisher_.set_module_ptr(this);  // For multi-output mailbox access
+        
+        // Only set publish mailbox for single-output modules
+        if constexpr (!use_mailbox_sets) {
+            publisher_.set_publish_mailbox(&publish_mailbox());
+        }
+        // Multi-output modules access mailboxes via get_publish_mailbox<Index>()
+        
         publisher_.set_module_name(config.name);
         
         // Phase 6.6: Initialize multi-input mailboxes
@@ -436,6 +640,23 @@ protected:
 
 public:
     // ========================================================================
+    // Phase 7.4: Public Mailbox Accessors for Multi-Output
+    // ========================================================================
+    
+    /**
+     * @brief Get publish mailbox by index (public for Publisher access)
+     */
+    template<std::size_t Index>
+    auto& get_publish_mailbox_public() {
+        if constexpr (use_mailbox_sets) {
+            return *std::get<Index>(mailbox_infrastructure_).publish;
+        } else {
+            static_assert(Index == 0, "Single-output modules only have one publish mailbox (index 0)");
+            return std::get<2>(mailbox_infrastructure_);
+        }
+    }
+    
+    // ========================================================================
     // Lifecycle Management
     // ========================================================================
     
@@ -447,12 +668,12 @@ public:
         on_init();
         
         // Start all 3 mailboxes
-        auto cmd_result = cmd_mailbox_.start();
+        auto cmd_result = cmd_mailbox().start();
         if (!cmd_result) {
             throw std::runtime_error("Failed to start command mailbox");
         }
         
-        auto work_result = work_mailbox_.start();
+        auto work_result = work_mailbox().start();
         if (!work_result) {
             throw std::runtime_error("Failed to start work mailbox");
         }
@@ -558,8 +779,8 @@ public:
         }
         
         // Stop all mailboxes
-        cmd_mailbox_.stop();
-        work_mailbox_.stop();
+        cmd_mailbox().stop();
+        work_mailbox().stop();
         if (data_mailbox_) {
             data_mailbox_->stop();
         }
@@ -692,7 +913,7 @@ private:
             };
             
             // BLOCKING receive on command mailbox (no timeout)
-            cmd_mailbox_.receive_any(visitor);
+            cmd_mailbox().receive_any(visitor);
         }
         std::cout << "[" << config_.name << "] command_loop ended\n";
     }
@@ -725,7 +946,7 @@ private:
             };
             
             // BLOCKING receive on work mailbox (no timeout)
-            work_mailbox_.receive_any(visitor);
+            work_mailbox().receive_any(visitor);
         }
         std::cout << "[" << config_.name << "] work_loop ended\n";
     }

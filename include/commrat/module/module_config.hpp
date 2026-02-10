@@ -32,9 +32,10 @@ struct ContinuousInput {
 
 // Mailbox type identifiers (offsets from base address)
 enum class MailboxType : uint8_t {
-    CMD = 0,   // Command mailbox - receives imperative commands
-    WORK = 16,  // Work mailbox - handles subscription protocol  
-    DATA = 32   // Data mailbox - receives input data streams
+    CMD = 0,      // Command mailbox - receives user commands only
+    WORK = 16,    // Work/System mailbox - subscription protocol + system messages
+    PUBLISH = 32, // Publish mailbox - sends output data to subscribers
+    DATA = 48     // Data mailbox - receives input data streams
 };
 
 // Phase 6.5: Multi-input source configuration
