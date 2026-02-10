@@ -667,15 +667,21 @@ public:
         
         on_init();
         
-        // Start all 3 mailboxes
-        auto cmd_result = cmd_mailbox().start();
-        if (!cmd_result) {
-            throw std::runtime_error("Failed to start command mailbox");
-        }
-        
-        auto work_result = work_mailbox().start();
-        if (!work_result) {
-            throw std::runtime_error("Failed to start work mailbox");
+        // Phase 7.4: Start mailboxes (all MailboxSets for multi-output)
+        if constexpr (use_mailbox_sets) {
+            // Multi-output: start all MailboxSets
+            start_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
+        } else {
+            // Single-output: start individual mailboxes
+            auto cmd_result = cmd_mailbox().start();
+            if (!cmd_result) {
+                throw std::runtime_error("Failed to start command mailbox");
+            }
+            
+            auto work_result = work_mailbox().start();
+            if (!work_result) {
+                throw std::runtime_error("Failed to start work mailbox");
+            }
         }
         
         // Only start data mailbox for single ContinuousInput modules
@@ -737,6 +743,48 @@ public:
         }
     }
     
+    /**
+     * @brief Start all MailboxSets for multi-output modules
+     */
+    template<std::size_t... Is>
+    void start_all_mailbox_sets(std::index_sequence<Is...>) {
+        // Start CMD and WORK mailboxes for each output type
+        (void)std::initializer_list<int>{
+            (start_mailbox_set<Is>(), 0)...
+        };
+    }
+    
+    template<std::size_t Index>
+    void start_mailbox_set() {
+        auto& cmd = get_cmd_mailbox<Index>();
+        auto cmd_result = cmd.start();
+        if (!cmd_result) {
+            throw std::runtime_error("[Module] Failed to start CMD mailbox for output " + std::to_string(Index));
+        }
+        
+        auto& work = get_work_mailbox<Index>();
+        auto work_result = work.start();
+        if (!work_result) {
+            throw std::runtime_error("[Module] Failed to start WORK mailbox for output " + std::to_string(Index));
+        }
+    }
+    
+    /**
+     * @brief Stop all MailboxSets for multi-output modules
+     */
+    template<std::size_t... Is>
+    void stop_all_mailbox_sets(std::index_sequence<Is...>) {
+        (void)std::initializer_list<int>{
+            (stop_mailbox_set<Is>(), 0)...
+        };
+    }
+    
+    template<std::size_t Index>
+    void stop_mailbox_set() {
+        get_cmd_mailbox<Index>().stop();
+        get_work_mailbox<Index>().stop();
+    }
+    
     void stop() {
         if (!running_) {
             return;
@@ -779,8 +827,14 @@ public:
         }
         
         // Stop all mailboxes
-        cmd_mailbox().stop();
-        work_mailbox().stop();
+        if constexpr (use_mailbox_sets) {
+            // Multi-output: stop all MailboxSets
+            stop_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
+        } else {
+            // Single-output
+            cmd_mailbox().stop();
+            work_mailbox().stop();
+        }
         if (data_mailbox_) {
             data_mailbox_->stop();
         }
