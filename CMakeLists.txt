@@ -124,6 +124,11 @@ add_executable(test_mailbox_sizing test/test_mailbox_sizing.cpp)
 target_link_libraries(test_mailbox_sizing PRIVATE commrat)
 target_include_directories(test_mailbox_sizing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+# Phase 7: TypedMailbox compile-time type validation test
+add_executable(test_typed_mailbox test/test_typed_mailbox.cpp)
+target_link_libraries(test_typed_mailbox PRIVATE commrat)
+target_include_directories(test_typed_mailbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 
 # Install targets
 install(TARGETS commrat
