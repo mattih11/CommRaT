@@ -775,6 +775,12 @@ public:
         if (!work_result) {
             throw std::runtime_error("[Module] Failed to start WORK mailbox for output " + std::to_string(Index));
         }
+        
+        auto& publish = get_publish_mailbox_public<Index>();
+        auto publish_result = publish.start();
+        if (!publish_result) {
+            throw std::runtime_error("[Module] Failed to start PUBLISH mailbox for output " + std::to_string(Index));
+        }
     }
     
     /**
@@ -815,6 +821,7 @@ public:
     void stop_mailbox_set() {
         get_cmd_mailbox<Index>().stop();
         get_work_mailbox<Index>().stop();
+        get_publish_mailbox_public<Index>().stop();
     }
     
     void stop() {
