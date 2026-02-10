@@ -438,8 +438,9 @@ protected:
     // Module threads
     std::optional<std::thread> data_thread_;
     std::optional<std::thread> command_thread_;
-    std::optional<std::thread> work_thread_;
-    std::vector<std::thread> secondary_input_threads_;  // Phase 6.9: Receive loops for secondary inputs
+    std::optional<std::thread> work_thread_;              // Single-output: one WORK mailbox
+    std::vector<std::thread> output_work_threads_;        // Multi-output: one thread per MailboxSet
+    std::vector<std::thread> secondary_input_threads_;    // Phase 6.9: Receive loops for secondary inputs
     
     // Subscriber management - inherited from SubscriberManager base class
     // (subscribers_, subscribers_mutex_ now in SubscriberManager)
@@ -700,8 +701,15 @@ public:
         running_ = true;
         on_start();
         
-        // Start work thread FIRST to handle subscriptions
-        work_thread_ = std::thread(&Module::work_loop, this);
+        // Start work thread(s) FIRST to handle subscriptions
+        if constexpr (use_mailbox_sets) {
+            // Multi-output: spawn one thread per MailboxSet
+            std::cout << "[" << config_.name << "] Spawning " << num_output_types << " output work threads...\n";
+            spawn_all_output_work_threads(std::make_index_sequence<num_output_types>{});
+        } else {
+            // Single-output: one work thread
+            work_thread_ = std::thread(&Module::work_loop, this);
+        }
         
         // Start command thread for user commands
         command_thread_ = std::thread(&Module::command_loop, this);
@@ -770,6 +778,30 @@ public:
     }
     
     /**
+     * @brief Spawn all output work threads for multi-output modules
+     * 
+     * Creates one thread per MailboxSet to handle subscriptions independently.
+     */
+    template<std::size_t... Is>
+    void spawn_all_output_work_threads(std::index_sequence<Is...>) {
+        // Reserve space for all threads
+        output_work_threads_.reserve(sizeof...(Is));
+        
+        // Spawn one thread per output type using fold expression
+        (void)std::initializer_list<int>{
+            (spawn_output_work_thread<Is>(), 0)...
+        };
+    }
+    
+    /**
+     * @brief Spawn work thread for a specific output index
+     */
+    template<std::size_t Index>
+    void spawn_output_work_thread() {
+        output_work_threads_.emplace_back(&Module::output_work_loop<Index>, this);
+    }
+    
+    /**
      * @brief Stop all MailboxSets for multi-output modules
      */
     template<std::size_t... Is>
@@ -819,9 +851,23 @@ public:
             }
         }
         
-        if (work_thread_ && work_thread_->joinable()) {
-            work_thread_->join();
+        // Join work threads (single or multi-output)
+        if constexpr (use_mailbox_sets) {
+            // Multi-output: join all output work threads
+            std::cout << "[" << config_.name << "] Joining " << output_work_threads_.size() 
+                      << " output work threads...\n";
+            for (auto& thread : output_work_threads_) {
+                if (thread.joinable()) {
+                    thread.join();
+                }
+            }
+        } else {
+            // Single-output: join single work thread
+            if (work_thread_ && work_thread_->joinable()) {
+                work_thread_->join();
+            }
         }
+        
         if (command_thread_ && command_thread_->joinable()) {
             command_thread_->join();
         }
@@ -1003,6 +1049,54 @@ private:
             work_mailbox().receive_any(visitor);
         }
         std::cout << "[" << config_.name << "] work_loop ended\n";
+    }
+    
+    /**
+     * @brief Multi-output work loop for a specific output index
+     * 
+     * Each MailboxSet gets its own work thread to handle subscriptions
+     * independently. This allows consumers to subscribe to specific output
+     * types without interference.
+     * 
+     * @tparam Index Output index (0-based)
+     */
+    template<std::size_t Index>
+    void output_work_loop() {
+        using OutputType = std::tuple_element_t<Index, OutputTypesTuple>;
+        uint32_t work_mailbox_addr = commrat::get_mailbox_address<OutputType, OutputTypesTuple, UserRegistry>(
+            config_.system_id, config_.instance_id, MailboxType::WORK);
+        
+        std::cout << "[" << config_.name << "] output_work_loop[" << Index << "] started for "
+                  << typeid(OutputType).name() << ", listening on WORK mailbox " 
+                  << work_mailbox_addr << "\n" << std::flush;
+        
+        auto& work_mbx = get_work_mailbox<Index>();
+        
+        while (running_) {
+            std::cout << "[" << config_.name << "] output_work_loop[" << Index << "]: waiting for message...\n" << std::flush;
+            auto visitor = [this](auto&& tims_msg) {
+                auto& msg = tims_msg.payload;
+                using MsgType = std::decay_t<decltype(msg)>;
+                
+                if constexpr (std::is_same_v<MsgType, SubscribeRequestType>) {
+                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
+                              << "] Handling SubscribeRequest\n";
+                    handle_subscribe_request(msg);
+                } else if constexpr (std::is_same_v<MsgType, SubscribeReplyType>) {
+                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
+                              << "] Handling SubscribeReply\n";
+                    handle_subscribe_reply(msg);
+                } else if constexpr (std::is_same_v<MsgType, UnsubscribeRequestType>) {
+                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
+                              << "] Handling UnsubscribeRequest\n";
+                    handle_unsubscribe_request(msg);
+                }
+            };
+            
+            work_mbx.receive_any(visitor);
+        }
+        
+        std::cout << "[" << config_.name << "] output_work_loop[" << Index << "] ended\n";
     }
     
     /**
