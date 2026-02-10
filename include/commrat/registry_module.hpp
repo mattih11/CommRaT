@@ -445,6 +445,11 @@ protected:
     // Subscriber management - inherited from SubscriberManager base class
     // (subscribers_, subscribers_mutex_ now in SubscriberManager)
     
+    // Phase 7: Multi-output subscriber management
+    // Each output type has its own subscriber list
+    std::vector<std::vector<uint32_t>> output_subscribers_;  // [output_index][subscriber_id]
+    mutable std::mutex output_subscribers_mutex_;            // Protects output_subscribers_
+    
     // ========================================================================
     // Phase 6.10: Input Metadata Storage
     // ========================================================================
@@ -580,6 +585,11 @@ public:
     {
         // Initialize SubscriberManager
         this->set_max_subscribers(config.max_subscribers);
+        
+        // Phase 7: Initialize per-output subscriber lists for multi-output
+        if constexpr (use_mailbox_sets) {
+            output_subscribers_.resize(num_output_types);
+        }
         
         // Initialize subscription protocol
         subscription_protocol_.set_config(&config_);
@@ -928,6 +938,89 @@ protected:
     void handle_unsubscribe_request(const UnsubscribeRequestPayload& req) {
         subscription_protocol_.handle_unsubscribe_request(req, static_cast<commrat::SubscriberManager&>(*this));
     }
+    
+    /**
+     * @brief Phase 7: Add subscriber to correct output-specific list
+     * 
+     * For multi-output modules, extracts type ID from subscriber base address
+     * and routes to the appropriate output's subscriber list.
+     */
+    void add_subscriber_to_output(uint32_t subscriber_base_addr) {
+        if constexpr (use_mailbox_sets) {
+            // Extract type ID from subscriber's base address [type_id_low:16][system:8][instance:8]
+            uint16_t subscriber_type_id_low = static_cast<uint16_t>((subscriber_base_addr >> 16) & 0xFFFF);
+            
+            // Find matching output index
+            std::size_t output_idx = find_output_index_by_type_id(subscriber_type_id_low);
+            
+            if (output_idx < num_output_types) {
+                std::lock_guard<std::mutex> lock(output_subscribers_mutex_);
+                auto& subs = output_subscribers_[output_idx];
+                
+                // Check if already subscribed
+                if (std::find(subs.begin(), subs.end(), subscriber_base_addr) == subs.end()) {
+                    subs.push_back(subscriber_base_addr);
+                    std::cout << "[" << config_.name << "] Added subscriber " << subscriber_base_addr 
+                              << " to output[" << output_idx << "] (total: " << subs.size() << ")\n";
+                }
+            } else {
+                std::cerr << "[" << config_.name << "] ERROR: No matching output type for subscriber type ID " 
+                          << subscriber_type_id_low << "\n";
+            }
+        } else {
+            // Single-output: use inherited SubscriberManager::add_subscriber
+            this->add_subscriber(subscriber_base_addr);
+        }
+    }
+    
+    /**
+     * @brief Find output index by type ID (lower 16 bits of message ID)
+     */
+    template<std::size_t... Is>
+    std::size_t find_output_index_by_type_id_impl(uint16_t type_id_low, std::index_sequence<Is...>) const {
+        std::size_t result = num_output_types;  // Invalid index by default
+        
+        // Check each output type's message ID
+        ((check_output_type_match<Is>(type_id_low, result)) || ...);
+        
+        return result;
+    }
+    
+    template<std::size_t Index>
+    bool check_output_type_match(uint16_t type_id_low, std::size_t& result) const {
+        using OutputType = std::tuple_element_t<Index, OutputTypesTuple>;
+        constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
+        constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
+        
+        if (output_type_id_low == type_id_low) {
+            result = Index;
+            return true;  // Found match, stop searching
+        }
+        return false;  // Continue searching
+    }
+    
+    std::size_t find_output_index_by_type_id(uint16_t type_id_low) const {
+        if constexpr (use_mailbox_sets) {
+            return find_output_index_by_type_id_impl(type_id_low, std::make_index_sequence<num_output_types>{});
+        }
+        return 0;
+    }
+    
+public:
+    /**
+     * @brief Get subscribers for specific output index (multi-output)
+     * PUBLIC: Needed by Publisher to access per-output subscriber lists
+     */
+    std::vector<uint32_t> get_output_subscribers(std::size_t output_idx) const {
+        if constexpr (use_mailbox_sets) {
+            std::lock_guard<std::mutex> lock(output_subscribers_mutex_);
+            if (output_idx < output_subscribers_.size()) {
+                return output_subscribers_[output_idx];
+            }
+        }
+        return {};
+    }
+    
 protected:
 
     // ========================================================================
