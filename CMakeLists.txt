@@ -119,6 +119,11 @@ add_executable(test_timestamp_logic test/test_timestamp_logic.cpp)
 target_link_libraries(test_timestamp_logic PRIVATE commrat)
 target_include_directories(test_timestamp_logic PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+# Phase 7: Mailbox buffer sizing optimization test
+add_executable(test_mailbox_sizing test/test_mailbox_sizing.cpp)
+target_link_libraries(test_mailbox_sizing PRIVATE commrat)
+target_include_directories(test_mailbox_sizing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 
 # Install targets
 install(TARGETS commrat

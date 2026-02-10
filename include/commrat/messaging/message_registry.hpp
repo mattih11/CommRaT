@@ -177,6 +177,35 @@ public:
     }
     
     static constexpr size_t max_message_size = calc_max_size(static_cast<PayloadTypes*>(nullptr));
+    
+    /**
+     * @brief Calculate maximum message size for specific payload types
+     * 
+     * This allows creating typed mailboxes with correct buffer sizes instead of
+     * using max_message_size for all mailboxes (which wastes memory).
+     * 
+     * @tparam SpecificTypes Subset of payload types
+     * @return Maximum serialized size among the specified types
+     * 
+     * Example:
+     * @code
+     * // Only need buffer for ResetCmd (16 bytes) and CalibrateCmd (24 bytes)
+     * constexpr size_t cmd_buffer_size = Registry::max_size_for_types<ResetCmd, CalibrateCmd>();
+     * // Result: 24 bytes instead of Registry::max_message_size (e.g., 2048 bytes)
+     * @endcode
+     */
+    template<typename... SpecificTypes>
+    static constexpr size_t max_size_for_types() {
+        static_assert(sizeof...(SpecificTypes) > 0, 
+                      "max_size_for_types requires at least one type");
+        
+        // Validate all types are registered
+        static_assert((is_registered_v<SpecificTypes> && ...), 
+                      "All types must be registered in the message registry");
+        
+        // Calculate max size for the specified types
+        return std::max({sertial::Message<TimsMessage<SpecificTypes>>::max_buffer_size...});
+    }
 
 private:
     // Helper to get MessageDefinition for a payload type
