@@ -23,6 +23,7 @@
 #include "commrat/platform/tims_wrapper.hpp"
 #include "commrat/mailbox/mailbox.hpp"
 #include "commrat/mailbox/registry_mailbox.hpp"
+#include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/registry_module.hpp"
 
 /**
