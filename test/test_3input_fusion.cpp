@@ -195,11 +195,10 @@ protected:
 
 class SensorFusionModule : public FusionApp::Module<
     Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,
-    PrimaryInput<IMUData>  // IMU drives fusion rate at 100Hz
+    Inputs<IMUData, GPSData, LidarData>  // IMU (first) is automatically primary
 > {
 public:
-    using FusionApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>, PrimaryInput<IMUData>>::Module;
+    using FusionApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>>::Module;
     
 protected:
     FusedData process(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {

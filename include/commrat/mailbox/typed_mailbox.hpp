@@ -197,7 +197,54 @@ public:
         static_assert(is_registered_type<PayloadT>,
                       "Message type not registered in the message registry.");
         
-        return mailbox_.send(message, dest_mailbox);
+        // Create TimsMessage wrapper (const → non-const copy for underlying Mailbox)
+        TimsMessage<PayloadT> tims_msg{
+            .header = {
+                .msg_type = Registry::template get_message_id<PayloadT>(),
+                .msg_size = 0,  // Will be set by serialization
+                .timestamp = 0, // Will be set by TiMS with current time
+                .seq_number = 0, // Will be set by TiMS
+                .flags = 0
+            },
+            .payload = message
+        };
+        
+        return mailbox_.send(tims_msg, dest_mailbox);
+    }
+    
+    /**
+     * @brief Send a message with explicit timestamp (type-restricted)
+     * 
+     * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
+     * @param message Message to send
+     * @param dest_mailbox Destination mailbox ID
+     * @param timestamp Explicit timestamp to set in TimsHeader
+     * @return Success or error
+     */
+    template<typename PayloadT>
+    auto send(PayloadT& message, uint32_t dest_mailbox, uint64_t timestamp) 
+        -> MailboxResult<void> {
+        
+        static_assert(is_allowed_type<PayloadT>,
+                      "Message type not allowed in this typed mailbox. "
+                      "Check that PayloadT is in the AllowedPayloadTypes list.");
+        
+        static_assert(is_registered_type<PayloadT>,
+                      "Message type not registered in the message registry.");
+        
+        // Create TimsMessage wrapper with explicit timestamp
+        TimsMessage<PayloadT> tims_msg{
+            .header = {
+                .msg_type = Registry::template get_message_id<PayloadT>(),
+                .msg_size = 0,  // Will be set by serialization
+                .timestamp = timestamp, // USER-PROVIDED timestamp
+                .seq_number = 0, // Will be set by TiMS
+                .flags = 0
+            },
+            .payload = message
+        };
+        
+        return mailbox_.send(tims_msg, dest_mailbox);
     }
     
     /**
@@ -221,52 +268,78 @@ public:
     // ========================================================================
     
     /**
-     * @brief Receive a specific message type (type-restricted)
+     * @brief Blocking receive for specific payload type
      * 
-     * @tparam PayloadT Payload type to receive (must be in AllowedPayloadTypes)
-     * @param timeout Maximum time to wait (-1 for blocking)
+     * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
      * @return Received message or error
-     * 
-     * Compile-time validation ensures PayloadT is allowed.
      */
     template<typename PayloadT>
-    auto receive(std::chrono::milliseconds timeout = std::chrono::milliseconds{-1})
-        -> MailboxResult<TimsMessage<PayloadT>> {
-        
+    auto receive() -> MailboxResult<TimsMessage<PayloadT>> {
         static_assert(is_allowed_type<PayloadT>,
                       "Message type not allowed in this typed mailbox. "
                       "Check that PayloadT is in the AllowedPayloadTypes list.");
-        
         static_assert(is_registered_type<PayloadT>,
                       "Message type not registered in the message registry.");
-        
-        return mailbox_.template receive<PayloadT>(timeout);
+        return mailbox_.template receive<PayloadT>();
+    }
+    
+    /**
+     * @brief Receive with timeout for specific payload type
+     * 
+     * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
+     * @param timeout Maximum time to wait
+     * @return Received message or error
+     */
+    template<typename PayloadT>
+    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<TimsMessage<PayloadT>> {
+        static_assert(is_allowed_type<PayloadT>,
+                      "Message type not allowed in this typed mailbox.");
+        static_assert(is_registered_type<PayloadT>,
+                      "Message type not registered in the message registry.");
+        return mailbox_.template receive_for<PayloadT>(timeout);
     }
     
     /**
      * @brief Non-blocking receive (type-restricted)
+     * 
+     * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
+     * @return Received message or TIMEOUT error if no message available
      */
     template<typename PayloadT>
     auto try_receive() -> MailboxResult<TimsMessage<PayloadT>> {
-        return receive<PayloadT>(std::chrono::milliseconds{0});
+        static_assert(is_allowed_type<PayloadT>,
+                      "Message type not allowed in this typed mailbox.");
+        static_assert(is_registered_type<PayloadT>,
+                      "Message type not registered in the message registry.");
+        return mailbox_.template try_receive<PayloadT>();
     }
-    
-    // ========================================================================
-    // Raw Receive (No Type Restriction - for internal use)
-    // ========================================================================
     
     /**
-     * @brief Receive any message type (bypasses type restriction)
+     * @brief Blocking receive any allowed message type using visitor pattern
      * 
-     * This is useful for subscription management where we need to receive
-     * system messages that might not be in AllowedPayloadTypes.
-     * 
-     * NOTE: This bypasses type safety! Use only when necessary.
+     * @tparam Visitor Callable accepting TimsMessage<T> for any allowed T
+     * @return Success or error
      */
-    auto receive_any_raw(std::chrono::milliseconds timeout = std::chrono::milliseconds{-1})
-        -> MailboxResult<RawReceivedMessage> {
-        return mailbox_.receive_any_raw(timeout);
+    template<typename Visitor>
+    auto receive_any(Visitor&& visitor) -> MailboxResult<void> {
+        return mailbox_.receive_any(std::forward<Visitor>(visitor));
     }
+    
+    /**
+     * @brief Receive any allowed message type with timeout
+     * 
+     * @tparam Visitor Callable accepting TimsMessage<T> for any allowed T
+     * @param timeout Maximum time to wait
+     * @return Success or error
+     */
+    template<typename Visitor>
+    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
+        return mailbox_.receive_any_for(timeout, std::forward<Visitor>(visitor));
+    }
+    
+    // ========================================================================
+    // Send Operations
+    // ========================================================================
     
     /**
      * @brief Receive any allowed message using a visitor
@@ -290,15 +363,19 @@ public:
      * });
      * @endcode
      */
-    template<typename Visitor>
-    auto receive_any(Visitor&& visitor, 
-                     std::chrono::milliseconds timeout = std::chrono::milliseconds{-1})
-        -> MailboxResult<void> {
-        
-        // TODO: Filter by AllowedPayloadTypes when dispatching
-        // For now, delegate to underlying mailbox
-        return mailbox_.receive_any(std::forward<Visitor>(visitor), timeout);
-    }
+    
+    // ========================================================================
+    // Access to Underlying Mailbox
+    // ========================================================================
+    
+    /**
+     * @brief Get reference to underlying RegistryMailbox
+     * 
+     * Needed for interop with legacy code that expects RegistryMailbox*.
+     * Use with caution - bypasses type restrictions!
+     */
+    auto& get_underlying_mailbox() { return mailbox_; }
+    const auto& get_underlying_mailbox() const { return mailbox_; }
 };
 
 // ============================================================================

@@ -31,24 +31,27 @@ namespace commrat {
  * - UserRegistry: User message registry
  * - OutputData: Single output type (or void for multi-output)
  * - SubscriberManager: Provides subscribers list and mutex
+ * - CmdMailboxT: Command mailbox type (defaults to TypedMailbox<UserRegistry>)
  */
 template<
     typename UserRegistry,
     typename OutputData,
-    typename SubscriberManager
+    typename SubscriberManager,
+    typename PublishMailboxT = TypedMailbox<UserRegistry>,
+    typename ModuleType = void  // Module type for multi-output mailbox access
 >
 class Publisher {
 protected:
-    using CmdMailbox = RegistryMailbox<UserRegistry>;
-    
     // References to module resources (set by derived class)
     SubscriberManager* subscriber_manager_{nullptr};
-    CmdMailbox* cmd_mailbox_{nullptr};
+    PublishMailboxT* publish_mailbox_{nullptr};  // For single-output only
+    ModuleType* module_ptr_{nullptr};  // Typed pointer to Module for multi-output
     std::string module_name_;
     
 public:
     void set_subscriber_manager(SubscriberManager* mgr) { subscriber_manager_ = mgr; }
-    void set_cmd_mailbox(CmdMailbox* mbx) { cmd_mailbox_ = mbx; }
+    void set_publish_mailbox(PublishMailboxT* mbx) { publish_mailbox_ = mbx; }
+    void set_module_ptr(ModuleType* ptr) { module_ptr_ = ptr; }  // For multi-output modules
     void set_module_name(const std::string& name) { module_name_ = name; }
     
     /**
@@ -93,7 +96,7 @@ public:
         for (uint32_t subscriber_base_addr : subscribers) {
             // Send to subscriber's DATA mailbox (base + 32)
             uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-            auto result = cmd_mailbox_->send(data, subscriber_data_mbx);
+            auto result = publish_mailbox_->send(data, subscriber_data_mbx);
             if (!result) {
                 std::cout << "[" << module_name_ << "] Send failed to subscriber " << subscriber_base_addr << "\n";
             }
@@ -113,7 +116,7 @@ public:
         for (uint32_t subscriber_base_addr : subscribers) {
             uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
             // Phase 6.10: Send with explicit timestamp from header
-            auto result = cmd_mailbox_->send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
+            auto result = publish_mailbox_->send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
             if (!result) {
                 std::cout << "[" << module_name_ << "] Send failed to subscriber " << subscriber_base_addr << "\n";
             }
@@ -121,21 +124,31 @@ public:
     }
     
     /**
-     * @brief Send output only if type matches subscriber's expected type
-     * Multi-output filtering: Each subscriber receives only their subscribed type
+     * @brief Send output at given index if type matches subscriber's expected type
+     * Phase 7.4: Uses Module's get_publish_mailbox<Index>() for per-output mailboxes
      */
-    template<typename OutputType>
-    void send_if_type_matches(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
+    template<std::size_t Index, typename OutputType>
+    void send_output_at_index(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
         // Get the full message ID for this output type
         constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
         constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
         
         // Only send if types match
         if (output_type_id_low == subscriber_type_id_low) {
-            auto result = cmd_mailbox_->send(output, dest_mailbox);
-            if (!result) {
-                std::cout << "[" << module_name_ << "] Send failed to subscriber " 
-                          << std::hex << dest_mailbox << std::dec << "\n";
+            // Get the correct publish mailbox for this output index
+            if constexpr (!std::is_void_v<ModuleType>) {
+                auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<Index>();
+                auto result = publish_mbx.send(output, dest_mailbox);
+                if (!result) {
+                    std::cout << "[" << module_name_ << "] Send failed for output[" << Index << "]\n";
+                }
+            } else {
+                // Single-output fallback
+                auto result = publish_mailbox_->send(output, dest_mailbox);
+                if (!result) {
+                    std::cout << "[" << module_name_ << "] Send failed to subscriber " 
+                              << std::hex << dest_mailbox << std::dec << "\n";
+                }
             }
         }
     }
@@ -157,8 +170,9 @@ public:
             uint16_t subscriber_type_id_low = extract_message_type_from_address(subscriber_base_addr);
             
             // Send each output only if it matches the subscriber's type
+            // Phase 7.4: Use index-based send with proper mailbox selection
             (void)std::initializer_list<int>{
-                (send_if_type_matches<std::tuple_element_t<Is, std::tuple<Ts...>>>(
+                (send_output_at_index<Is, std::tuple_element_t<Is, std::tuple<Ts...>>>(
                     subscriber_type_id_low,
                     std::get<Is>(outputs),
                     subscriber_data_mbx
