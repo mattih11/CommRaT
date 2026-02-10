@@ -354,16 +354,22 @@ protected:
         // Calculate source module's WORK mailbox address
         uint32_t source_data_type_id;
         
-        if (source_primary_output_type_id) {
+        // PRIORITY 1: Multi-input uses input type at source_index
+        if constexpr (has_multi_input) {
+            // Multi-input: use the input type at source_index (what WE want for THIS input)
+            source_data_type_id = get_input_type_id_at_index(source_index);
+        } 
+        // PRIORITY 2: Single continuous input uses InputData type
+        else if constexpr (has_continuous_input) {
+            // Single-input: use InputData type (what WE want to subscribe to)
+            source_data_type_id = Registry::template get_message_id<InputData>();
+        } 
+        // PRIORITY 3: Fallback to provided primary output type ID
+        else if (source_primary_output_type_id) {
             // Multi-output producer: use the provided primary output type ID
             source_data_type_id = *source_primary_output_type_id;
-        } else if constexpr (has_multi_input) {
-            // Multi-input: use the input type at source_index
-            source_data_type_id = get_input_type_id_at_index(source_index);
-        } else if constexpr (has_continuous_input) {
-            // Single-input: use InputData type
-            source_data_type_id = Registry::template get_message_id<InputData>();
-        } else {
+        } 
+        else {
             static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");
             return;
         }
