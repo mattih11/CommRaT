@@ -13,6 +13,7 @@
 #include <commrat/mailbox/registry_mailbox.hpp>
 #include <commrat/messages.hpp>  // TimsMessage definition
 #include <commrat/module/helpers/address_helpers.hpp>  // extract_message_type_from_address
+#include <commrat/module/module_config.hpp>  // MailboxType enum
 #include <iostream>
 #include <tuple>
 #include <mutex>
@@ -53,15 +54,6 @@ public:
     void set_publish_mailbox(PublishMailboxT* mbx) { publish_mailbox_ = mbx; }
     void set_module_ptr(ModuleType* ptr) { module_ptr_ = ptr; }  // For multi-output modules
     void set_module_name(const std::string& name) { module_name_ = name; }
-    
-    /**
-     * @brief Mailbox type offsets (must match Module's enum)
-     */
-    enum class MailboxType : uint8_t {
-        CMD = 0,
-        WORK = 16,
-        DATA = 32
-    };
     
     /**
      * @brief Create TimsMessage with explicit timestamp
@@ -155,29 +147,33 @@ public:
     
     /**
      * @brief Multi-output publishing implementation
-     * Uses index sequence to iterate over tuple elements at compile time
+     * Phase 7: Each output publishes to its own subscriber list
      */
     template<typename... Ts, std::size_t... Is>
     void publish_multi_outputs_impl(std::tuple<Ts...>& outputs, std::index_sequence<Is...>) {
-        auto& mutex = subscriber_manager_->get_subscribers_mutex();
-        auto& subscribers = subscriber_manager_->get_subscribers();
-        
-        std::lock_guard<std::mutex> lock(mutex);
-        for (uint32_t subscriber_base_addr : subscribers) {
-            uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        // Each output index publishes to its own subscriber list
+        (publish_output_at_index<Is>(std::get<Is>(outputs)), ...);
+    }
+    
+    /**
+     * @brief Publish specific output to its subscribers (Phase 7)
+     */
+    template<std::size_t Index, typename OutputType>
+    void publish_output_at_index(OutputType& output) {
+        if constexpr (!std::is_void_v<ModuleType>) {
+            // Get subscribers for this specific output
+            auto subscribers = module_ptr_->get_output_subscribers(Index);
             
-            // Extract the message type ID that this subscriber expects
-            uint16_t subscriber_type_id_low = extract_message_type_from_address(subscriber_base_addr);
-            
-            // Send each output only if it matches the subscriber's type
-            // Phase 7.4: Use index-based send with proper mailbox selection
-            (void)std::initializer_list<int>{
-                (send_output_at_index<Is, std::tuple_element_t<Is, std::tuple<Ts...>>>(
-                    subscriber_type_id_low,
-                    std::get<Is>(outputs),
-                    subscriber_data_mbx
-                ), 0)...
-            };
+            // Send to each subscriber's DATA mailbox
+            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<Index>();
+            for (uint32_t subscriber_base_addr : subscribers) {
+                uint32_t dest_mailbox = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+                auto result = publish_mbx.send(output, dest_mailbox);
+                if (!result) {
+                    std::cout << "[" << module_name_ << "] Send failed for output[" << Index 
+                              << "] to subscriber " << subscriber_base_addr << "\n";
+                }
+            }
         }
     }
     

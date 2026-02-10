@@ -47,6 +47,8 @@ protected:
     size_t max_subscribers_{100};  // Default, overridden by config
     
 public:
+    virtual ~SubscriberManager() = default;
+    
     void set_max_subscribers(size_t max) { max_subscribers_ = max; }
     
     void add_subscriber(uint32_t subscriber_id) {
@@ -63,6 +65,17 @@ public:
         }
         
         subscribers_.push_back(subscriber_id);
+    }
+    
+    /**
+     * @brief Add subscriber (virtual method for overriding in Module)
+     * 
+     * For single-output modules, this calls add_subscriber().
+     * For multi-output modules, Module overrides this to route to correct output list.
+     */
+    virtual void add_subscriber_to_output(uint32_t subscriber_id) {
+        // Default: single-output behavior
+        add_subscriber(subscriber_id);
     }
     
     void remove_subscriber(uint32_t subscriber_id) {
@@ -262,11 +275,11 @@ public:
     void handle_subscribe_request(const SubscribeRequestType& req, SubscriberMgr& sub_mgr) {
         try {
             // req.subscriber_mailbox_id is the subscriber's base address
-            sub_mgr.add_subscriber(req.subscriber_mailbox_id);
+            // Phase 7: Route to correct output-specific subscriber list
+            sub_mgr.add_subscriber_to_output(req.subscriber_mailbox_id);
             uint32_t subscriber_data_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::DATA);
-            std::cout << "[" << module_name_ << "] Added subscriber base=" << req.subscriber_mailbox_id 
-                      << ", will send to DATA mailbox=" << subscriber_data_mbx
-                      << " (total subscribers: " << sub_mgr.subscriber_count() << ")\n";
+            std::cout << "[" << module_name_ << "] Added subscriber to output-specific list, "
+                      << "will send to DATA mailbox=" << subscriber_data_mbx << "\n";
             
             SubscribeReplyType reply{
                 .actual_period_ms = config_->period.count(),
