@@ -42,27 +42,8 @@ public:
         
         module.on_init();
         
-        // Phase 7.4: Start mailboxes (all MailboxSets for multi-output)
-        if constexpr (module.use_mailbox_sets) {
-            // Multi-output: start all MailboxSets
-            module.template start_all_mailbox_sets(std::make_index_sequence<module.num_output_types>{});
-        } else {
-            // Single-output: start individual mailboxes
-            auto cmd_result = module.cmd_mailbox().start();
-            if (!cmd_result) {
-                throw std::runtime_error("Failed to start command mailbox");
-            }
-            
-            auto work_result = module.work_mailbox().start();
-            if (!work_result) {
-                throw std::runtime_error("Failed to start work mailbox");
-            }
-            
-            auto publish_result = module.publish_mailbox().start();
-            if (!publish_result) {
-                throw std::runtime_error("Failed to start publish mailbox");
-            }
-        }
+        // Start mailboxes (always use MailboxSets, even for single output)
+        module.template start_all_mailbox_sets(std::make_index_sequence<module.num_output_types>{});
         
         // Only start data mailbox for single ContinuousInput modules
         if (module.data_mailbox_) {
@@ -81,14 +62,9 @@ public:
         module.on_start();
         
         // Start work thread(s) FIRST to handle subscriptions
-        if constexpr (module.use_mailbox_sets) {
-            // Multi-output: spawn one thread per MailboxSet
-            std::cout << "[" << module.config_.name << "] Spawning " << module.num_output_types << " output work threads...\n";
-            module.template spawn_all_output_work_threads(std::make_index_sequence<module.num_output_types>{});
-        } else {
-            // Single-output: one work thread
-            module.work_thread_ = std::thread(&ModuleType::work_loop, &module);
-        }
+        // Always use per-output work threads (even for single output)
+        std::cout << "[" << module.config_.name << "] Spawning " << module.num_output_types << " output work threads...\n";
+        module.template spawn_all_output_work_threads(std::make_index_sequence<module.num_output_types>{});
         
         // Start command thread for user commands
         module.command_thread_ = std::thread(&ModuleType::command_loop, &module);
@@ -179,30 +155,15 @@ public:
             module.join_secondary_input_threads();
         }
         
-        // Join work threads (single or multi-output)
-        if constexpr (module.use_mailbox_sets) {
-            // Multi-output: join all output work threads (via MultiOutputManager)
-            module.join_output_work_threads();
-        } else {
-            // Single-output: join single work thread
-            if (module.work_thread_ && module.work_thread_->joinable()) {
-                module.work_thread_->join();
-            }
-        }
+        // Join work threads
+        module.join_output_work_threads();
         
         if (module.command_thread_ && module.command_thread_->joinable()) {
             module.command_thread_->join();
         }
         
         // Stop all mailboxes
-        if constexpr (module.use_mailbox_sets) {
-            // Multi-output: stop all MailboxSets
-            module.template stop_all_mailbox_sets(std::make_index_sequence<module.num_output_types>{});
-        } else {
-            // Single-output
-            module.cmd_mailbox().stop();
-            module.work_mailbox().stop();
-        }
+        module.template stop_all_mailbox_sets(std::make_index_sequence<module.num_output_types>{});
         if (module.data_mailbox_) {
             module.data_mailbox_->stop();
         }

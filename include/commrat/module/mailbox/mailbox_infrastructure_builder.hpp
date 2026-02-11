@@ -26,52 +26,17 @@ template<typename ModuleType, typename UserRegistry>
 class MailboxInfrastructureBuilder {
 protected:
     /**
-     * @brief Create mailbox infrastructure (Phase 7.4)
+     * @brief Create mailbox infrastructure
      * 
-     * Single output: Returns tuple<CmdMailbox, WorkMailbox, PublishMailbox>
-     * Multi-output: Returns tuple<MailboxSet<T1>, MailboxSet<T2>, ...>
+     * Always returns tuple of MailboxSets (one per output type).
+     * Single-output modules get a tuple with 1 MailboxSet.
      * 
      * @param config Module configuration with system_id, instance_id, etc.
-     * @return Mailbox infrastructure (tuple of mailboxes or MailboxSets)
+     * @return Tuple of MailboxSets
      */
     static auto create_mailbox_infrastructure(const ModuleConfig& config) {
-        if constexpr (!ModuleType::use_mailbox_sets) {
-            // Single output: Create traditional mailboxes
-            typename ModuleType::CmdMailbox cmd(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<typename ModuleType::OutputData, typename ModuleType::OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::CMD),
-                .message_slots = config.message_slots,
-                .max_message_size = UserRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_cmd"
-            });
-            
-            typename ModuleType::WorkMailbox work(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<typename ModuleType::OutputData, typename ModuleType::OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::WORK),
-                .message_slots = config.message_slots,
-                .max_message_size = SystemRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_work"
-            });
-            
-            typename ModuleType::PublishMailbox publish(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<typename ModuleType::OutputData, typename ModuleType::OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::PUBLISH),
-                .message_slots = config.message_slots,
-                .max_message_size = UserRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_publish"
-            });
-            
-            return std::make_tuple(std::move(cmd), std::move(work), std::move(publish));
-        } else {
-            // Multi-output: Create tuple of MailboxSets
-            return create_mailbox_sets_impl(config, std::make_index_sequence<ModuleType::num_output_types>{});
-        }
+        // Always create tuple of MailboxSets
+        return create_mailbox_sets_impl(config, std::make_index_sequence<ModuleType::num_output_types>{});
     }
     
     /**
@@ -86,9 +51,8 @@ protected:
      */
     template<std::size_t... Is>
     static auto create_mailbox_sets_impl(const ModuleConfig& config, std::index_sequence<Is...>) {
-        using MailboxSetTuple = typename ModuleType::MailboxSetTuple;
-        // Use fold expression to construct tuple with initialized MailboxSets
-        return MailboxSetTuple{create_mailbox_set<Is>(config)...};
+        // Create tuple with forwarding to ensure proper initialization
+        return std::make_tuple(create_mailbox_set<Is>(config)...);
     }
     
     /**
