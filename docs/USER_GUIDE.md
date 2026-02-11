@@ -44,13 +44,35 @@ using MyApp = CommRaT<
 // Registry validates uniqueness, calculates IDs, generates serialization
 ```
 
-**2. Three-Mailbox Architecture**
-Every module has three separate mailboxes with distinct purposes:
-- **CMD Mailbox**: User commands and control messages
-- **WORK Mailbox**: Subscription protocol (SubscribeRequest/Reply)
-- **DATA Mailbox**: High-frequency data streams (Input<T>)
+**2. MailboxSet Architecture**
 
-This separation prevents interference between command, control, and data flows.
+CommRaT uses a **MailboxSet per output type** design:
+
+**Each output type gets 3 mailboxes:**
+- **CMD Mailbox** (base+0): Commands for this output type
+- **WORK Mailbox** (base+16): Subscription protocol for this output type
+- **PUBLISH Mailbox** (base+32): Publishes this output type to subscribers
+
+**Plus a shared DATA mailbox for all inputs:**
+- **DATA Mailbox** (base+48): Receives input data (shared across output types)
+
+**Single-Output Module Example:**
+```cpp
+class Sensor : public Module<Output<TempData>, PeriodicInput>
+```
+Has 1 MailboxSet = 3 mailboxes (CMD, WORK, PUBLISH)
+Total: 3 mailboxes
+
+**Multi-Output Module Example:**
+```cpp  
+class Fusion : public Module<Outputs<Raw, Filtered, Diag>, Input<SensorData>>
+```
+Has 3 MailboxSets × 3 = 9 mailboxes + 1 DATA = 10 total mailboxes
+- Each output type (Raw, Filtered, Diag) has its own CMD, WORK, PUBLISH
+- All share one DATA mailbox for receiving SensorData
+- Subscribers choose which output type to subscribe to
+
+This design allows **independent subscription per output type** - a subscriber can request only FilteredData without receiving Raw or Diag.
 
 **3. Blocking Receives with Zero CPU Usage**
 ```cpp
@@ -72,12 +94,13 @@ class SensorFusion : public MyApp::Module<
     PrimaryInput<IMUData>                  // Primary drives execution
 > {
 protected:
-    FusedData process_multi_input(
+    void process(
         const IMUData& imu,      // Received (blocking)
         const GPSData& gps,      // Fetched via getData
-        const LidarData& lidar   // Fetched via getData
+        const LidarData& lidar,  // Fetched via getData
+        FusedData& output        // Output written here
     ) override {
-        return fuse_sensors(imu, gps, lidar);
+        output = fuse_sensors(imu, gps, lidar);
     }
 };
 ```
@@ -220,7 +243,7 @@ class MyModule : public MyApp::Module<
     ...Commands    // What commands it handles
 > {
 protected:
-    // Override process() or process_continuous() to implement logic
+    // Override process() to implement logic
 };
 ```
 
@@ -231,10 +254,10 @@ class TemperatureSensor : public MyApp::Module<
     PeriodicInput             // Generates data every config_.period
 > {
 protected:
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         // Called every 10ms (if config_.period = 10ms)
         float temp = read_sensor();  // Your hardware interface
-        return TemperatureData{
+        output = TemperatureData{
             .timestamp = Time::now(),
             .sensor_id = sensor_id_,
             .temperature_c = temp,
@@ -322,7 +345,7 @@ work_mailbox_.send(req, producer_work_mailbox);
 ```cpp
 // Producer receives SubscribeRequest on WORK mailbox
 void handle_subscribe_request(const SubscribeRequest& req) {
-    subscribers_.push_back(req.subscriber_base_address + 32);  // DATA mailbox
+    subscribers_.push_back(req.subscriber_base_address + 48);  // DATA mailbox
     
     // Send acknowledgment
     SubscribeReply reply{ .success = true };
@@ -332,22 +355,22 @@ void handle_subscribe_request(const SubscribeRequest& req) {
 
 **Step 3: Producer Publishes to Subscribers**
 ```cpp
-// Every time process() returns data
+// Every time process() generates output
 void publish(const TemperatureData& data) {
     for (uint32_t subscriber_data_mbx : subscribers_) {
-        data_mailbox_.send(data, subscriber_data_mbx);
+        publish_mailbox_.send(data, subscriber_data_mbx);  // Send from PUBLISH mailbox
     }
 }
 ```
 
-**Step 4: Consumer Receives on DATA Mailbox**
+**Step 4: Consumer Receives on DATA Mailbox (base+48)**
 ```cpp
 // Consumer's data_thread blocked on receive
 void continuous_loop() {
     while (running_) {
         data_mailbox_.receive_any([this](auto&& msg) {
-            process_continuous(msg.message);
-        });  // Blocks until message arrives
+            process(msg.message);
+        });  // Blocks until message arrives on DATA mailbox
     }
 }
 ```
@@ -363,9 +386,9 @@ MyApp::serialize(UnregisteredType{});
 
 // COMPILE ERROR: Wrong output type
 class BadModule : public MyApp::Module<Output<WrongType>, PeriodicInput> {
-    TemperatureData process() override { ... }  // Mismatch!
+    void process(TemperatureData& output) override { ... }  // Mismatch!
 };
-// error: invalid covariant return type
+// error: type constraint violation
 
 // COMPILE ERROR: Duplicate message types
 using BadApp = CommRaT<
@@ -381,7 +404,7 @@ CommRaT enforces real-time safety through **design constraints**:
 
 **FORBIDDEN in process() functions:**
 ```cpp
-TemperatureData process() override {
+void process(TemperatureData& output) override {
     // ERROR: Dynamic allocation
     std::vector<float> readings;  // May allocate
     readings.push_back(temp);     // May reallocate
@@ -399,7 +422,7 @@ TemperatureData process() override {
 
 **ALLOWED in process() functions:**
 ```cpp
-TemperatureData process() override {
+void process(TemperatureData& output) override {
     // VALID: Fixed-size stack allocation
     std::array<float, 10> readings;
     sertial::fixed_vector<float, 100> buffer;  // Bounded capacity
@@ -413,7 +436,7 @@ TemperatureData process() override {
     // VALID: Deterministic computation
     float filtered = alpha_ * temp + (1 - alpha_) * prev_temp_;
     
-    return TemperatureData{ /* ... */ };
+    output = TemperatureData{ /* ... */ };
 }
 ```
 
@@ -525,12 +548,12 @@ public:
 
 protected:
     // This function is called every config_.period (e.g., every 100ms)
-    TemperatureReading process() override {
+    void process(TemperatureReading& output) override {
         // Simulate sensor reading
         float temp = 20.0f + (rand() % 100) / 10.0f;  // 20-30°C
         float humidity = 40.0f + (rand() % 200) / 10.0f;  // 40-60%
         
-        TemperatureReading reading{
+        output = TemperatureReading{
             .timestamp = commrat::Time::now(),
             .sensor_id = sensor_id_,
             .temperature_c = temp,
@@ -539,8 +562,6 @@ protected:
         
         std::cout << "[Sensor] Generated: " << temp << "°C, "
                   << humidity << "% humidity\n";
-        
-        return reading;  // Automatically published to all subscribers
     }
 
 private:
@@ -550,8 +571,8 @@ private:
 
 **Key points:**
 - Inherits from `TempApp::Module<Output<...>, PeriodicInput>`
-- Overrides `process()` which is called automatically every `config_.period`
-- Returns the data - **no explicit publish call needed**
+- Overrides `process(OutputData& output)` which is called automatically every `config_.period`
+- Writes to output parameter - **no explicit publish call needed**
 - Must use `override` keyword (process is virtual)
 
 ### 3.4 Create a Consumer Module
@@ -574,7 +595,7 @@ public:
 
 protected:
     // Called for each received TemperatureReading
-    TemperatureReading process_continuous(const TemperatureReading& reading) override {
+    void process(const TemperatureReading& input, TemperatureReading& output) override {
         count_++;
         
         std::cout << "[Monitor] #" << count_ 
@@ -728,12 +749,12 @@ monitor.start()
 **3. Subscription (20-30ms):**
 ```
 Sensor's work_loop receives SubscribeRequest
-    → Adds monitor's DATA mailbox to subscribers_ list
-    → Sends SubscribeReply to monitor's WORK mailbox
+    → Adds monitor's DATA mailbox (base+48) to subscribers_ list
+    → Sends SubscribeReply to monitor's WORK mailbox (base+16)
 
 Monitor's work_loop receives SubscribeReply
     → Subscription confirmed
-    → Begins blocking on DATA mailbox
+    → Begins blocking on DATA mailbox (base+48)
 ```
 
 **4. Data Flow (every 100ms):**
@@ -743,10 +764,10 @@ Sensor's data_thread (timer fires every 100ms)
     → User code generates TemperatureReading
     → Module automatically publishes to all subscribers
         → Serializes TemperatureReading
-        → Sends to monitor's DATA mailbox
+        → Sends from PUBLISH mailbox (base+32) to monitor's DATA mailbox (base+48)
 
 Monitor's continuous_loop (blocked on receive)
-    → Receives message on DATA mailbox
+    → Receives message on DATA mailbox (base+48)
     → Deserializes TemperatureReading
     → Calls process_continuous(reading)
     → User code displays data
@@ -770,8 +791,8 @@ main() calls monitor.stop()
 **Mistake 1: Forgetting `override` keyword**
 ```cpp
 // ERROR: Won't compile
-TemperatureReading process() {  // Missing override
-    return reading;
+void process(TemperatureReading& output) {  // Missing override
+    output = reading;
 }
 ```
 **Fix:** Always use `override` for process methods (they're virtual).
@@ -780,8 +801,8 @@ TemperatureReading process() {  // Missing override
 ```cpp
 // ERROR: Module says Output<TemperatureReading> but returns wrong type
 class BadSensor : public TempApp::Module<Output<TemperatureReading>, PeriodicInput> {
-    OtherData process() override {  // Type mismatch!
-        return OtherData{};
+    void process(OtherData& output) override {  // Type mismatch!
+        output = OtherData{};
     }
 };
 ```
@@ -799,9 +820,9 @@ ModuleConfig monitor_config{
 
 **Mistake 4: Blocking in process()**
 ```cpp
-TemperatureReading process() override {
+void process(TemperatureReading& output) override {
     std::this_thread::sleep_for(std::chrono::seconds(1));  // ERROR: Blocks!
-    return reading;
+    output = reading;
 }
 ```
 **Fix:** Never block in process() - use CommRaT's timing primitives or configure `period`.
@@ -839,11 +860,11 @@ class TemperatureFilter : public TempApp::Module<
     Output<TemperatureReading>,      // Outputs filtered data
     Input<TemperatureReading>        // Inputs raw data
 > {
-    TemperatureReading process_continuous(const TemperatureReading& raw) override {
+    void process(const TemperatureReading& raw, TemperatureReading& output) override {
         // Apply exponential moving average
         filtered_temp_ = 0.7f * filtered_temp_ + 0.3f * raw.temperature_c;
         
-        return TemperatureReading{
+        output = TemperatureReading{
             .timestamp = Time::now(),
             .sensor_id = raw.sensor_id,
             .temperature_c = filtered_temp_,
@@ -860,8 +881,8 @@ private:
 
 1. **Messages** are plain POD structs - define your data structure naturally
 2. **CommRaT<...>** registers all types and generates serialization automatically
-3. **Producer modules** use `PeriodicInput` and override `process()`
-4. **Consumer modules** use `Input<T>` and override `process_continuous(const T&)`
+3. **Producer modules** use `PeriodicInput` and override `process(OutputData& output)`
+4. **Consumer modules** use `Input<T>` and override `process(const InputData& input, OutputData& output)`
 5. **Configuration** uses system_id/instance_id for addressing and source IDs for subscription
 6. **Subscription** happens automatically in `start()` based on configuration
 7. **Shutdown** is clean - just call `stop()` on all modules
@@ -890,11 +911,11 @@ Every module has an **InputSpec** that determines its processing behavior:
 
 **Signature:**
 ```cpp
-class MyModule : public MyApp::Module<OutputSpec, PeriodicInput> {
+class MyModule : public MyApp::Module<Output<OutputType>, PeriodicInput> {
 protected:
-    OutputType process() override {
+    void process(OutputType& output) override {
         // Called every config_.period (e.g., 100ms)
-        return OutputType{ /* ... */ };
+        output = OutputType{ /* ... */ };
     }
 };
 ```
@@ -923,8 +944,8 @@ public:
         : Module(config), seq_(0) {}
 
 protected:
-    HeartbeatMsg process() override {
-        return HeartbeatMsg{
+    void process(HeartbeatMsg& output) override {
+        output = HeartbeatMsg{
             .timestamp = Time::now(),
             .sequence_number = seq_++,
             .process_id = getpid()
@@ -998,7 +1019,7 @@ public:
         : Module(config), alpha_(0.3f), prev_temp_(20.0f) {}
 
 protected:
-    FilteredTemperature process_continuous(const RawTemperature& raw) override {
+    void process(const RawTemperature& raw, FilteredTemperature& output) override {
         // Exponential moving average
         float filtered = alpha_ * raw.value_c + (1 - alpha_) * prev_temp_;
         prev_temp_ = filtered;
@@ -1006,7 +1027,7 @@ protected:
         // Calculate confidence based on rate of change
         float confidence = 1.0f - std::min(std::abs(filtered - raw.value_c) / 10.0f, 1.0f);
         
-        return FilteredTemperature{
+        output = FilteredTemperature{
             .timestamp = Time::now(),
             .value_c = filtered,
             .confidence = confidence
@@ -1022,7 +1043,7 @@ private:
 **Characteristics:**
 - **Event-driven**: Executes only when data arrives (0% CPU when no messages)
 - **Blocking receive**: Thread blocks efficiently until message available
-- **Guaranteed delivery**: Every published message triggers process_continuous
+- **Guaranteed delivery**: Every published message triggers process
 - **Timestamp propagation**: Output timestamp = input.header.timestamp (exact propagation)
 - **Order preserved**: Messages processed in arrival order
 
@@ -1032,11 +1053,11 @@ private:
 
 **Signature:**
 ```cpp
-class MyModule : public MyApp::Module<OutputSpec, LoopInput> {
+class MyModule : public MyApp::Module<Output<OutputType>, LoopInput> {
 protected:
-    OutputType process() override {
+    void process(OutputType& output) override {
         // Called repeatedly as fast as possible
-        return OutputType{ /* ... */ };
+        output = OutputType{ /* ... */ };
     }
 };
 ```
@@ -1065,7 +1086,7 @@ public:
         : Module(config), packet_id_(0) {}
 
 protected:
-    DataPacket process() override {
+    void process(DataPacket& output) override {
         DataPacket packet{
             .timestamp = Time::now(),
             .packet_id = packet_id_++
@@ -1076,7 +1097,7 @@ protected:
             packet.samples[i] = std::sin(2 * M_PI * i / 100.0);
         }
         
-        return packet;
+        output = packet;
     }
 
 private:
@@ -1100,7 +1121,7 @@ Modules can produce zero, one, or multiple outputs:
 ```cpp
 class DataLogger : public MyApp::Module<Output<void>, Input<SensorData>> {
 protected:
-    void process_continuous(const SensorData& data) override {
+    void process(const SensorData& data) override {
         log_to_file(data);
         // No return value - this is a sink
     }
@@ -1111,7 +1132,7 @@ protected:
 ```cpp
 class Filter : public MyApp::Module<Output<FilteredData>, Input<RawData>> {
 protected:
-    FilteredData process_continuous(const RawData& raw) override {
+    void process(const RawData& raw, FilteredData& output) override {
         return apply_filter(raw);
     }
 };
@@ -1124,7 +1145,7 @@ class SignalSplitter : public MyApp::Module<
     Input<CombinedData>
 > {
 protected:
-    void process_continuous(const CombinedData& input, DataA& out1, DataB& out2) override {
+    void process(const CombinedData& input, DataA& out1, DataB& out2) override {
         // Fill both outputs by reference
         out1 = extract_channel_a(input);
         out2 = extract_channel_b(input);
@@ -1237,16 +1258,16 @@ Let's combine multiple module types in a realistic system:
 // 1. Periodic sensor reading (PeriodicInput)
 class IMUSensor : public MyApp::Module<Output<IMUData>, PeriodicInput> {
 protected:
-    IMUData process() override {
-        return read_imu_hardware();  // Every 10ms
+    void process(IMUData& output) override {
+        output = read_imu_hardware();  // Every 10ms
     }
 };
 
 // 2. Event-driven filtering (ContinuousInput)
 class IMUFilter : public MyApp::Module<Output<FilteredIMU>, Input<IMUData>> {
 protected:
-    FilteredIMU process_continuous(const IMUData& raw) override {
-        return kalman_filter_.update(raw);
+    void process(const IMUData& raw, FilteredIMU& output) override {
+        output = kalman_filter_.update(raw);
     }
 private:
     KalmanFilter kalman_filter_;
@@ -1259,18 +1280,19 @@ class PoseFusion : public MyApp::Module<
     PrimaryInput<FilteredIMU>  // IMU drives execution
 > {
 protected:
-    PoseEstimate process_multi_input(
+    void process(
         const FilteredIMU& imu,
-        const GPSData& gps
+        const GPSData& gps,
+        PoseEstimate& output
     ) override {
-        return fuse_sensors(imu, gps);
+        output = fuse_sensors(imu, gps);
     }
 };
 
 // 4. Sink for logging (ContinuousInput, no output)
 class PoseLogger : public MyApp::Module<Output<void>, Input<PoseEstimate>> {
 protected:
-    void process_continuous(const PoseEstimate& pose) override {
+    void process(const PoseEstimate& pose) override {
         write_to_log(pose);
     }
 };
@@ -1352,7 +1374,7 @@ protected:
 ```cpp
 class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>> {
 protected:
-    FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         return fuse(imu, gps);
     }
 };
@@ -1558,8 +1580,8 @@ consumer.start();  // Automatically sends SubscribeRequest to (10, 1)
 ```cpp
 class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> {
 protected:
-    SensorData process() override {
-        return read_sensor();  // Called every config_.period
+    void process(SensorData& output) override {
+        output = read_sensor();  // Called every config_.period
     }
 };
 ```
@@ -1573,15 +1595,15 @@ protected:
 ```cpp
 class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
 protected:
-    FilteredData process_continuous(const SensorData& input) override {
-        return apply_filter(input);  // Called for each message
+    void process(const SensorData& input, FilteredData& output) override {
+        output = apply_filter(input);  // Called for each message
     }
 };
 ```
 
 - `continuous_loop()` blocks on DATA mailbox `receive()`
 - Receives `TimsMessage<SensorData>` from producer
-- Unwraps payload, calls `process_continuous(payload)`
+- Unwraps payload, calls `process(payload, output)`
 - Result wrapped with `timestamp = input.header.timestamp` (exact propagation)
 - Sent to filter's subscribers
 
@@ -1704,7 +1726,7 @@ SubscribeReplyPayload reply{
 5. Consumer's DATA mailbox receives (blocking)
 6. Deserializes message (zero-copy when possible)
 7. Unwraps payload from TimsMessage
-8. Calls process_continuous(payload)
+8. Calls process(payload, output)
 9. Result wrapped and published to consumer's subscribers
 ```
 
@@ -1751,9 +1773,9 @@ class BadFusion : public MyApp::Module<Output<FusedData>, Input<IMUData>> {
     GPSData latest_gps_;     // Stale data, no synchronization
     LidarData latest_lidar_; // Stale data, no synchronization
     
-    FusedData process_continuous(const IMUData& imu) override {
+    void process(const IMUData& imu, FusedData& output) override {
         // GPS and Lidar timestamps may be from completely different times!
-        return fuse(imu, latest_gps_, latest_lidar_);  // WRONG!
+        output = fuse(imu, latest_gps_, latest_lidar_);  // WRONG!
     }
 };
 ```
@@ -1771,13 +1793,14 @@ class SensorFusion : public MyApp::Module<
     PrimaryInput<IMUData>                  // Primary input designation
 > {
 protected:
-    FusedData process_multi_input(
+    void process(
         const IMUData& imu,      // PRIMARY - blocking receive
         const GPSData& gps,      // SECONDARY - time-synchronized getData
-        const LidarData& lidar   // SECONDARY - time-synchronized getData
+        const LidarData& lidar,  // SECONDARY - time-synchronized getData
+        FusedData& output,       // OUTPUT reference - data will be published
     ) override {
         // All inputs guaranteed time-aligned to imu.header.timestamp!
-        return fuse_sensors(imu, gps, lidar);
+        output = fuse_sensors(imu, gps, lidar);
     }
 };
 ```
@@ -1868,10 +1891,11 @@ At t=150ms (IMU arrives):
 Use metadata accessors to check secondary input freshness:
 
 ```cpp
-FusedData process_multi_input(
+void process(
     const IMUData& imu,
     const GPSData& gps,
-    const LidarData& lidar
+    const LidarData& lidar,
+    FusedData& output
 ) override {
     // Check if GPS is fresh (new message since last process_multi_input)
     if (has_new_data<1>()) {  // Index 1 = GPSData
@@ -1891,7 +1915,7 @@ FusedData process_multi_input(
     uint64_t age_ns = imu_meta.timestamp - gps_meta.timestamp;
     std::cout << "GPS age: " << age_ns / 1'000'000 << " ms\n";
     
-    return fuse_sensors(imu, gps, lidar);
+    output = fuse_sensors(imu, gps, lidar);
 }
 ```
 
@@ -1952,9 +1976,10 @@ public:
     }
 
 protected:
-    FusedPose process_multi_input(
+    void process(
         const IMUData& imu,
-        const GPSData& gps
+        const GPSData& gps,
+        FusedPose& output
     ) override {
         // Check GPS freshness
         bool gps_fresh = has_new_data<1>();  // Index 1 = GPSData
@@ -1974,7 +1999,7 @@ protected:
         std::cout << "[Fusion] Fused pose @ " << pose.timestamp / 1'000'000 << " ms"
                   << " (GPS " << (gps_fresh ? "FRESH" : "STALE") << ")\n";
         
-        return pose;
+        output = pose;
     }
 };
 ```
@@ -2045,16 +2070,17 @@ int main() {
 **Optional secondary inputs:**
 
 ```cpp
-FusedData process_multi_input(
+void process(
     const IMUData& imu,
     const GPSData& gps,
-    const MagnetometerData& mag
+    const MagnetometerData& mag,
+    FusedData& output
 ) override {
     // Use magnetometer only if available
     if (is_input_valid<2>()) {
-        return fuse_with_mag(imu, gps, mag);
+        output = fuse_with_mag(imu, gps, mag);
     } else {
-        return fuse_without_mag(imu, gps);  // Graceful degradation
+        output = fuse_without_mag(imu, gps);  // Graceful degradation
     }
 }
 ```
@@ -2062,7 +2088,7 @@ FusedData process_multi_input(
 **Adaptive tolerance:**
 
 ```cpp
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
     auto gps_meta = get_input_metadata<GPSData>();
     uint64_t gps_age = get_input_timestamp<IMUData>() - gps_meta.timestamp;
     
@@ -2084,11 +2110,12 @@ class MultiSensorFusion : public MyApp::Module<
     PrimaryInput<IMUData>
 > {
 protected:
-    FusedData process_multi_input(
+    void process(
         const IMUData& imu,
         const GPSData& gps,
         const LidarData& lidar,
-        const CameraData& camera
+        const CameraData& camera,
+        FusedData& output
     ) override {
         // All four inputs time-aligned to IMU timestamp
         return fuse_all(imu, gps, lidar, camera);
@@ -2216,9 +2243,9 @@ CommRaT **automatically assigns timestamps** based on module type:
 ```cpp
 class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> {
 protected:
-    SensorData process() override {
+    void process(SensorData& output) override {
         // Just return payload - no timestamp needed!
-        return SensorData{
+        output = SensorData{
             .temperature = read_sensor(),
             .pressure = read_pressure()
         };
@@ -2233,10 +2260,10 @@ protected:
 ```cpp
 class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
 protected:
-    FilteredData process_continuous(const SensorData& input) override {
+    void process(const SensorData& input, FilteredData& output) override {
         // Input has no timestamp field - it's in header!
         // Just return filtered payload
-        return FilteredData{
+        output = FilteredData{
             .filtered_value = apply_filter(input.temperature)
         };
         // Module automatically wraps output and sets
@@ -2250,10 +2277,10 @@ protected:
 ```cpp
 class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>> {
 protected:
-    FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         // Both inputs have clean payloads (no timestamp fields)
         // Just return fused result
-        return FusedData{
+        output = FusedData{
             .position = fuse_position(imu, gps),
             .velocity = fuse_velocity(imu, gps)
         };
@@ -2270,7 +2297,7 @@ Use **metadata accessors** to access input timestamps in your `process()` functi
 **Index-based access (always works):**
 
 ```cpp
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
     // Get full metadata for each input
     auto imu_meta = get_input_metadata<0>();   // Index 0 = first input (IMUData)
     auto gps_meta = get_input_metadata<1>();   // Index 1 = second input (GPSData)
@@ -2283,21 +2310,21 @@ FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
     uint64_t gps_age_ns = imu_ts - gps_ts;
     std::cout << "GPS age: " << gps_age_ns / 1'000'000 << " ms\n";
     
-    return fuse(imu, gps);
+    output = fuse(imu, gps);
 }
 ```
 
 **Type-based access (when types unique):**
 
 ```cpp
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
     // Cleaner syntax when input types are unique
     uint64_t imu_ts = get_input_timestamp<IMUData>();
     uint64_t gps_ts = get_input_timestamp<GPSData>();
     
     // Note: Compile error if duplicate types (e.g., Inputs<IMUData, IMUData>)
     
-    return fuse(imu, gps);
+    output = fuse(imu, gps);
 }
 ```
 
@@ -2375,7 +2402,7 @@ class Monitor : public MyApp::Module<Output<void>, Input<SensorData>> {
     uint32_t last_seq_{0};
     
 protected:
-    SensorData process_continuous(const SensorData& input) override {
+    void process(const SensorData& input, SensorData& output) override {
         auto meta = get_input_metadata<0>();
         
         // Check for dropped messages
@@ -2386,7 +2413,7 @@ protected:
         }
         
         last_seq_ = meta.sequence_number;
-        return input;  // Pass-through
+        output = input;  // Pass-through
     }
 };
 ```
@@ -2394,7 +2421,7 @@ protected:
 **Verifying monotonicity (debugging):**
 
 ```cpp
-FilteredData process_continuous(const SensorData& input) override {
+void process(const SensorData& input, FilteredData& output) override {
     static uint64_t last_ts = 0;
     
     uint64_t current_ts = get_input_timestamp<0>();
@@ -2405,7 +2432,7 @@ FilteredData process_continuous(const SensorData& input) override {
     }
     
     last_ts = current_ts;
-    return apply_filter(input);
+    output = apply_filter(input);
 }
 ```
 
@@ -2441,7 +2468,7 @@ public:
 **Logging message flow:**
 
 ```cpp
-FilteredData process_continuous(const SensorData& input) override {
+void process(const SensorData& input, FilteredData& output) override {
     uint64_t recv_time = Time::now();
     uint64_t msg_time = get_input_timestamp<0>();
     uint64_t latency_us = (recv_time - msg_time) / 1000;
@@ -2449,7 +2476,7 @@ FilteredData process_continuous(const SensorData& input) override {
     std::cout << "[Filter] Received message @ " << msg_time / 1'000'000 << " ms"
               << " (latency: " << latency_us << " µs)\n";
     
-    return apply_filter(input);
+    output = apply_filter(input);
 }
 ```
 
@@ -2522,15 +2549,16 @@ struct SensorData {
 **Pitfall 2: Manual timestamp setting**
 
 ```cpp
-// ❌ WRONG - trying to set timestamp manually
-SensorData process() override {
+// TODO: manual timestamp setting should be provided, either as overload or member function
+// WRONG - trying to set timestamp manually
+void process(SensorData& output) override {
     SensorData data{.temperature = read_sensor()};
     data.timestamp = Time::now();  // NO! Payload has no timestamp field!
-    return data;
+    output = data;
 }
 
-// ✅ RIGHT - automatic timestamp
-SensorData process() override {
+// RIGHT - automatic timestamp
+void process(SensorData& output) override {
     return SensorData{.temperature = read_sensor()};
     // Module sets header.timestamp automatically
 }
@@ -2539,31 +2567,32 @@ SensorData process() override {
 **Pitfall 3: Stale data without checking**
 
 ```cpp
-// ❌ RISKY - using GPS without freshness check
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+// TODO - make synced inputs std::optional<const InType&>!
+// RISKY - using GPS without freshness check
+void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
     // GPS might be 500ms old!
-    return fuse(imu, gps);
+    output = fuse(imu, gps);
 }
 
-// ✅ SAFE - check freshness
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps) override {
+// SAFE - check freshness
+void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
     uint64_t gps_age = get_input_timestamp<0>() - get_input_timestamp<1>();
     if (gps_age > 100'000'000) {  // > 100ms
         std::cerr << "GPS stale: " << gps_age / 1'000'000 << " ms\n";
     }
-    return fuse(imu, gps);
+    output = fuse(imu, gps);
 }
 ```
 
 **Pitfall 4: Timezone confusion**
 
 ```cpp
-// ❌ WRONG - assuming local time
+// WRONG - assuming local time
 uint64_t ts_ns = get_input_timestamp<0>();
 time_t ts_s = ts_ns / 1'000'000'000;
 struct tm* local = localtime(&ts_s);  // Wrong! Not UTC-aligned
 
-// ✅ RIGHT - use duration for intervals
+// RIGHT - use duration for intervals
 uint64_t start_ts = message1.header.timestamp;
 uint64_t end_ts = message2.header.timestamp;
 uint64_t duration_ns = end_ts - start_ts;  // Correct interval

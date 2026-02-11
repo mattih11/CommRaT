@@ -11,12 +11,12 @@
 CommRaT needs a **realtime-safe ring buffer** for storing recent messages in producer modules. This enables time-synchronized multi-input processing similar to RACK's getData mechanism.
 
 **Key Requirements:**
-- ✅ **Zero runtime allocation** - fully compile-time sized
-- ✅ **Fixed capacity** - template parameter `MaxSize`
-- ✅ **Circular buffer** - oldest data overwritten when full
-- ✅ **Header-only** - template implementation in `sertial/ring_buffer.hpp`
-- ✅ **Realtime-safe** - no malloc/free, no exceptions, deterministic O(1) operations
-- ✅ **STL-compatible** - iterator support, standard container interface where possible
+- **Zero runtime allocation** - fully compile-time sized
+- **Fixed capacity** - template parameter `MaxSize`
+- **Circular buffer** - oldest data overwritten when full
+- **Header-only** - template implementation in `sertial/ring_buffer.hpp`
+- **Realtime-safe** - no malloc/free, no exceptions, deterministic O(1) operations
+- **STL-compatible** - iterator support, standard container interface where possible
 
 ---
 
@@ -469,4 +469,4 @@ SeRTial/include/sertial/ring_buffer.hpp
 
 ---
 
-Thank you for your help with this foundational data structure! 🚀
+Thank you for your help with this foundational data structure!

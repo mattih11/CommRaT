@@ -406,26 +406,26 @@ protected:
 ## Key Design Decisions
 
 ### 1. Index-Based Access (Not "last")
-✅ **Aligned with inputs**: `get_input_metadata<0>()` matches `input0`  
-✅ **Multi-input friendly**: Each input has independent metadata  
-✅ **Compile-time indexed**: Zero runtime cost for index calculation  
+ **Aligned with inputs**: `get_input_metadata<0>()` matches `input0`  
+ **Multi-input friendly**: Each input has independent metadata  
+ **Compile-time indexed**: Zero runtime cost for index calculation  
 
 ### 2. Structured Metadata (Not just timestamp)
-✅ **Extensible**: Easy to add fields (sender_id, priority, etc.)  
-✅ **Complete info**: Type, timestamp, sequence, freshness  
-✅ **Type-safe**: Compile-time DataType for introspection  
+ **Extensible**: Easy to add fields (sender_id, priority, etc.)  
+ **Complete info**: Type, timestamp, sequence, freshness  
+ **Type-safe**: Compile-time DataType for introspection  
 
 ### 3. is_new_data Flag
-✅ **Continuous input**: Always `true` (fresh from mailbox)  
-✅ **Multi-input primary**: Always `true` (triggers processing)  
-✅ **Multi-input secondary**: Depends on getData tolerance check  
+ **Continuous input**: Always `true` (fresh from mailbox)  
+ **Multi-input primary**: Always `true` (triggers processing)  
+ **Multi-input secondary**: Depends on getData tolerance check  
    - `true` if timestamp within tolerance → fresh data  
    - `false` if reusing stale data from history  
 
 ### 4. is_valid Flag
-✅ **Continuous input**: Always `true`  
-✅ **Multi-input primary**: Always `true`  
-✅ **Multi-input secondary**: `false` if getData failed  
+**Continuous input**: Always `true`  
+**Multi-input primary**: Always `true`  
+**Multi-input secondary**: `false` if getData failed  
    - No data in history within tolerance  
    - Input not yet received  
    - History buffer empty  
@@ -545,10 +545,10 @@ protected:
     Result process_multi_input(const SensorData& sensor1,
                                const SensorData& sensor2) override {
         // MUST use index-based (type-based won't compile)
-        auto meta1 = get_input_metadata<0>();  // ✓ Works
-        auto meta2 = get_input_metadata<1>();  // ✓ Works
+        auto meta1 = get_input_metadata<0>();  // Works
+        auto meta2 = get_input_metadata<1>();  // Works
         
-        // auto meta = get_input_metadata<SensorData>();  // ✗ Compile error!
+        // auto meta = get_input_metadata<SensorData>();  // Compile error!
         // Error: "Type appears multiple times in inputs - use index-based access"
         
         return Result{};
@@ -622,10 +622,10 @@ struct InputMetadata {
 
 ## Migration Path
 
-✅ **100% Backward Compatible**: New API is purely additive  
-✅ **Opt-in**: Modules don't need to use metadata accessors  
-✅ **Zero Cost**: Metadata only populated when inputs exist  
-✅ **No Breaking Changes**: Existing modules compile unchanged  
+**100% Backward Compatible**: New API is purely additive  
+**Opt-in**: Modules don't need to use metadata accessors  
+**Zero Cost**: Metadata only populated when inputs exist  
+**No Breaking Changes**: Existing modules compile unchanged  
 
 ---
 
@@ -733,11 +733,11 @@ protected:
 ```
 
 #### Pros
-✅ Simple, clean API  
-✅ No signature changes  
-✅ Backward compatible (100%)  
-✅ Zero overhead when unused (inlined getter)  
-✅ Easy to understand and document  
+Simple, clean API  
+No signature changes  
+Backward compatible (100%)  
+Zero overhead when unused (inlined getter)  
+Easy to understand and document  
 ✅ Matches C++ best practices (getter methods)  
 ✅ Only 8 bytes per Module instance  
 

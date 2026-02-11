@@ -89,9 +89,9 @@ using MyApp = commrat::CommRaT<
 ```
 
 **That's it for messages!** You've:
-- ✅ Defined your data types (plain structs)
-- ✅ Created your application template with `CommRaT<>`
-- ✅ Ready to use `MyApp::Module<>` for creating modules
+- Defined your data types (plain structs)
+- Created your application template with `CommRaT<>`
+- Ready to use `MyApp::Module<>` for creating modules
 
 CommRaT automatically includes system messages (subscription protocol) and handles all mailbox management internally!
 
@@ -115,11 +115,11 @@ public:
 
 protected:
     // Called every config.period milliseconds
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         static float temp = 20.0f;
         temp += (rand() % 20 - 10) * 0.1f;  // Simulate sensor noise
         
-        return TemperatureData{
+        output = TemperatureData{
             .temperature_celsius = temp,
             .humidity_percent = 45.0f + (rand() % 20 - 10) * 0.5f,
             .timestamp_ms = static_cast<uint64_t>(
@@ -136,14 +136,14 @@ public:
 
 protected:
     // Called for each received TemperatureData message
-    StatusData process_continuous(const TemperatureData& input) override {
+    void process(const TemperatureData& input, StatusData& output) override {
         std::cout << "[Monitor] Temperature: " << input.temperature_celsius << "°C, "
                   << "Humidity: " << input.humidity_percent << "%\n";
         
         // Calculate status based on temperature
         uint32_t status = (input.temperature_celsius > 25.0f) ? 1 : 0;
         
-        return StatusData{
+        output = StatusData{
             .status_code = status,
             .cpu_load = 0.3f,
             .uptime_ms = static_cast<uint64_t>(uptime_++)
@@ -274,7 +274,7 @@ protected:
         // Perform calibration...
     }
     
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         // Existing code...
     }
 };
@@ -296,8 +296,8 @@ using CounterApp = commrat::CommRaT<
 // Module with LoopInput (no delays, runs as fast as possible)
 class HighSpeedCounter : public CounterApp::Module<Output<CounterData>, LoopInput> {
 protected:
-    CounterData process() override {
-        return CounterData{.count = counter_++};
+    void process(CounterData& output) override {
+        output = CounterData{.count = counter_++};
         // Called as fast as possible (200K-400K iter/sec)
     }
 private:
@@ -362,10 +362,10 @@ using MyApp = commrat::CommRaT<
 3. **Create modules** - Inherit from `MyApp::Module<Output<T>, Input<U>, Commands...>`
 
 **Everything else is automatic:**
-- ✅ Message ID assignment
-- ✅ Subscription protocol
-- ✅ Thread management
-- ✅ Serialization/deserialization
-- ✅ Type-safe dispatch
+- Message ID assignment
+- Subscription protocol
+- Thread management
+- Serialization/deserialization
+- Type-safe dispatch
 
 **Next**: Read [USER_GUIDE.md](USER_GUIDE.md) for comprehensive documentation and [examples/](../examples/) for complete working examples.

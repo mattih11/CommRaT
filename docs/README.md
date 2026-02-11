@@ -1,7 +1,6 @@
 # CommRaT Documentation
 
-**Last Updated**: February 8, 2026  
-**Current Version**: Phase 6.10 Complete (Timestamp Metadata Accessors)
+**Last Updated**: February 8, 2026
 
 ---
 
@@ -48,24 +47,26 @@ See `archive/` directory for historical design documents from earlier developmen
 
 ---
 
-## 🎯 Current State (Phase 6.10 Complete)
+## Current Features
 
-### What We Have
+### Core Messaging System
 
-✅ **Compile-Time Message System**
+**Compile-Time Message System**
 - `CommRaT<MessageDefs...>` application template (user-facing API)
 - `MessageRegistry<MessageDefs...>` with variadic templates (internal)
 - Automatic message ID calculation (compile-time)
 - Zero runtime allocation for message dispatch
 - Type-safe serialization via SeRTial
 
-✅ **3-Mailbox Architecture**
+**3-Mailbox Architecture**
 - Hierarchical addressing: `(system_id << 8) | instance_id` + offset
 - Separate mailboxes for CMD (commands), WORK (subscription), DATA (streams)
 - Blocking receives, zero CPU when idle
 - Thread-per-mailbox model
 
-✅ **Module Framework with I/O Specifications** (Phase 5.2)
+### Module Framework
+
+**I/O Specifications**
 ```cpp
 template<typename UserRegistry,
          typename OutputSpec,    // Output<T>, Outputs<Ts...>, or raw T
@@ -74,7 +75,7 @@ template<typename UserRegistry,
 class Module;
 ```
 
-✅ **Multi-Input with Synchronized getData** (Phase 6.9 NEW)
+**Multi-Input with Synchronized getData**
 ```cpp
 // 3-input sensor fusion with time synchronization
 class FusionModule : public MyApp::Module<
@@ -83,20 +84,21 @@ class FusionModule : public MyApp::Module<
     PrimaryInput<IMUData>  // Designate IMU as synchronization driver
 > {
 protected:
-    FusedData process_multi_input(
+    void process(
         const IMUData& imu,      // PRIMARY - blocking receive
         const GPSData& gps,      // SECONDARY - getData(imu.timestamp)
-        const LidarData& lidar   // SECONDARY - getData(imu.timestamp)
+        const LidarData& lidar,  // SECONDARY - getData(imu.timestamp)
+        FusedData& output        // OUTPUT - result written here
     ) override {
-        return fuse_sensors(imu, gps, lidar);
+        output = fuse_sensors(imu, gps, lidar);
     }
 };
 ```
 
-✅ **Timestamp Metadata Accessors** (Phase 6.10 NEW)
+**Timestamp Metadata Accessors**
 ```cpp
 // Access input metadata in process functions
-FusedData process_multi_input(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {
+void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, FusedData& output) override {
     // Index-based access (always works)
     auto imu_meta = get_input_metadata<0>();
     auto gps_meta = get_input_metadata<1>();
@@ -114,11 +116,11 @@ FusedData process_multi_input(const IMUData& imu, const GPSData& gps, const Lida
         std::cerr << "Lidar getData failed\n";
     }
     
-    return fuse_sensors(imu, gps, lidar);
+    output = fuse_sensors(imu, gps, lidar);
 }
 ```
 
-**Phase 5-6 Features:**
+**Additional Capabilities:**
 - I/O specification types: `Output<T>`, `Outputs<Ts...>`, `Input<T>`, `Inputs<Ts...>`
 - Multi-input synchronization via `HistoricalMailbox` with `getData(timestamp, tolerance)`
 - Primary input designation: `PrimaryInput<T>` for explicit control
@@ -132,7 +134,7 @@ FusedData process_multi_input(const IMUData& imu, const GPSData& gps, const Lida
 - `PeriodicInput` - Timer-based execution
 - `LoopInput` - Maximum throughput (100% CPU)
 - `Input<T>` - Processes input stream
-- `Inputs<Ts...>` - Multi-input with synchronized getData (Phase 6)
+- `Inputs<Ts...>` - Multi-input with synchronized getData
 
 **Features:**
 - Automatic subscription management
@@ -155,53 +157,53 @@ examples/
 **Tests:**
 ```
 test/
-├── test_timestamp_logic.cpp      # Phase 6.10: Metadata accessors
-├── test_3input_fusion.cpp        # Phase 6.9: Multi-input synchronization
-├── test_historical_mailbox.cpp   # Phase 6.3: HistoricalMailbox getData
-└── test_process_signature.cpp    # Phase 5: Type constraints
+├── test_timestamp_logic.cpp      # Metadata accessors
+├── test_3input_fusion.cpp        # Multi-input synchronization
+├── test_historical_mailbox.cpp   # HistoricalMailbox getData
+└── test_process_signature.cpp    # Type constraints
 ```
 
 ---
 
-## 🚀 Phase 5-6 Progress
+## Feature Overview
 
-### ✅ Phase 5.1: Core I/O Specification Types (Complete)
+### I/O Specification Types (Complete)
 - `Output<T>`, `Outputs<Ts...>`, `NoOutput`
 - `Input<T>`, `Inputs<Ts...>`
 - Normalization traits and concepts
 - Comprehensive test suite
 
-### ✅ Phase 5.2: Module Refactoring (Complete)
+### Module Refactoring (Complete)
 - Updated Module template signature to use I/O specs
 - Fixed process_continuous virtual dispatch bug
 - Helper base class `ContinuousProcessorBase<InputData, OutputData>`
 - Backward compatibility maintained
 
-### ✅ Phase 5.3: Multi-Output Support (Complete)
+### Multi-Output Support (Complete)
 - `void process(T1& out1, T2& out2)` for multiple outputs
 - Type-specific publishing to subscribers
 - Multi-output with multi-input support
 
-### ✅ Phase 6.1-6.5: Multi-Input Infrastructure (Complete)
+### Multi-Input Infrastructure (Complete)
 - `PrimaryInput<T>` designation
 - `ModuleConfig.input_sources` for multi-subscription
 - Input type extraction and validation
 - Multi-input module configuration
 
-### ✅ Phase 6.6-6.8: Multi-Input Implementation (Complete)
+### Multi-Input Implementation (Complete)
 - `HistoricalMailbox` with timestamped history
 - Multi-input mailbox creation and management
 - `multi_input_loop()` with getData synchronization
 - Compilation tests with type safety validation
 
-### ✅ Phase 6.9: End-to-End Multi-Input (Complete)
+### End-to-End Multi-Input (Complete)
 - 3-input sensor fusion test (IMU + GPS + LiDAR)
 - Primary/secondary input coordination
-- getData with tolerance-based synchronization (FIXED: tolerance unit conversion bug)
+- getData with tolerance-based synchronization
 - Secondary input receive threads
 - **Status**: Fully functional - Example 03 demonstrates successful fusion with sync ages <100ms
 
-### ✅ Phase 6.10: Timestamp Metadata Accessors (Complete)
+### Timestamp Metadata Accessors (Complete)
 - `InputMetadata` structure with timestamp, sequence, freshness, validity
 - Index-based accessors: `get_input_metadata<0>()`
 - Type-based accessors: `get_input_metadata<IMUData>()`
@@ -209,41 +211,36 @@ test/
 - Automatic metadata population before process() calls
 - Single source of truth: `TimsHeader.timestamp` only
 
-### 🔄 Phase 5 Wave 6: Module Cleanup (Complete)
-### 🔄 Phase 5 Wave 6: Module Cleanup (Complete)
-- Attempted extraction of remaining helpers
-- Determined complex stateful helpers better kept inline
-- Removed unnecessary abstraction files
-- Final result: registry_module.hpp at 1,003 lines (49% reduction from original 1,952)
-- Extracted valuable modules: subscription, publishing, loops, metadata accessors
+### Module Cleanup (Complete)
+- Extracted helper modules for better organization
+- registry_module.hpp reduced to 1,003 lines (49% reduction from original 1,952)
+- Extracted modules: subscription, publishing, loops, metadata accessors
 
 ---
 
-## 🚀 Future: Phase 7 (Advanced Features)
+## Future Development
 
 ### Planned Features
 
-**Phase 7.1**: Optional Secondary Inputs
+**Optional Secondary Inputs**
 - Graceful getData failure handling
 - Fallback strategies for missing/stale data
 - `Optional<T>` wrapper for secondary inputs
 
-**Phase 7.2**: Input Buffering Strategies  
+**Input Buffering Strategies**
 - Sliding window buffers
 - Latest-only mode
 - Configurable overflow behavior
 
-**Phase 7.3**: ROS 2 Adapter (separate repository)
+**ROS 2 Adapter** (separate repository)
 - rclcpp-commrat bridge
 - Automatic message conversion
 - Lifecycle node integration
 
-**Phase 7.4**: Performance Tools
+**Performance Tools**
 - Real-time profiling
 - Latency measurement
 - Static analysis for RT safety
-
-**Target**: Phase 7 features by **Q2 2026**
 
 ---
 
@@ -277,23 +274,51 @@ using MyApp = commrat::CommRaT<
 - Type-safe visitor pattern for dispatch
 - Clean user API hides internal MessageRegistry complexity
 
-### 3-Mailbox System (RACK-style)
+### 4-Mailbox System
 
-Each module has three independent mailboxes:
+### MailboxSet Architecture
+
+**Each output type gets its own MailboxSet** with 3 mailboxes:
 
 ```
-Module Base Address = (system_id << 8) | instance_id
-
-CMD  mailbox: base + 0   → User commands (imperative)
-WORK mailbox: base + 16  → Subscription protocol (control plane)
-DATA mailbox: base + 32  → Input data streams (data plane)
+MailboxSet for OutputType:
+  Base Address = [type_id:16][system_id:8][instance_id:8]
+  
+  CMD     mailbox: base + 0   → Commands for this output type
+  WORK    mailbox: base + 16  → Subscription protocol for this output type  
+  PUBLISH mailbox: base + 32  → Publishes this output type to subscribers
 ```
 
-**Why separate mailboxes?**
-- **Isolation**: Commands don't interfere with data flow
-- **Priority**: Can process commands with higher priority
-- **Blocking**: Each thread blocks on its mailbox (0% CPU idle)
-- **Scalability**: Clear separation of concerns
+**Plus a shared DATA mailbox for inputs:**
+```
+DATA mailbox: module_base + 48  → Receives input data (shared across output types)
+```
+
+**Examples:**
+
+**Single-Output Module:**
+```cpp
+class Sensor : public Module<Output<TempData>, PeriodicInput>
+```
+- 1 MailboxSet with 3 mailboxes (CMD, WORK, PUBLISH)
+- 1 DATA mailbox if it has inputs
+- Total: 3-4 mailboxes
+
+**Multi-Output Module:**
+```cpp
+class Fusion : public Module<Outputs<RawData, FilteredData, Diagnostics>, Input<SensorData>>
+```
+- 3 MailboxSets × 3 mailboxes = 9 mailboxes (CMD, WORK, PUBLISH per output type)
+- 1 shared DATA mailbox for SensorData input
+- Total: 10 mailboxes
+- Each output type has unique base address (includes type_id)
+- Subscribers subscribe to specific output types via their WORK mailbox
+
+**Why this design?**
+- **Type-specific subscription**: Subscribers request specific output types
+- **Independent control**: Each output type can have its own subscriber list
+- **Scalable addressing**: Type ID in base address allows unique mailboxes per output
+- **No multiplexing**: Each output type has dedicated publish path
 
 ### Module Lifecycle
 
@@ -306,7 +331,7 @@ start()          // Start threads
     ↓
 on_start()       // Post-startup initialization
     ↓
-[Running]        // process() / process_continuous() / periodic_loop()
+[Running]        // process() called in periodic_loop() or continuous_loop()
     ↓
 stop()           // Signal shutdown
     ↓
@@ -321,27 +346,27 @@ Destructor
 
 **PeriodicInput**: Timer-driven execution
 ```cpp
-class SensorModule : public Module<SensorData, PeriodicInput> {
-    SensorData process() override {
-        return read_sensor();  // Called every config.period
+class SensorModule : public Module<Output<SensorData>, PeriodicInput> {
+    void process(SensorData& output) override {
+        output = read_sensor();  // Called every config.period
     }
 };
 ```
 
 **LoopInput**: Maximum throughput
 ```cpp
-class CounterModule : public Module<CounterData, LoopInput> {
-    CounterData process() override {
-        return {++count_};  // Called as fast as possible (100% CPU)
+class CounterModule : public Module<Output<CounterData>, LoopInput> {
+    void process(CounterData& output) override {
+        output = {++count_};  // Called as fast as possible (100% CPU)
     }
 };
 ```
 
 **Input<T>**: Stream processing
 ```cpp
-class FilterModule : public Module<FilteredData, Input<RawData>> {
-    FilteredData process(const RawData& input) override {
-        return apply_filter(input);  // Called for each incoming message
+class FilterModule : public Module<Output<FilteredData>, Input<RawData>> {
+    void process(const RawData& input, FilteredData& output) override {
+        output = apply_filter(input);  // Called for each incoming message
     }
 };
 ```
@@ -351,7 +376,7 @@ class FilterModule : public Module<FilteredData, Input<RawData>> {
 Variadic command support with automatic dispatch:
 
 ```cpp
-class MyModule : public Module<Data, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd> {
+class MyModule : public Module<Output<Data>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd> {
     void on_command(const ResetCmd& cmd) override {
         reset_state();
     }
@@ -395,19 +420,19 @@ cmd_sender.send(cmd, target_module_cmd_mailbox);
 ### 3. Real-Time Safe
 
 **Never in hot paths:**
-- ❌ `new` / `delete`
-- ❌ `malloc` / `free`
-- ❌ `std::vector::push_back()` (may allocate)
-- ❌ `std::string` operations (may allocate)
-- ❌ Blocking I/O in loops
-- ❌ Exceptions
+- `new` / `delete`
+- `malloc` / `free`
+- `std::vector::push_back()` (may allocate)
+- `std::string` operations (may allocate)
+- Blocking I/O in loops
+- Exceptions
 
 **Use instead:**
-- ✅ `std::array<T, N>`
-- ✅ `sertial::fixed_vector<T, N>`
-- ✅ `std::atomic<T>`
-- ✅ `constexpr` functions
-- ✅ Template metaprogramming
+- `std::array<T, N>`
+- `sertial::fixed_vector<T, N>`
+- `std::atomic<T>`
+- `constexpr` functions
+- Template metaprogramming
 
 ### 4. Simple User-Facing API
 
@@ -432,7 +457,7 @@ Behind the scenes:
 
 ---
 
-## 🔗 Related Resources
+## Related Resources
 
 ### Internal
 - **Source Code**: `/home/muddy/src/CommRaT/include/commrat/`
@@ -451,31 +476,19 @@ Behind the scenes:
 
 ---
 
-## 📝 Contributing
+## Contributing
 
 When updating documentation:
 
 1. **Active docs**: Update `work/ARCHITECTURE_ANALYSIS.md` for roadmap changes
 2. **Historical record**: Add to `work/FIXES_APPLIED.md` for bug fixes
 3. **Examples**: Keep examples up-to-date with latest API
-4. **This README**: Update current state section when completing phases
+4. **This README**: Update current state section for major changes
 
 When archiving docs:
 ```bash
 mv obsolete_doc.md archive/
 ```
-
----
-
-## 🏷️ Version History
-
-- **Phase 1** (Complete): Core module template with lifecycle hooks
-- **Phase 2** (Complete): ContinuousInput with automatic subscription
-- **Phase 3** (Complete): Variadic command handling with type-safe dispatch
-- **Phase 4** (Complete): 3-mailbox architecture with hierarchical addressing
-- **Phase 5** (Planned): Multi-input/multi-output modules (Target: April 2026)
-- **Phase 6** (Planned): Command reply mechanisms
-- **Phase 7** (Planned): Advanced features
 
 ---
 
