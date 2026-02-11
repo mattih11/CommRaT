@@ -263,7 +263,7 @@ protected:
     >;
     SubscriptionProtocolType subscription_protocol_;
     
-    // Publishing logic (post-unification: SubscriberManager parameter removed)
+    // Publishing logic (post-unification: uses MultiOutputManager for subscribers)
     using PublisherType = commrat::Publisher<
         UserRegistry, 
         OutputData, 
@@ -281,11 +281,9 @@ protected:
     // Multi-output: output_work_threads_ in MultiOutputManager mixin
     // Multi-input: secondary_input_threads_ in MultiInputInfrastructure mixin
     
-    // Subscriber management - inherited from SubscriberManager base class
-    // (subscribers_, subscribers_mutex_ now in SubscriberManager)
-    
-    // Multi-output subscriber management (in MultiOutputManager mixin)
-    // - output_subscribers_: Per-output subscriber lists
+    // Subscriber management - inherited from MultiOutputManager mixin
+    // ALL modules now use per-output subscriber lists (post-unification):
+    // - output_subscribers_: Per-output subscriber lists (index 0 for single-output)
     // - output_subscribers_mutex_: Protects output_subscribers_
     
     // ========================================================================
