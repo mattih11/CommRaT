@@ -305,21 +305,26 @@ int main() {
         
         // Start all modules
         std::cout << "Starting modules...\n\n";
+        
+        // Start sensor modules FIRST so their WORK mailboxes exist
+        std::cout << "Starting sensor modules...\n";
         imu_module.start();
         gps_module.start();
         lidar_module.start();
         
-        // Wait for producers to build up data
-        std::cout << "Waiting for producers to initialize...\n";
-        Time::sleep(Milliseconds(500));  // Let producers publish some data
+        // Wait for sensor WORK mailboxes to be created and work_loops to start
+        std::cout << "Waiting for sensors to initialize...\n";
+        Time::sleep(Milliseconds(200));
+        std::cout << "Sensors initialized.\n";
         
-        // Start fusion (will subscribe to all inputs)
+        // Now start fusion module (will send SubscribeRequests to existing WORK mailboxes)
         std::cout << "Starting fusion module...\n\n";
         fusion_module.start();
         
-        // Wait for secondary input threads to populate buffers
-        std::cout << "Waiting for buffers to fill...\n";
+        // Wait for subscription protocol to complete and buffers to fill
+        std::cout << "Waiting for subscription and data flow...\n";
         Time::sleep(Milliseconds(500));
+        std::cout << "Subscription complete, starting test...\n";
         
         // Run for 5 seconds
         std::cout << "Running fusion for 5 seconds...\n\n";
