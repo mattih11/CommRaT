@@ -1,34 +1,25 @@
 #pragma once
 
+// Mailbox infrastructure
 #include "commrat/mailbox/registry_mailbox.hpp"
-#include "commrat/mailbox/typed_mailbox.hpp"  // Phase 7.3: Type-optimized mailboxes
+#include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/mailbox/historical_mailbox.hpp"
+
+// System messaging
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
+
+// Platform abstractions
 #include "commrat/platform/threading.hpp"
 #include "commrat/platform/timestamp.hpp"
-#include "commrat/module/io_spec.hpp"
-#include "commrat/module/module_config.hpp"
-#include "commrat/module/traits/type_extraction.hpp"
-#include "commrat/module/traits/processor_bases.hpp"
-#include "commrat/module/traits/multi_input_resolver.hpp"
-#include "commrat/module/traits/module_types.hpp"  // Phase 1: Extracted type computations
-#include "commrat/module/helpers/address_helpers.hpp"
-#include "commrat/module/helpers/tims_helpers.hpp"
-#include "commrat/module/metadata/input_metadata.hpp"
-#include "commrat/module/metadata/input_metadata_accessors.hpp"  // Phase 5: Metadata accessor mixin
-#include "commrat/module/metadata/input_metadata_manager.hpp"  // Phase 9: Metadata update/mark functions
-#include "commrat/module/services/subscription.hpp"
-#include "commrat/module/services/publishing.hpp"
-#include "commrat/module/lifecycle/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
-#include "commrat/module/mailbox/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
-#include "commrat/module/io/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
-#include "commrat/module/lifecycle/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
-#include "commrat/module/io/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
-#include "commrat/module/io/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
-#include "commrat/module/lifecycle/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
-#include "commrat/module/lifecycle/work_loop_handler.hpp"  // Phase 7: Work loop (subscription protocol)
-#include "commrat/module/mailbox/mailbox_infrastructure_builder.hpp"  // Phase 8: Mailbox factory methods
+
+// Module core (config, I/O specs, traits, helpers, metadata)
+#include "commrat/module/module_core.hpp"
+
+// Module mixins (I/O, mailbox, lifecycle, services)
+#include "commrat/module/module_mixins.hpp"
+
+// External dependencies
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -44,11 +35,11 @@ struct EmptyBase3 {};
 struct EmptyBase4 {};
 
 // ============================================================================
-// Phase 6.10: Automatic Timestamp Management
+// Automatic Timestamp Management
 // ============================================================================
 
 /**
- * @brief Phase 6.10: Timestamp Management Architecture
+ * @brief Timestamp Management Architecture
  * 
  * Timestamps are stored ONLY in TimsHeader.timestamp, never in payload.
  * Module automatically wraps payloads in TimsMessage and sets header.timestamp:
@@ -71,22 +62,12 @@ struct EmptyBase4 {};
  * 
  * @tparam UserRegistry The application's complete MessageRegistry
  * @tparam OutputSpec_ Output specification: Output<T>, Outputs<Ts...>, or raw type T (normalized to Output<T>)
- * @tparam InputSpec_ Input specification: Input<T>, PeriodicInput, LoopInput, ContinuousInput<T> (legacy)
+ * @tparam InputSpec_ Input specification: Input<T>, Inputs<T,U,V>, PeriodicInput, LoopInput
  * @tparam CommandTypes Optional variadic command types this module handles
  * 
- * Example (new style with I/O specs):
+ * Example:
  * @code
  * class SensorModule : public Module<Registry, Output<TempData>, PeriodicInput> {
- * protected:
- *     TempData process() override {
- *         return TempData{.temperature_celsius = read_sensor()};
- *     }
- * };
- * @endcode
- * 
- * Example (backward compatible - raw type):
- * @code
- * class SensorModule : public Module<Registry, TempData, PeriodicInput> {
  * protected:
  *     TempData process() override {
  *         return TempData{.temperature_celsius = read_sensor()};
@@ -115,29 +96,29 @@ class Module
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
-    , public commrat::SubscriberManager // Subscriber management for subscription protocol
+    , public commrat::SubscriberManager
     , public std::conditional_t<
         (module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::num_output_types > 1),
         MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>,
-        EmptyBase  // Single-output modules don't need MultiOutputManager
+        EmptyBase
       >
-    , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Loop implementations for periodic and free loops
-    , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Input metadata accessors
-    , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>  // Phase 3: Command dispatch
+    , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
+    , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
+    , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>
     , public std::conditional_t<
         module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::has_multi_input,
         MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
-        EmptyBase2  // Single-input modules don't need multi-input infrastructure
-      >  // Phase 4: Multi-input infrastructure
+        EmptyBase2
+      >
     , public std::conditional_t<
         module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::has_multi_input,
         MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
-        EmptyBase3  // Single-input modules don't need multi-input processor
-      >  // Phase 5: Multi-input processing
-    , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 6: Lifecycle management
-    , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 7: Work loop handler
-    , public MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>  // Phase 8: Mailbox factory
-    , public InputMetadataManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 9: Metadata management
+        EmptyBase3
+      >
+    , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
+    , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
+    , public MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>
+    , public InputMetadataManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -153,7 +134,7 @@ class Module
     
 private:
     // ========================================================================
-    // Type Definitions (Phase 1: Extracted to module_types.hpp)
+    // Type Definitions
     // ========================================================================
     
     // Import all type computations from module_traits::ModuleTypes
@@ -214,8 +195,8 @@ public:
 protected:
     ModuleConfig config_;
     
-    // Phase 7.4: Per-output mailbox infrastructure
-    // For single output: Direct mailboxes (backward compatible)
+    // Per-output mailbox infrastructure
+    // For single output: Direct mailboxes
     // For multi-output: Tuple of MailboxSets (each output at its own base address)
     std::conditional_t<
         use_mailbox_sets,
@@ -287,15 +268,15 @@ protected:
         }
     }
     
-    // Phase 6.6: Multi-input support
-    // Single-input mode (backward compatible)
+    // Multi-input support
+    // Single-input mode
     std::optional<DataMailbox> data_mailbox_;  // base + 48: Receives input data (only for single ContinuousInput)
     
-    // Phase 4: Multi-input mailbox infrastructure moved to MultiInputInfrastructure mixin
+    // Multi-input mailbox infrastructure (in MultiInputInfrastructure mixin)
     // - input_mailboxes_: Tuple of HistoricalMailbox instances
     // - secondary_input_threads_: Background receive threads
     
-    // Subscription protocol (Phase 5: extracted to subscription.hpp)
+    // Subscription protocol
     using SubscriptionProtocolType = commrat::SubscriptionProtocol<
         UserRegistry,
         has_continuous_input,
@@ -308,8 +289,7 @@ protected:
     >;
     SubscriptionProtocolType subscription_protocol_;
     
-    // Publishing logic (Phase 5: extracted to publishing.hpp)
-    // Phase 7.4: Add Module type for multi-output mailbox access
+    // Publishing logic
     using PublisherType = commrat::Publisher<
         UserRegistry, 
         OutputData, 
@@ -325,18 +305,18 @@ protected:
     std::optional<std::thread> data_thread_;
     std::optional<std::thread> command_thread_;
     std::optional<std::thread> work_thread_;              // Single-output: one WORK mailbox
-    // Phase 2: output_work_threads_ moved to MultiOutputManager mixin
-    // Phase 4: secondary_input_threads_ moved to MultiInputInfrastructure mixin
+    // Multi-output: output_work_threads_ in MultiOutputManager mixin
+    // Multi-input: secondary_input_threads_ in MultiInputInfrastructure mixin
     
     // Subscriber management - inherited from SubscriberManager base class
     // (subscribers_, subscribers_mutex_ now in SubscriberManager)
     
-    // Phase 2: Multi-output subscriber management moved to MultiOutputManager mixin
+    // Multi-output subscriber management (in MultiOutputManager mixin)
     // - output_subscribers_: Per-output subscriber lists
     // - output_subscribers_mutex_: Protects output_subscribers_
     
     // ========================================================================
-    // Phase 6.10: Input Metadata Storage
+    // Input Metadata Storage
     // ========================================================================
     
     /**
@@ -354,11 +334,11 @@ protected:
     // Fixed-size array for input metadata (zero-size when no inputs)
     std::array<InputMetadataStorage, (num_inputs > 0 ? num_inputs : 1)> input_metadata_;
     
-    // Phase 9: Input metadata management moved to InputMetadataManager mixin
+    // Input metadata management (in InputMetadataManager mixin)
     // - update_input_metadata<T>()
     // - mark_input_invalid()
     
-    // Phase 8: Mailbox infrastructure creation moved to MailboxInfrastructureBuilder mixin
+    // Mailbox infrastructure creation (in MailboxInfrastructureBuilder mixin)
     // - create_mailbox_infrastructure()
     // - create_mailbox_sets_impl()
     // - create_mailbox_set()
@@ -383,7 +363,7 @@ public:
         // Initialize SubscriberManager
         this->set_max_subscribers(config.max_subscribers);
         
-        // Phase 2: Initialize per-output subscriber lists for multi-output modules
+        // Initialize per-output subscriber lists for multi-output modules
         if constexpr (use_mailbox_sets) {
             this->initialize_output_subscribers();
         }
@@ -405,7 +385,7 @@ public:
         
         publisher_.set_module_name(config.name);
         
-        // Phase 6.6: Initialize multi-input mailboxes
+        // Initialize multi-input mailboxes
         if constexpr (has_multi_input) {
             this->initialize_multi_input_mailboxes();
         }
@@ -448,7 +428,7 @@ protected:
 
 public:
     // ========================================================================
-    // Phase 7.4: Public Mailbox Accessors for Multi-Output
+    // Public Mailbox Accessors
     // ========================================================================
     
     /**
@@ -465,9 +445,9 @@ public:
     }
     
     // ========================================================================
-    // Lifecycle Management (Phase 6: Extracted to lifecycle_manager.hpp)
+    // Lifecycle Management
     // ========================================================================
-    // start(), stop(), is_running() moved to LifecycleManager mixin
+    // start(), stop(), is_running() in LifecycleManager mixin
 
     // ========================================================================
     // Subscription Protocol (delegated to SubscriptionProtocol member)
@@ -502,7 +482,7 @@ protected:
     }
     
     /**
-     * @brief Phase 2: Add subscriber to correct output-specific list
+     * @brief Add subscriber to correct output-specific list
      * 
      * Delegates to MultiOutputManager mixin for multi-output modules.
      */
@@ -519,7 +499,7 @@ protected:
 protected:
 
     // ========================================================================
-    // Publishing (Phase 5: extracted to publishing.hpp)
+    // Publishing
     // ========================================================================
     // Delegation wrappers for publishing operations
     
@@ -552,7 +532,7 @@ protected:
     // ========================================================================
     // Main Loops
     // ========================================================================
-    // See: commrat/module/loops/loop_executor.hpp
+    // See: commrat/module/lifecycle/loop_executor.hpp
     // - periodic_loop(): Time-driven generation (PeriodicInput)
     // - free_loop(): Maximum throughput (LoopInput)
     // - continuous_loop(): Event-driven single input (Input<T>)
@@ -560,12 +540,11 @@ protected:
     // ========================================================================
     
 private:
-    // Phase 4: secondary_input_receive_loop() moved to MultiInputInfrastructure mixin
-    // Phase 3: command_loop() moved to CommandDispatcher mixin
-    // Phase 7: work_loop() moved to WorkLoopHandler mixin
-    
-    // Phase 2: output_work_loop moved to MultiOutputManager mixin
-    // Phase 3: handle_user_command() and on_command() moved to CommandDispatcher mixin
+    // secondary_input_receive_loop() in MultiInputInfrastructure mixin
+    // command_loop() in CommandDispatcher mixin
+    // work_loop() in WorkLoopHandler mixin
+    // output_work_loop() in MultiOutputManager mixin
+    // handle_user_command() and on_command() in CommandDispatcher mixin
     
     // ========================================================================
     // Helper Functions
@@ -574,7 +553,7 @@ private:
 private:
     // Helper: Get primary input index at compile time
     static constexpr size_t get_primary_input_index() {
-        // Phase 6.7: Extract primary input from CommandTypes (PrimaryInput<T> passed as command)
+        // Extract primary input from CommandTypes (PrimaryInput<T> passed as command)
         if constexpr (has_primary_input_spec) {
             // PrimaryInput<T> found in CommandTypes, extract T and find index
             return PrimaryInputIndex_v<PrimaryPayloadType, InputTypesTuple>;
@@ -584,7 +563,7 @@ private:
         }
     }
     
-    // Phase 4: Multi-input mailbox creation/initialization moved to MultiInputInfrastructure mixin
+    // Multi-input mailbox creation/initialization (in MultiInputInfrastructure mixin)
     // - create_historical_mailbox_for_input<Index>()
     // - create_input_mailboxes_impl()
     // - initialize_multi_input_mailboxes()
@@ -593,7 +572,7 @@ private:
     // - start_secondary_input_threads()
     // - start_secondary_threads_impl()
     
-    // Phase 5: Multi-input processing moved to MultiInputProcessor mixin
+    // Multi-input processing (in MultiInputProcessor mixin)
     // - receive_primary_input<PrimaryIdx>()
     // - gather_all_inputs<PrimaryIdx>()
     // - sync_secondary_inputs<PrimaryIdx>()
