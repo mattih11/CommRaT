@@ -45,13 +45,13 @@ class Publisher {
 protected:
     // References to module resources (set by derived class)
     SubscriberManager* subscriber_manager_{nullptr};
-    PublishMailboxT* publish_mailbox_{nullptr};  // For single-output only
+    // REMOVED: publish_mailbox_ - ALL modules now use MailboxSets (post-unification)
     ModuleType* module_ptr_{nullptr};  // Typed pointer to Module for multi-output
     std::string module_name_;
     
 public:
     void set_subscriber_manager(SubscriberManager* mgr) { subscriber_manager_ = mgr; }
-    void set_publish_mailbox(PublishMailboxT* mbx) { publish_mailbox_ = mbx; }
+    // REMOVED: set_publish_mailbox() - no longer used after unification
     void set_module_ptr(ModuleType* ptr) { module_ptr_ = ptr; }  // For multi-output modules
     void set_module_name(const std::string& name) { module_name_ = name; }
     
@@ -77,21 +77,28 @@ public:
     /**
      * @brief Single-output publishing (only enabled when OutputData is not void)
      * Publishes data to all subscribers' DATA mailboxes
+     * 
+     * After unification, ALL modules use MailboxSets and MultiOutputManager,
+     * so we access mailbox via get_publish_mailbox_public<0>() and subscribers
+     * via get_output_subscribers(0).
      */
     template<typename T = OutputData>
         requires (!std::is_void_v<T>)
     void publish_to_subscribers(T& data) {
-        auto& mutex = subscriber_manager_->get_subscribers_mutex();
-        auto& subscribers = subscriber_manager_->get_subscribers();
-        
-        std::lock_guard<std::mutex> lock(mutex);
-        for (uint32_t subscriber_base_addr : subscribers) {
-            // Send to subscriber's DATA mailbox (base + MailboxType::DATA = base + 48)
-            uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-            auto result = publish_mailbox_->send(data, subscriber_data_mbx);
-            if (!result) {
-                std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
-                          << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+        if constexpr (!std::is_void_v<ModuleType>) {
+            // Use MailboxSet approach (unified path for all modules)
+            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<0>();
+            // Get output-specific subscriber list (index 0 for single-output)
+            auto subscribers = module_ptr_->get_output_subscribers(0);
+            
+            for (uint32_t subscriber_base_addr : subscribers) {
+                // Send to subscriber's DATA mailbox (base + MailboxType::DATA = base + 48)
+                uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+                auto result = publish_mbx.send(data, subscriber_data_mbx);
+                if (!result) {
+                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
+                              << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+                }
             }
         }
     }
@@ -99,20 +106,27 @@ public:
     /**
      * @brief Publish TimsMessage<T> for single output
      * Phase 6.10: Uses explicit timestamp from header
+     * 
+     * After unification, ALL modules use MailboxSets and MultiOutputManager,
+     * so we access mailbox via get_publish_mailbox_public<0>() and subscribers
+     * via get_output_subscribers(0).
      */
     template<typename T>
     void publish_tims_message(TimsMessage<T>& tims_msg) {
-        auto& mutex = subscriber_manager_->get_subscribers_mutex();
-        auto& subscribers = subscriber_manager_->get_subscribers();
-        
-        std::lock_guard<std::mutex> lock(mutex);
-        for (uint32_t subscriber_base_addr : subscribers) {
-            uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-            // Phase 6.10: Send with explicit timestamp from header
-            auto result = publish_mailbox_->send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
-            if (!result) {
-                std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
-                          << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+        if constexpr (!std::is_void_v<ModuleType>) {
+            // Use MailboxSet approach (unified path for all modules)
+            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<0>();
+            // Get output-specific subscriber list (index 0 for single-output)
+            auto subscribers = module_ptr_->get_output_subscribers(0);
+            
+            for (uint32_t subscriber_base_addr : subscribers) {
+                uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+                // Phase 6.10: Send with explicit timestamp from header
+                auto result = publish_mbx.send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
+                if (!result) {
+                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
+                              << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+                }
             }
         }
     }
@@ -120,6 +134,9 @@ public:
     /**
      * @brief Send output at given index if type matches subscriber's expected type
      * Phase 7.4: Uses Module's get_publish_mailbox<Index>() for per-output mailboxes
+     * 
+     * After unification, ModuleType is always set (never void), so we always
+     * use the MailboxSet approach via get_publish_mailbox_public<Index>().
      */
     template<std::size_t Index, typename OutputType>
     void send_output_at_index(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
@@ -129,19 +146,12 @@ public:
         
         // Only send if types match
         if (output_type_id_low == subscriber_type_id_low) {
-            // Get the correct publish mailbox for this output index
+            // Get the correct publish mailbox for this output index (unified path)
             if constexpr (!std::is_void_v<ModuleType>) {
                 auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<Index>();
                 auto result = publish_mbx.send(output, dest_mailbox);
                 if (!result) {
                     std::cout << "[" << module_name_ << "] Send failed for output[" << Index << "]\n";
-                }
-            } else {
-                // Single-output fallback
-                auto result = publish_mailbox_->send(output, dest_mailbox);
-                if (!result) {
-                    std::cout << "[" << module_name_ << "] Send failed to subscriber " 
-                              << std::hex << dest_mailbox << std::dec << "\n";
                 }
             }
         }
