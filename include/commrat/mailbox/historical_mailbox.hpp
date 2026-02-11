@@ -96,9 +96,19 @@ public:
     
     /**
      * @brief Start the mailbox (pass-through to underlying mailbox)
+     * @return Success or error from underlying mailbox initialization
      */
-    void start() {
-        mailbox_.start();
+    auto start() -> MailboxResult<void> {
+        auto result = mailbox_.start();
+        if (!result) {
+            std::cerr << "[HistoricalMailbox] Start failed for mailbox " 
+                      << mailbox_.mailbox_id() << " - error " 
+                      << static_cast<int>(result.get_error()) << "\n";
+        } else {
+            std::cout << "[HistoricalMailbox] Started mailbox " 
+                      << mailbox_.mailbox_id() << " successfully\n";
+        }
+        return result;
     }
     
     /**

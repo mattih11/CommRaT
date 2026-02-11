@@ -21,6 +21,7 @@
 #include "commrat/module/publishing.hpp"
 #include "commrat/module/loops/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
 #include "commrat/module/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
+#include "commrat/module/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -28,6 +29,9 @@
 #include <optional>
 
 namespace commrat {
+
+// Empty base class for conditional inheritance
+struct EmptyBase {};
 
 // ============================================================================
 // Phase 6.10: Automatic Timestamp Management
@@ -102,11 +106,17 @@ class Module
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
     , public commrat::SubscriberManager // Subscriber management for subscription protocol
+    , public std::conditional_t<
+        (module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::num_output_types > 1),
+        MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>,
+        EmptyBase  // Single-output modules don't need MultiOutputManager
+      >
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Loop implementations for periodic and free loops
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Input metadata accessors
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
+    friend class MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>;
     friend class InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     
 private:
@@ -300,16 +310,15 @@ protected:
     std::optional<std::thread> data_thread_;
     std::optional<std::thread> command_thread_;
     std::optional<std::thread> work_thread_;              // Single-output: one WORK mailbox
-    std::vector<std::thread> output_work_threads_;        // Multi-output: one thread per MailboxSet
+    // Phase 2: output_work_threads_ moved to MultiOutputManager mixin
     std::vector<std::thread> secondary_input_threads_;    // Phase 6.9: Receive loops for secondary inputs
     
     // Subscriber management - inherited from SubscriberManager base class
     // (subscribers_, subscribers_mutex_ now in SubscriberManager)
     
-    // Phase 7: Multi-output subscriber management
-    // Each output type has its own subscriber list
-    std::vector<std::vector<uint32_t>> output_subscribers_;  // [output_index][subscriber_id]
-    mutable std::mutex output_subscribers_mutex_;            // Protects output_subscribers_
+    // Phase 2: Multi-output subscriber management moved to MultiOutputManager mixin
+    // - output_subscribers_: Per-output subscriber lists
+    // - output_subscribers_mutex_: Protects output_subscribers_
     
     // ========================================================================
     // Phase 6.10: Input Metadata Storage
@@ -447,9 +456,9 @@ public:
         // Initialize SubscriberManager
         this->set_max_subscribers(config.max_subscribers);
         
-        // Phase 7: Initialize per-output subscriber lists for multi-output
+        // Phase 2: Initialize per-output subscriber lists for multi-output modules
         if constexpr (use_mailbox_sets) {
-            output_subscribers_.resize(num_output_types);
+            this->initialize_output_subscribers();
         }
         
         // Initialize subscription protocol
@@ -542,7 +551,7 @@ public:
         // Phase 7.4: Start mailboxes (all MailboxSets for multi-output)
         if constexpr (use_mailbox_sets) {
             // Multi-output: start all MailboxSets
-            start_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
+            this->start_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
         } else {
             // Single-output: start individual mailboxes
             auto cmd_result = cmd_mailbox().start();
@@ -553,6 +562,11 @@ public:
             auto work_result = work_mailbox().start();
             if (!work_result) {
                 throw std::runtime_error("Failed to start work mailbox");
+            }
+            
+            auto publish_result = publish_mailbox().start();
+            if (!publish_result) {
+                throw std::runtime_error("Failed to start publish mailbox");
             }
         }
         
@@ -576,7 +590,7 @@ public:
         if constexpr (use_mailbox_sets) {
             // Multi-output: spawn one thread per MailboxSet
             std::cout << "[" << config_.name << "] Spawning " << num_output_types << " output work threads...\n";
-            spawn_all_output_work_threads(std::make_index_sequence<num_output_types>{});
+            this->spawn_all_output_work_threads(std::make_index_sequence<num_output_types>{});
         } else {
             // Single-output: one work thread
             work_thread_ = std::thread(&Module::work_loop, this);
@@ -622,78 +636,7 @@ public:
         }
     }
     
-    /**
-     * @brief Start all MailboxSets for multi-output modules
-     */
-    template<std::size_t... Is>
-    void start_all_mailbox_sets(std::index_sequence<Is...>) {
-        // Start CMD and WORK mailboxes for each output type
-        (void)std::initializer_list<int>{
-            (start_mailbox_set<Is>(), 0)...
-        };
-    }
-    
-    template<std::size_t Index>
-    void start_mailbox_set() {
-        auto& cmd = get_cmd_mailbox<Index>();
-        auto cmd_result = cmd.start();
-        if (!cmd_result) {
-            throw std::runtime_error("[Module] Failed to start CMD mailbox for output " + std::to_string(Index));
-        }
-        
-        auto& work = get_work_mailbox<Index>();
-        auto work_result = work.start();
-        if (!work_result) {
-            throw std::runtime_error("[Module] Failed to start WORK mailbox for output " + std::to_string(Index));
-        }
-        
-        auto& publish = get_publish_mailbox_public<Index>();
-        auto publish_result = publish.start();
-        if (!publish_result) {
-            throw std::runtime_error("[Module] Failed to start PUBLISH mailbox for output " + std::to_string(Index));
-        }
-    }
-    
-    /**
-     * @brief Spawn all output work threads for multi-output modules
-     * 
-     * Creates one thread per MailboxSet to handle subscriptions independently.
-     */
-    template<std::size_t... Is>
-    void spawn_all_output_work_threads(std::index_sequence<Is...>) {
-        // Reserve space for all threads
-        output_work_threads_.reserve(sizeof...(Is));
-        
-        // Spawn one thread per output type using fold expression
-        (void)std::initializer_list<int>{
-            (spawn_output_work_thread<Is>(), 0)...
-        };
-    }
-    
-    /**
-     * @brief Spawn work thread for a specific output index
-     */
-    template<std::size_t Index>
-    void spawn_output_work_thread() {
-        output_work_threads_.emplace_back(&Module::output_work_loop<Index>, this);
-    }
-    
-    /**
-     * @brief Stop all MailboxSets for multi-output modules
-     */
-    template<std::size_t... Is>
-    void stop_all_mailbox_sets(std::index_sequence<Is...>) {
-        (void)std::initializer_list<int>{
-            (stop_mailbox_set<Is>(), 0)...
-        };
-    }
-    
-    template<std::size_t Index>
-    void stop_mailbox_set() {
-        get_cmd_mailbox<Index>().stop();
-        get_work_mailbox<Index>().stop();
-        get_publish_mailbox_public<Index>().stop();
-    }
+    // Phase 2: Multi-output mailbox lifecycle methods moved to MultiOutputManager mixin
     
     void stop() {
         if (!running_) {
@@ -731,14 +674,8 @@ public:
         
         // Join work threads (single or multi-output)
         if constexpr (use_mailbox_sets) {
-            // Multi-output: join all output work threads
-            std::cout << "[" << config_.name << "] Joining " << output_work_threads_.size() 
-                      << " output work threads...\n";
-            for (auto& thread : output_work_threads_) {
-                if (thread.joinable()) {
-                    thread.join();
-                }
-            }
+            // Multi-output: join all output work threads (via MultiOutputManager)
+            this->join_output_work_threads();
         } else {
             // Single-output: join single work thread
             if (work_thread_ && work_thread_->joinable()) {
@@ -753,7 +690,7 @@ public:
         // Stop all mailboxes
         if constexpr (use_mailbox_sets) {
             // Multi-output: stop all MailboxSets
-            stop_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
+            this->stop_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
         } else {
             // Single-output
             cmd_mailbox().stop();
@@ -801,85 +738,18 @@ protected:
     }
     
     /**
-     * @brief Phase 7: Add subscriber to correct output-specific list
+     * @brief Phase 2: Add subscriber to correct output-specific list
      * 
-     * For multi-output modules, extracts type ID from subscriber base address
-     * and routes to the appropriate output's subscriber list.
+     * Delegates to MultiOutputManager mixin for multi-output modules.
      */
     void add_subscriber_to_output(uint32_t subscriber_base_addr) {
         if constexpr (use_mailbox_sets) {
-            // Extract type ID from subscriber's base address [type_id_low:16][system:8][instance:8]
-            uint16_t subscriber_type_id_low = static_cast<uint16_t>((subscriber_base_addr >> 16) & 0xFFFF);
-            
-            // Find matching output index
-            std::size_t output_idx = find_output_index_by_type_id(subscriber_type_id_low);
-            
-            if (output_idx < num_output_types) {
-                std::lock_guard<std::mutex> lock(output_subscribers_mutex_);
-                auto& subs = output_subscribers_[output_idx];
-                
-                // Check if already subscribed
-                if (std::find(subs.begin(), subs.end(), subscriber_base_addr) == subs.end()) {
-                    subs.push_back(subscriber_base_addr);
-                    std::cout << "[" << config_.name << "] Added subscriber " << subscriber_base_addr 
-                              << " to output[" << output_idx << "] (total: " << subs.size() << ")\n";
-                }
-            } else {
-                std::cerr << "[" << config_.name << "] ERROR: No matching output type for subscriber type ID " 
-                          << subscriber_type_id_low << "\n";
-            }
+            // Multi-output: delegate to inherited MultiOutputManager::add_subscriber_to_output
+            this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr);
         } else {
             // Single-output: use inherited SubscriberManager::add_subscriber
             this->add_subscriber(subscriber_base_addr);
         }
-    }
-    
-    /**
-     * @brief Find output index by type ID (lower 16 bits of message ID)
-     */
-    template<std::size_t... Is>
-    std::size_t find_output_index_by_type_id_impl(uint16_t type_id_low, std::index_sequence<Is...>) const {
-        std::size_t result = num_output_types;  // Invalid index by default
-        
-        // Check each output type's message ID
-        ((check_output_type_match<Is>(type_id_low, result)) || ...);
-        
-        return result;
-    }
-    
-    template<std::size_t Index>
-    bool check_output_type_match(uint16_t type_id_low, std::size_t& result) const {
-        using OutputType = std::tuple_element_t<Index, OutputTypesTuple>;
-        constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
-        constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
-        
-        if (output_type_id_low == type_id_low) {
-            result = Index;
-            return true;  // Found match, stop searching
-        }
-        return false;  // Continue searching
-    }
-    
-    std::size_t find_output_index_by_type_id(uint16_t type_id_low) const {
-        if constexpr (use_mailbox_sets) {
-            return find_output_index_by_type_id_impl(type_id_low, std::make_index_sequence<num_output_types>{});
-        }
-        return 0;
-    }
-    
-public:
-    /**
-     * @brief Get subscribers for specific output index (multi-output)
-     * PUBLIC: Needed by Publisher to access per-output subscriber lists
-     */
-    std::vector<uint32_t> get_output_subscribers(std::size_t output_idx) const {
-        if constexpr (use_mailbox_sets) {
-            std::lock_guard<std::mutex> lock(output_subscribers_mutex_);
-            if (output_idx < output_subscribers_.size()) {
-                return output_subscribers_[output_idx];
-            }
-        }
-        return {};
     }
     
 protected:
@@ -1012,53 +882,7 @@ private:
         std::cout << "[" << config_.name << "] work_loop ended\n";
     }
     
-    /**
-     * @brief Multi-output work loop for a specific output index
-     * 
-     * Each MailboxSet gets its own work thread to handle subscriptions
-     * independently. This allows consumers to subscribe to specific output
-     * types without interference.
-     * 
-     * @tparam Index Output index (0-based)
-     */
-    template<std::size_t Index>
-    void output_work_loop() {
-        using OutputType = std::tuple_element_t<Index, OutputTypesTuple>;
-        uint32_t work_mailbox_addr = commrat::get_mailbox_address<OutputType, OutputTypesTuple, UserRegistry>(
-            config_.system_id, config_.instance_id, MailboxType::WORK);
-        
-        std::cout << "[" << config_.name << "] output_work_loop[" << Index << "] started for "
-                  << typeid(OutputType).name() << ", listening on WORK mailbox " 
-                  << work_mailbox_addr << "\n" << std::flush;
-        
-        auto& work_mbx = get_work_mailbox<Index>();
-        
-        while (running_) {
-            std::cout << "[" << config_.name << "] output_work_loop[" << Index << "]: waiting for message...\n" << std::flush;
-            auto visitor = [this](auto&& tims_msg) {
-                auto& msg = tims_msg.payload;
-                using MsgType = std::decay_t<decltype(msg)>;
-                
-                if constexpr (std::is_same_v<MsgType, SubscribeRequestType>) {
-                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
-                              << "] Handling SubscribeRequest\n";
-                    handle_subscribe_request(msg);
-                } else if constexpr (std::is_same_v<MsgType, SubscribeReplyType>) {
-                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
-                              << "] Handling SubscribeReply\n";
-                    handle_subscribe_reply(msg);
-                } else if constexpr (std::is_same_v<MsgType, UnsubscribeRequestType>) {
-                    std::cout << "[" << config_.name << "] output_work_loop[" << Index 
-                              << "] Handling UnsubscribeRequest\n";
-                    handle_unsubscribe_request(msg);
-                }
-            };
-            
-            work_mbx.receive_any(visitor);
-        }
-        
-        std::cout << "[" << config_.name << "] output_work_loop[" << Index << "] ended\n";
-    }
+    // Phase 2: output_work_loop moved to MultiOutputManager mixin
     
     /**
      * @brief Dispatch user command to on_command handler
@@ -1151,7 +975,14 @@ private:
     template<size_t... Is>
     void start_input_mailboxes_impl(std::index_sequence<Is...>) {
         if (input_mailboxes_) {
-            (std::get<Is>(*input_mailboxes_).start(), ...);
+            // Check each mailbox start result
+            ([&]() {
+                auto result = std::get<Is>(*input_mailboxes_).start();
+                if (!result) {
+                    std::cerr << "[" << config_.name << "] ERROR: Failed to start input mailbox " 
+                              << Is << " - error " << static_cast<int>(result.get_error()) << "\n";
+                }
+            }(), ...);
         }
     }
     
