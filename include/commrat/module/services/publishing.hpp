@@ -25,34 +25,33 @@ namespace commrat {
  * @brief Publishing logic for producer modules
  * 
  * Handles publishing to subscribers with type-specific filtering.
- * Single-output modules publish to all subscribers.
- * Multi-output modules filter based on subscriber's expected message type.
+ * After unification, ALL modules use MailboxSets and access subscribers
+ * via module_ptr_->get_output_subscribers(index).
  * 
  * Template parameters:
  * - UserRegistry: User message registry
  * - OutputData: Single output type (or void for multi-output)
- * - SubscriberManager: Provides subscribers list and mutex
- * - CmdMailboxT: Command mailbox type (defaults to TypedMailbox<UserRegistry>)
+ * - PublishMailboxT: Publish mailbox type (defaults to TypedMailbox<UserRegistry>)
+ * - ModuleType: Module type for mailbox/subscriber access (REQUIRED after unification)
  */
 template<
     typename UserRegistry,
     typename OutputData,
-    typename SubscriberManager,
     typename PublishMailboxT = TypedMailbox<UserRegistry>,
     typename ModuleType = void  // Module type for multi-output mailbox access
 >
 class Publisher {
 protected:
     // References to module resources (set by derived class)
-    SubscriberManager* subscriber_manager_{nullptr};
+    // REMOVED: subscriber_manager_ - ALL modules now use MultiOutputManager (post-unification)
     // REMOVED: publish_mailbox_ - ALL modules now use MailboxSets (post-unification)
-    ModuleType* module_ptr_{nullptr};  // Typed pointer to Module for multi-output
+    ModuleType* module_ptr_{nullptr};  // Typed pointer to Module for mailbox/subscriber access
     std::string module_name_;
     
 public:
-    void set_subscriber_manager(SubscriberManager* mgr) { subscriber_manager_ = mgr; }
+    // REMOVED: set_subscriber_manager() - no longer used after unification
     // REMOVED: set_publish_mailbox() - no longer used after unification
-    void set_module_ptr(ModuleType* ptr) { module_ptr_ = ptr; }  // For multi-output modules
+    void set_module_ptr(ModuleType* ptr) { module_ptr_ = ptr; }
     void set_module_name(const std::string& name) { module_name_ = name; }
     
     /**

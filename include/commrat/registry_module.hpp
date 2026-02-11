@@ -264,11 +264,10 @@ protected:
     >;
     SubscriptionProtocolType subscription_protocol_;
     
-    // Publishing logic
+    // Publishing logic (post-unification: SubscriberManager parameter removed)
     using PublisherType = commrat::Publisher<
         UserRegistry, 
         OutputData, 
-        commrat::SubscriberManager, 
         PublishMailbox,
         Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>  // Module type for get_publish_mailbox<Index>()
     >;
@@ -356,8 +355,8 @@ public:
         subscription_protocol_.set_work_mailbox(&work_mailbox());
         subscription_protocol_.set_module_name(config.name);
         
-        // Initialize publisher
-        publisher_.set_subscriber_manager(this);  // Module inherits from SubscriberManager
+        // Initialize publisher (post-unification: uses module_ptr_ for mailboxes and subscribers)
+        // REMOVED: set_subscriber_manager() - subscribers accessed via module_ptr_->get_output_subscribers()
         publisher_.set_module_ptr(this);  // For mailbox access via get_publish_mailbox<Index>()
         publisher_.set_module_name(config.name);
         
