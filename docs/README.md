@@ -125,14 +125,13 @@ FusedData process_multi_input(const IMUData& imu, const GPSData& gps, const Lida
 - Automatic timestamp propagation through message chains
 - Input metadata: timestamp, sequence number, freshness, validity
 - Index-based and type-based metadata access
-- Backward compatibility: `ContinuousInput<T>` → `Input<T>`
-- Virtual `process_continuous` with proper inheritance
+- Virtual `process` with proper inheritance
 - Compile-time validation with helpful error messages
 
 **Input Modes:**
 - `PeriodicInput` - Timer-based execution
 - `LoopInput` - Maximum throughput (100% CPU)
-- `Input<T>` / `ContinuousInput<T>` - Processes input stream
+- `Input<T>` - Processes input stream
 - `Inputs<Ts...>` - Multi-input with synchronized getData (Phase 6)
 
 **Features:**
@@ -338,10 +337,10 @@ class CounterModule : public Module<CounterData, LoopInput> {
 };
 ```
 
-**ContinuousInput<T>**: Stream processing
+**Input<T>**: Stream processing
 ```cpp
-class FilterModule : public Module<FilteredData, ContinuousInput<RawData>> {
-    FilteredData process_continuous(const RawData& input) override {
+class FilterModule : public Module<FilteredData, Input<RawData>> {
+    FilteredData process(const RawData& input) override {
         return apply_filter(input);  // Called for each incoming message
     }
 };

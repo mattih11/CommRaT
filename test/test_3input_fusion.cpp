@@ -105,7 +105,7 @@ public:
     using FusionApp::Module<Output<IMUData>, PeriodicInput>::Module;
     
 protected:
-    IMUData process() override {
+    void process(IMUData& output) override {
         uint32_t count = imu_count.fetch_add(1);
         
         if (count < 3) {
@@ -130,7 +130,7 @@ protected:
                       << data.accel_x << "," << data.accel_y << "," << data.accel_z << ")\n";
         }
         
-        return data;
+        output = data;
     }
 };
 
@@ -140,7 +140,7 @@ public:
     using FusionApp::Module<Output<GPSData>, PeriodicInput>::Module;
     
 protected:
-    GPSData process() override {
+    void process(GPSData& output) override {
         uint32_t count = gps_count.fetch_add(1);
         
         // Simulate GPS readings (slower update rate)
@@ -157,7 +157,7 @@ protected:
                   << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
                   << ", lon=" << data.longitude << "\n";
         
-        return data;
+        output = data;
     }
 };
 
@@ -167,7 +167,7 @@ public:
     using FusionApp::Module<Output<LidarData>, PeriodicInput>::Module;
     
 protected:
-    LidarData process() override {
+    void process(LidarData& output) override {
         uint32_t count = lidar_count.fetch_add(1);
         
         // Simulate Lidar readings (medium update rate)
@@ -185,7 +185,7 @@ protected:
                       << data.distance << "m, points=" << data.point_count << "\n";
         }
         
-        return data;
+        output = data;
     }
 };
 
@@ -201,7 +201,7 @@ public:
     using FusionApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>>::Module;
     
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {
+    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, FusedData& output) override {
         uint32_t count = fusion_count.fetch_add(1);
         
         // Integrate IMU acceleration to velocity
@@ -230,7 +230,7 @@ protected:
                       << "," << fused.velocity_z << ")\n";
         }
         
-        return fused;
+        output = fused;
     }
     
 private:

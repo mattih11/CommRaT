@@ -48,7 +48,7 @@ using MyApp = CommRaT<
 Every module has three separate mailboxes with distinct purposes:
 - **CMD Mailbox**: User commands and control messages
 - **WORK Mailbox**: Subscription protocol (SubscribeRequest/Reply)
-- **DATA Mailbox**: High-frequency data streams (ContinuousInput)
+- **DATA Mailbox**: High-frequency data streams (Input<T>)
 
 This separation prevents interference between command, control, and data flows.
 
@@ -881,7 +881,7 @@ Every module has an **InputSpec** that determines its processing behavior:
 | InputSpec | When process() Called | Use Case | Example |
 |-----------|----------------------|----------|---------|
 | **PeriodicInput** | Timer fires (every `period`) | Data generation, periodic sampling | Sensor reading, heartbeat |
-| **Input<T>** (ContinuousInput) | Message received | Data transformation, filtering | Signal processing, fusion |
+| **Input<T>** | Message received | Data transformation, filtering | Signal processing, fusion |
 | **LoopInput** | As fast as possible | Maximum throughput | High-speed data forwarding |
 
 ### 4.2 PeriodicInput: Timer-Driven Processing
@@ -949,7 +949,7 @@ hb.start();
 - **CPU efficient**: Thread sleeps between periods (0% CPU when idle)
 - **Timestamp assignment**: `TimsHeader.timestamp = Time::now()` at generation moment
 
-### 4.3 Input<T>: Event-Driven Processing (ContinuousInput)
+### 4.3 Input<T>: Event-Driven Processing
 
 **When to use:** React to incoming messages, transform data.
 
@@ -972,7 +972,7 @@ ModuleConfig config{
     .instance_id = 1,
     .source_system_id = 10,     // Producer's system ID
     .source_instance_id = 1,    // Producer's instance ID
-    .period = Duration(0)       // Ignored for ContinuousInput
+    .period = Duration(0)       // Ignored for Input<T>
 };
 ```
 
@@ -1090,7 +1090,7 @@ private:
 - **Non-deterministic timing**: Rate depends on processing speed
 - **Use with caution**: Can starve other processes
 
-**WARNING:** LoopInput should be used sparingly. Most applications should use PeriodicInput or ContinuousInput for predictable behavior and efficient CPU usage.
+**WARNING:** LoopInput should be used sparingly. Most applications should use PeriodicInput or Input<T> for predictable behavior and efficient CPU usage.
 
 ### 4.5 Output Specifications
 
@@ -1189,7 +1189,7 @@ Does your module generate data from scratch?
 │
 └─ NO → Does it receive messages?
         ├─ YES → Need maximum throughput?
-        │        ├─ NO → Use Input<T> (ContinuousInput)
+        │        ├─ NO → Use Input<T>
         │        │       └─ Subscribe with source_system_id
         │        │
         │        └─ YES → Use LoopInput (rarely needed)
@@ -1217,7 +1217,7 @@ Does your module generate data from scratch?
 - **CPU Usage**: Low (sleeps between periods)
 - **Jitter**: Low (timer-driven)
 
-**Input<T> (ContinuousInput):**
+**Input<T>:****
 - **Latency**: Minimal (processes immediately on arrival)
 - **Throughput**: Depends on publisher rate
 - **CPU Usage**: 0% when idle, scales with message rate

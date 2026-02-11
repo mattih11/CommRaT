@@ -17,7 +17,7 @@
  * 
  * ARCHITECTURE NOTE:
  * This test uses Phase 6.10 metadata accessors to verify timestamp propagation.
- * Current API only provides payload: process_continuous(const T& input)
+ * Current API only provides payload: process(const T& input)
  * Solution needed: Accessor function to get last received message metadata
  */
 
@@ -61,8 +61,8 @@ public:
     using Module::Module;
     
 protected:
-    SensorData process() override {
-        return SensorData{
+    void process(SensorData& output) override {
+        output = SensorData{
             .sensor_id = 1,
             .value = 42.0f + counter++
         };
@@ -81,11 +81,11 @@ public:
     using Module::Module;
     
 protected:
-    FilteredData process_continuous(const SensorData& input) override {
+    void process(const SensorData& input, FilteredData& output) override {
         // TODO: Need access to input timestamp here for verification!
         // Proposed: uint64_t input_ts = get_input_timestamp();
         
-        return FilteredData{
+        output = FilteredData{
             .filtered_value = input.value * 0.9f
         };
     }
@@ -113,7 +113,7 @@ public:
     Mutex timestamps_mutex;
     
 protected:
-    FilteredData process_continuous(const FilteredData& input) override {
+    void process(const FilteredData& input, FilteredData& output) override {
         // Phase 6.10: USE THE NEW METADATA ACCESSOR API!
         auto meta = get_input_metadata<0>();  // Index-based access
         
@@ -144,7 +144,7 @@ protected:
                   << " new=" << meta.is_new_data << "\n";
         
         // Pass through (workaround for NoOutput issue)
-        return input;
+        output = input;
     }
 };
 
@@ -157,11 +157,11 @@ public:
     using Module::Module;
     
 protected:
-    SensorData process() override {
+    void process(SensorData& output) override {
         // TODO: In future, allow setting custom timestamp:
         // set_output_timestamp(custom_timestamp);
         
-        return SensorData{
+        output = SensorData{
             .sensor_id = 2,
             .value = 100.0f
         };

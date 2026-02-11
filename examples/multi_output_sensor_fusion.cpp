@@ -169,7 +169,7 @@ public:
         , log_count_(0) {}
 
 protected:
-    RawSensorData process_continuous(const RawSensorData& input) override {
+    void process(const RawSensorData& input, RawSensorData& output) override {
         log_count_++;
         
         if (log_count_ % 20 == 0) {
@@ -179,7 +179,7 @@ protected:
                       << ", " << input.accelerometer_z << "]\n";
         }
         
-        return input;  // Pass through
+        output = input;  // Pass through
     }
 
 private:
@@ -200,7 +200,7 @@ public:
         , consume_count_(0) {}
 
 protected:
-    FilteredData process_continuous(const FilteredData& input) override {
+    void process(const FilteredData& input, FilteredData& output) override {
         consume_count_++;
         
         if (consume_count_ % 15 == 0) {
@@ -210,7 +210,7 @@ protected:
                       << " (Confidence: " << input.confidence * 100.0f << "%)\n";
         }
         
-        return input;  // Pass through
+        output = input;  // Pass through
     }
 
 private:
@@ -231,7 +231,7 @@ public:
         , monitor_count_(0) {}
 
 protected:
-    DiagnosticsData process_continuous(const DiagnosticsData& input) override {
+    void process(const DiagnosticsData& input, DiagnosticsData& output) override {
         monitor_count_++;
         
         if (monitor_count_ % 25 == 0) {
@@ -242,7 +242,7 @@ protected:
                       << ", Dropped: " << input.dropped_samples << "\n";
         }
         
-        return input;  // Pass through
+        output = input;  // Pass through
     }
 
 private:

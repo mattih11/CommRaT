@@ -95,13 +95,16 @@ protected:
     /**
      * @brief Call multi-input process with single output
      * 
-     * Unpacks InputTypesTuple and calls process(const T1&, const T2&, ...)
+     * Unpacks InputTypesTuple and calls process(const T1&, const T2&, ..., Output&)
+     * SFINAE: Only enabled when OutputData is not void (single output case)
      * 
      * @param inputs Tuple of all input payloads
-     * @return Single output data
+     * @param output Reference to output data to populate
      */
-    OutputData call_multi_input_process(const InputTypesTuple& inputs) {
-        return call_multi_input_process_impl(inputs, std::make_index_sequence<InputCount>{});
+    template<typename O = OutputData,
+             typename = std::enable_if_t<!std::is_void_v<O>>>
+    void call_multi_input_process(const InputTypesTuple& inputs, O& output) {
+        call_multi_input_process_impl(inputs, output, std::make_index_sequence<InputCount>{});
     }
     
     /**
@@ -184,14 +187,16 @@ private:
     
     /**
      * @brief Call multi-input process implementation (single output)
+     * SFINAE: Only enabled when OutputData is not void
      */
-    template<std::size_t... Is>
-    OutputData call_multi_input_process_impl(const InputTypesTuple& inputs, std::index_sequence<Is...>) {
+    template<std::size_t... Is, typename O = OutputData,
+             typename = std::enable_if_t<!std::is_void_v<O>>>
+    void call_multi_input_process_impl(const InputTypesTuple& inputs, O& output, std::index_sequence<Is...>) {
         auto& module = static_cast<ModuleType&>(*this);
         
-        // Unpack tuple and call process(const T1&, const T2&, ...)
+        // Unpack tuple and call process(const T1&, const T2&, ..., Output&)
         using Base = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
-        return static_cast<Base*>(&module)->process(std::get<Is>(inputs)...);
+        static_cast<Base*>(&module)->process(std::get<Is>(inputs)..., output);
     }
     
     /**

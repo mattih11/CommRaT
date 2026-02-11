@@ -109,11 +109,11 @@ public:
     }
 
 protected:
-    IMUData process() override {
+    void process(IMUData& output) override {
         // Simulate sinusoidal motion with noise
         phase_ += 0.1f;
         
-        IMUData data{
+        output = IMUData{
             .accel_x = base_accel_x_ * std::sin(phase_) + accel_noise_(gen_),
             .accel_y = 0.2f * std::cos(phase_ * 0.5f) + accel_noise_(gen_),
             .accel_z = 9.81f + accel_noise_(gen_),  // Gravity + noise
@@ -121,8 +121,6 @@ protected:
             .gyro_y = 0.03f * std::cos(phase_ * 0.7f) + gyro_noise_(gen_),
             .gyro_z = 0.02f * std::sin(phase_ * 1.2f) + gyro_noise_(gen_)
         };
-        
-        return data;
     }
 
 private:
@@ -165,19 +163,17 @@ public:
     }
 
 protected:
-    GPSData process() override {
+    void process(GPSData& output) override {
         // Simulate northward movement (increase latitude)
         lat_ += 0.00001;  // ~1.1m north per update
         lon_ += 0.000005; // ~0.5m east per update
         
-        GPSData data{
+        output = GPSData{
             .latitude = lat_ + pos_noise_(gen_),
             .longitude = lon_ + pos_noise_(gen_),
             .altitude = alt_ + alt_noise_(gen_),
             .speed = speed_
         };
-        
-        return data;
     }
 
 private:
@@ -232,7 +228,7 @@ protected:
      * @param gps Secondary input (fetched via getData)
      * @return Fused sensor data
      */
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         imu_count_++;
         
         // ====================================================================
@@ -307,7 +303,7 @@ protected:
         // Return Fused Data
         // ====================================================================
         
-        return FusedData{
+        output = FusedData{
             .latitude = fused_lat,
             .longitude = fused_lon,
             .altitude = fused_alt,
@@ -347,7 +343,7 @@ public:
     }
 
 protected:
-    FusedData process_continuous(const FusedData& input) override {
+    void process(const FusedData& input, FusedData& output) override {
         count_++;
         
         // Display every 10th sample (10Hz output for 100Hz input)
@@ -359,7 +355,7 @@ protected:
                       << " | GPS: " << (input.gps_fresh ? "✓" : "⚠") << "\n";
         }
         
-        return input;
+        output = input;
     }
 
 private:

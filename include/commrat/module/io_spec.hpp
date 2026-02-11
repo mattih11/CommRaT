@@ -25,7 +25,6 @@ namespace commrat {
 
 struct PeriodicInput;
 struct LoopInput;
-template<typename T> struct ContinuousInput;
 
 // ============================================================================
 // Output Specifications
@@ -63,7 +62,7 @@ struct Output {
  * @code
  * class ProcessingModule : public Module<Registry, 
  *                                        Outputs<ProcessedData, Diagnostics>,
- *                                        ContinuousInput<RawData>> {
+ *                                        Input<RawData>> {
  *     void process(const RawData& raw, ProcessedData& proc, Diagnostics& diag) override {
  *         proc = filter(raw);
  *         diag = calculate_stats(raw);
@@ -87,7 +86,7 @@ struct Outputs {
  * 
  * Example:
  * @code
- * class LoggerModule : public Module<Registry, NoOutput, ContinuousInput<LogData>> {
+ * class LoggerModule : public Module<Registry, NoOutput, Input<LogData>> {
  *     void process(const LogData& data) override {
  *         write_to_file(data);
  *         // No return value
@@ -246,15 +245,6 @@ template<typename T>
 inline constexpr bool is_loop_input_v = is_loop_input<T>::value;
 
 template<typename T>
-struct is_continuous_input_legacy : std::false_type {};
-
-template<typename T>
-struct is_continuous_input_legacy<ContinuousInput<T>> : std::true_type {};
-
-template<typename T>
-inline constexpr bool is_continuous_input_legacy_v = is_continuous_input_legacy<T>::value;
-
-template<typename T>
 struct is_single_input : std::false_type {};
 
 template<typename T>
@@ -284,7 +274,6 @@ inline constexpr bool is_primary_input_v = is_primary_input<T>::value;
 template<typename T>
 concept ValidInputSpec = is_periodic_input_v<T> || 
                          is_loop_input_v<T> || 
-                         is_continuous_input_legacy_v<T> ||
                          is_single_input_v<T> || 
                          is_multi_input_v<T>;
 
@@ -294,8 +283,7 @@ template<typename T>
 concept PeriodicOrLoop = is_periodic_input_v<T> || is_loop_input_v<T>;
 
 template<typename T>
-concept HasContinuousInput = is_continuous_input_legacy_v<T> || 
-                             is_single_input_v<T> || 
+concept HasContinuousInput = is_single_input_v<T> || 
                              is_multi_input_v<T>;
 
 // --- Count Helpers ---
@@ -339,11 +327,6 @@ struct InputCount<Input<T>> {
     static constexpr size_t value = 1;
 };
 
-template<typename T>
-struct InputCount<ContinuousInput<T>> {
-    static constexpr size_t value = 1;
-};
-
 template<typename... Ts>
 struct InputCount<Inputs<Ts...>> {
     static constexpr size_t value = sizeof...(Ts);
@@ -353,31 +336,22 @@ template<typename T>
 inline constexpr size_t InputCount_v = InputCount<T>::value;
 
 // ============================================================================
-// Backward Compatibility Mapping
+// Input/Output Normalization
 // ============================================================================
 
 /**
- * @brief Maps legacy input specifications to new Input<T> format
- * 
- * This allows existing code using ContinuousInput<T> to work seamlessly
- * with the new multi-I/O system.
+ * @brief Pass-through for input specifications (no normalization needed)
  */
 template<typename T>
 struct NormalizeInput {
     using Type = T;  // Default: pass through
 };
 
-// Map ContinuousInput<T> -> Input<T>
-template<typename T>
-struct NormalizeInput<ContinuousInput<T>> {
-    using Type = Input<T>;
-};
-
 template<typename T>
 using NormalizeInput_t = typename NormalizeInput<T>::Type;
 
 /**
- * @brief Maps legacy output specifications to new Output<T> format
+ * @brief Maps raw output types to Output<T> format
  * 
  * For backward compatibility, a raw payload type T is treated as Output<T>.
  */
@@ -458,7 +432,7 @@ template<typename OutputSpec>
 using SingleOutputType_t = typename SingleOutputType<OutputSpec>::Type;
 
 /**
- * @brief Get the single payload type from Input<T> or ContinuousInput<T>
+ * @brief Get the single payload type from Input<T>
  */
 template<typename InputSpec>
 struct SingleInputType {
@@ -467,11 +441,6 @@ struct SingleInputType {
 
 template<typename T>
 struct SingleInputType<Input<T>> {
-    using Type = T;
-};
-
-template<typename T>
-struct SingleInputType<ContinuousInput<T>> {
     using Type = T;
 };
 

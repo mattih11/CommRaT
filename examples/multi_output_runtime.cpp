@@ -99,14 +99,14 @@ public:
         , received_count_(0) {}
 
 protected:
-    TemperatureData process_continuous(const TemperatureData& input) override {
+    void process(const TemperatureData& input, TemperatureData& output) override {
         received_count_++;
         std::cout << "[TempReceiver] Received temp #" << received_count_ 
                   << ": " << input.temperature_c << "°C"
                   << " (sensor " << input.sensor_id << ")\n";
         
         // Just pass through
-        return input;
+        output = input;
     }
 
 private:
@@ -127,14 +127,14 @@ public:
         , received_count_(0) {}
 
 protected:
-    PressureData process_continuous(const PressureData& input) override {
+    void process(const PressureData& input, PressureData& output) override {
         received_count_++;
         std::cout << "[PressureReceiver] Received pressure #" << received_count_ 
                   << ": " << input.pressure_pa << " Pa"
                   << " (sensor " << input.sensor_id << ")\n";
         
         // Just pass through
-        return input;
+        output = input;
     }
 
 private:

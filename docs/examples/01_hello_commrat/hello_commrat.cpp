@@ -8,8 +8,8 @@
  * Demonstrates:
  * - Message definition (plain POD struct)
  * - Application registration (CommRaT<...>)
- * - Producer module (PeriodicInput, process())
- * - Consumer module (Input<T>, process_continuous())
+ * - Producer module (PeriodicInput, process(output))
+ * - Consumer module (Input<T>, process(input, output))
  * - Configuration (system_id, period, source_system_id)
  * - Lifecycle (start, run, stop)
  */
@@ -106,7 +106,7 @@ protected:
      * 
      * @return Message to publish to all subscribers
      */
-    CounterMessage process() override {
+    void process(CounterMessage& output) override {
         CounterMessage msg{
             .timestamp = commrat::Time::now(),  // Current time in nanoseconds
             .count = counter_++                  // Increment counter
@@ -115,7 +115,7 @@ protected:
         std::cout << "[Counter] Generated: count=" << msg.count << "\n";
         
         // Return value is automatically published to all subscribers
-        return msg;
+        output = msg;
     }
 
 private:
@@ -133,7 +133,7 @@ private:
  * - Output<CounterMessage>: Returns the same message (pass-through sink)
  * - Input<CounterMessage>: Receives CounterMessage (event-driven)
  * 
- * Override process_continuous() to handle incoming messages.
+ * Override process() to handle incoming messages.
  */
 class DisplayModule : public HelloApp::Module<
     commrat::Output<CounterMessage>,     // Pass-through output
@@ -160,7 +160,7 @@ public:
 
 protected:
     /**
-     * process_continuous() - Called for EACH received message
+     * process() - Called for EACH received message
      * 
      * This function MUST:
      * - Not allocate memory (real-time safe)
@@ -170,7 +170,7 @@ protected:
      * @param msg The received CounterMessage
      * @return The same message (pass-through for sink behavior)
      */
-    CounterMessage process_continuous(const CounterMessage& msg) override {
+    void process(const CounterMessage& msg, CounterMessage& output) override {
         message_count_++;
         
         // Display the received counter value
@@ -182,7 +182,7 @@ protected:
         // - Accumulate statistics
         // - etc.
         
-        return msg;  // Pass through (not published since no subscribers)
+        output = msg;  // Pass through (not published since no subscribers)
     }
 
 private:
@@ -329,13 +329,13 @@ Timeline:
       └─ Subscription confirmed
 
 100ms: Counter's timer fires
-       ├─ Call process()
+       ├─ Call process(output) → generates CounterMessage{count=0}
        ├─ User code generates CounterMessage{count=0}
        └─ Publish to all subscribers (display's DATA mailbox)
 
 100ms: Display's continuous_loop receives message
        ├─ Deserialize CounterMessage
-       ├─ Call process_continuous(msg)
+       ├─ Call process(msg, output)
        └─ User code displays "count=0"
        └─ Block on DATA mailbox again
 

@@ -66,9 +66,9 @@ public:
     using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>>::Module;
     
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         // Should compile - primary is first input
-        return FusedData{
+        output = FusedData{
             .position_x = static_cast<float>(gps.latitude),
             .position_y = static_cast<float>(gps.longitude)
         };
@@ -88,9 +88,9 @@ public:
     using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<GPSData>>::Module;
     
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         // Should compile - primary is second input
-        return FusedData{
+        output = FusedData{
             .position_x = static_cast<float>(gps.latitude),
             .velocity_x = imu.accel_x
         };
@@ -110,9 +110,9 @@ public:
     using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>, PrimaryInput<GPSData>>::Module;
     
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps, const LidarData& lidar) override {
+    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, FusedData& output) override {
         // Should compile - GPS drives rate, IMU and Lidar sync via getData
-        return FusedData{
+        output = FusedData{
             .position_x = static_cast<float>(gps.latitude),
             .position_z = lidar.distance,
             .velocity_x = imu.accel_x
@@ -133,9 +133,9 @@ public:
     using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>>::Module;
     
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
+    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
         // Should compile - first input (IMU) implicitly primary
-        return FusedData{
+        output = FusedData{
             .velocity_y = imu.accel_y
         };
     }
@@ -166,27 +166,6 @@ protected:
 };
 
 // ============================================================================
-// Test 6: INVALID - Primary input not in Inputs<> list
-// ============================================================================
-// UNCOMMENT TO TEST ERROR MESSAGE:
-/*
-class Test6_InvalidPrimary : public TestApp::Module<
-    Output<FusedData>,
-    Inputs<IMUData, GPSData>,
-    PrimaryInput<LidarData>  // ERROR: LidarData not in Inputs<IMU, GPS>
-> {
-public:
-    using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<LidarData>>::Module;
-    
-protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
-        // Should NOT compile - static_assert should catch this
-        return FusedData{};
-    }
-};
-*/
-
-// ============================================================================
 // Main - Instantiate all test modules to validate compilation
 // ============================================================================
 
@@ -207,9 +186,6 @@ int main() {
     
     std::cout << "Test 5: Multi-input + multi-output, explicit primary... ";
     std::cout << "✓ COMPILES\n";
-    
-    std::cout << "\nTest 6: Invalid primary (not in Inputs)... ";
-    std::cout << "✓ CORRECTLY REJECTED (uncomment to test)\n";
     
     std::cout << "\n=== ALL COMPILATION TESTS PASSED ===\n";
     std::cout << "\nNOTE: To test error messages, uncomment Test6_InvalidPrimary\n";

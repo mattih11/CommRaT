@@ -19,13 +19,6 @@ struct PeriodicInput {
 /// Free-running loop - module runs as fast as possible, no input data
 struct LoopInput {};
 
-/// Continuous input - module receives data of type T from subscribed source
-template<typename T>
-struct ContinuousInput {
-    using InputData = T;
-    std::chrono::milliseconds requested_period{0};  // 0 = as fast as source publishes
-};
-
 // ============================================================================
 // Mailbox Configuration
 // ============================================================================
@@ -62,7 +55,7 @@ struct ModuleConfig {
     // Single-Input Mode (backward compatible)
     // ========================================================================
     
-    // For ContinuousInput mode: source module's system_id and instance_id
+    // For Input<T> mode: source module's system_id and instance_id
     std::optional<uint8_t> source_system_id;
     std::optional<uint8_t> source_instance_id;
     
