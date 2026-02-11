@@ -1,34 +1,22 @@
 #pragma once
 
+// Mailbox infrastructure
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/mailbox/historical_mailbox.hpp"
+
+// System messaging and platform
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/platform/threading.hpp"
 #include "commrat/platform/timestamp.hpp"
-#include "commrat/module/io_spec.hpp"
-#include "commrat/module/module_config.hpp"
-#include "commrat/module/traits/type_extraction.hpp"
-#include "commrat/module/traits/processor_bases.hpp"
-#include "commrat/module/traits/multi_input_resolver.hpp"
-#include "commrat/module/traits/module_types.hpp"
-#include "commrat/module/helpers/address_helpers.hpp"
-#include "commrat/module/helpers/tims_helpers.hpp"
-#include "commrat/module/metadata/input_metadata.hpp"
-#include "commrat/module/metadata/input_metadata_accessors.hpp"
-#include "commrat/module/metadata/input_metadata_manager.hpp"
-#include "commrat/module/services/subscription.hpp"
-#include "commrat/module/services/publishing.hpp"
-#include "commrat/module/lifecycle/loop_executor.hpp"
-#include "commrat/module/mailbox/mailbox_set.hpp"
-#include "commrat/module/io/multi_output_manager.hpp"
-#include "commrat/module/lifecycle/command_dispatcher.hpp"
-#include "commrat/module/io/multi_input_infrastructure.hpp"
-#include "commrat/module/io/multi_input_processor.hpp"
-#include "commrat/module/lifecycle/lifecycle_manager.hpp"
-#include "commrat/module/lifecycle/work_loop_handler.hpp"
-#include "commrat/module/mailbox/mailbox_infrastructure_builder.hpp"
+
+// Module aggregator headers (reduce visual clutter)
+#include "commrat/module/module_core.hpp"      // I/O specs, traits, config
+#include "commrat/module/module_mixins.hpp"    // CRTP mixins (lifecycle, loops, I/O)
+#include "commrat/module/module_services.hpp"  // Subscription, publishing, MailboxSet
+
+// External dependencies
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
