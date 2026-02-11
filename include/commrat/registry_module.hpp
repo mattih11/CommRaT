@@ -27,6 +27,7 @@
 #include "commrat/module/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
 #include "commrat/module/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
 #include "commrat/module/work_loop_handler.hpp"  // Phase 7: Work loop (subscription protocol)
+#include "commrat/module/mailbox_infrastructure_builder.hpp"  // Phase 8: Mailbox factory methods
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -134,6 +135,7 @@ class Module
       >  // Phase 5: Multi-input processing
     , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 6: Lifecycle management
     , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 7: Work loop handler
+    , public MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>  // Phase 8: Mailbox factory
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -144,6 +146,7 @@ class Module
     friend class MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     friend class LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
+    friend class MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>;
     
 private:
     // ========================================================================
@@ -379,76 +382,15 @@ protected:
         input_metadata_[index].is_new_data = false;
     }
     
-    /**
-     * @brief Helper to create mailbox infrastructure (Phase 7.4)
-     * 
-     * Single output: Returns tuple<CmdMailbox, WorkMailbox, PublishMailbox>
-     * Multi-output: Returns tuple<MailboxSet<T1>, MailboxSet<T2>, ...>
-     */
-    static auto create_mailbox_infrastructure(const ModuleConfig& config) {
-        if constexpr (!use_mailbox_sets) {
-            // Single output: Create traditional mailboxes
-            CmdMailbox cmd(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::CMD),
-                .message_slots = config.message_slots,
-                .max_message_size = UserRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_cmd"
-            });
-            
-            WorkMailbox work(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::WORK),
-                .message_slots = config.message_slots,
-                .max_message_size = SystemRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_work"
-            });
-            
-            PublishMailbox publish(MailboxConfig{
-                .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::PUBLISH),
-                .message_slots = config.message_slots,
-                .max_message_size = UserRegistry::max_message_size,
-                .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_publish"
-            });
-            
-            return std::make_tuple(std::move(cmd), std::move(work), std::move(publish));
-        } else {
-            // Multi-output: Create tuple of MailboxSets
-            return create_mailbox_sets_impl(config, std::make_index_sequence<num_output_types>{});
-        }
-    }
-    
-    /**
-     * @brief Helper to create MailboxSet tuple for multi-output modules
-     */
-    template<std::size_t... Is>
-    static auto create_mailbox_sets_impl(const ModuleConfig& config, std::index_sequence<Is...>) {
-        // Use fold expression to construct tuple with initialized MailboxSets
-        return MailboxSetTuple{create_mailbox_set<Is>(config)...};
-    }
-    
-    /**
-     * @brief Create a single MailboxSet for output type at index I
-     */
-    template<std::size_t I>
-    static auto create_mailbox_set(const ModuleConfig& config) {
-        using OutputType = std::tuple_element_t<I, OutputTypesTuple>;
-        MailboxSet<UserRegistry, OutputType, CommandTypes...> set;
-        set.initialize(config);
-        return set;
-    }
-    
+    // Phase 8: Mailbox infrastructure creation moved to MailboxInfrastructureBuilder mixin
+    // - create_mailbox_infrastructure()
+    // - create_mailbox_sets_impl()
+    // - create_mailbox_set()
+
 public:
     explicit Module(const ModuleConfig& config)
         : config_(config)
-        , mailbox_infrastructure_(create_mailbox_infrastructure(config))
+        , mailbox_infrastructure_(this->create_mailbox_infrastructure(config))
         , data_mailbox_(has_continuous_input && !has_multi_input ? 
             std::make_optional<DataMailbox>(MailboxConfig{
                 .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
