@@ -20,6 +20,9 @@ namespace commrat {
  * - PUBLISH (base + 32): Publishes this output type to subscribers
  * - DATA (base + 48):   Reserved for future use (inputs handled separately)
  * 
+ * NOTE: These offsets are defined in MailboxType enum (module_config.hpp)
+ *       All code MUST use MailboxType::DATA, not literal offsets!
+ * 
  * @tparam UserRegistry The message registry for user-defined types
  * @tparam OutputType The specific output data type this set serves
  * @tparam CommandTypes Variadic list of command types (for CMD mailbox)

@@ -86,11 +86,12 @@ public:
         
         std::lock_guard<std::mutex> lock(mutex);
         for (uint32_t subscriber_base_addr : subscribers) {
-            // Send to subscriber's DATA mailbox (base + 32)
+            // Send to subscriber's DATA mailbox (base + MailboxType::DATA = base + 48)
             uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
             auto result = publish_mailbox_->send(data, subscriber_data_mbx);
             if (!result) {
-                std::cout << "[" << module_name_ << "] Send failed to subscriber " << subscriber_base_addr << "\n";
+                std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
+                          << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
             }
         }
     }
@@ -110,7 +111,8 @@ public:
             // Phase 6.10: Send with explicit timestamp from header
             auto result = publish_mailbox_->send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
             if (!result) {
-                std::cout << "[" << module_name_ << "] Send failed to subscriber " << subscriber_base_addr << "\n";
+                std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
+                          << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
             }
         }
     }
