@@ -18,17 +18,17 @@
 #include "commrat/module/metadata/input_metadata.hpp"
 #include "commrat/module/metadata/input_metadata_accessors.hpp"  // Phase 5: Metadata accessor mixin
 #include "commrat/module/metadata/input_metadata_manager.hpp"  // Phase 9: Metadata update/mark functions
-#include "commrat/module/subscription.hpp"
-#include "commrat/module/publishing.hpp"
-#include "commrat/module/loops/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
-#include "commrat/module/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
-#include "commrat/module/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
-#include "commrat/module/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
-#include "commrat/module/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
-#include "commrat/module/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
-#include "commrat/module/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
-#include "commrat/module/work_loop_handler.hpp"  // Phase 7: Work loop (subscription protocol)
-#include "commrat/module/mailbox_infrastructure_builder.hpp"  // Phase 8: Mailbox factory methods
+#include "commrat/module/services/subscription.hpp"
+#include "commrat/module/services/publishing.hpp"
+#include "commrat/module/lifecycle/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
+#include "commrat/module/mailbox/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
+#include "commrat/module/io/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
+#include "commrat/module/lifecycle/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
+#include "commrat/module/io/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
+#include "commrat/module/io/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
+#include "commrat/module/lifecycle/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
+#include "commrat/module/lifecycle/work_loop_handler.hpp"  // Phase 7: Work loop (subscription protocol)
+#include "commrat/module/mailbox/mailbox_infrastructure_builder.hpp"  // Phase 8: Mailbox factory methods
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "commrat/module/io_spec.hpp"
-#include "commrat/module/mailbox_set.hpp"
+#include "commrat/module/mailbox/mailbox_set.hpp"
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/messaging/system/system_registry.hpp"

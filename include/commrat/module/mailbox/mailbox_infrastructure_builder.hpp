@@ -1,7 +1,7 @@
 #pragma once
 
 #include "commrat/mailbox/registry_mailbox.hpp"
-#include "commrat/module/mailbox_set.hpp"
+#include "commrat/module/mailbox/mailbox_set.hpp"
 #include "commrat/module/module_config.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
