@@ -26,6 +26,7 @@
 #include "commrat/module/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
 #include "commrat/module/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
 #include "commrat/module/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
+#include "commrat/module/work_loop_handler.hpp"  // Phase 7: Work loop (subscription protocol)
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -132,6 +133,7 @@ class Module
         EmptyBase3  // Single-input modules don't need multi-input processor
       >  // Phase 5: Multi-input processing
     , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 6: Lifecycle management
+    , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 7: Work loop handler
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -141,6 +143,7 @@ class Module
     friend class MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     friend class MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     friend class LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
+    friend class WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     
 private:
     // ========================================================================
@@ -641,39 +644,7 @@ protected:
 private:
     // Phase 4: secondary_input_receive_loop() moved to MultiInputInfrastructure mixin
     // Phase 3: command_loop() moved to CommandDispatcher mixin
-    
-    void work_loop() {
-        std::cout << "[" << config_.name << "] work_loop started, listening on WORK mailbox " 
-                  << commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                         config_.system_id, config_.instance_id, MailboxType::WORK) 
-                  << "\n" << std::flush;
-        while (running_) {
-            // Use receive_any with visitor pattern on work_mailbox
-            // BLOCKING receive - waits indefinitely for subscription messages
-            std::cout << "[" << config_.name << "] work_loop: waiting for message...\n" << std::flush;
-            auto visitor = [this](auto&& tims_msg) {
-                // tims_msg is TimsMessage<PayloadT>, extract payload
-                auto& msg = tims_msg.payload;
-                using MsgType = std::decay_t<decltype(msg)>;
-                
-                // Handle subscription protocol
-                if constexpr (std::is_same_v<MsgType, SubscribeRequestType>) {
-                    std::cout << "[" << config_.name << "] Handling SubscribeRequest\n";
-                    handle_subscribe_request(msg);
-                } else if constexpr (std::is_same_v<MsgType, SubscribeReplyType>) {
-                    std::cout << "[" << config_.name << "] Handling SubscribeReply\n";
-                    handle_subscribe_reply(msg);
-                } else if constexpr (std::is_same_v<MsgType, UnsubscribeRequestType>) {
-                    std::cout << "[" << config_.name << "] Handling UnsubscribeRequest\n";
-                    handle_unsubscribe_request(msg);
-                }
-            };
-            
-            // BLOCKING receive on work mailbox (no timeout)
-            work_mailbox().receive_any(visitor);
-        }
-        std::cout << "[" << config_.name << "] work_loop ended\n";
-    }
+    // Phase 7: work_loop() moved to WorkLoopHandler mixin
     
     // Phase 2: output_work_loop moved to MultiOutputManager mixin
     // Phase 3: handle_user_command() and on_command() moved to CommandDispatcher mixin
