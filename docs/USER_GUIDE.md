@@ -724,7 +724,7 @@ Let's trace the message flow:
 
 **1. Initialization (0-10ms):**
 ```
-main() → tims::init()
+main()
       → TemperatureSensor constructor
           → Creates 3 mailboxes (CMD, WORK, DATA)
           → Base address: [TemperatureReading_ID:16][10:8][1:8]

@@ -71,20 +71,25 @@ struct TemperatureData {
     uint64_t timestamp_ms;
 };
 
+struct StatusData {
+    int status_code;
+    float average_temp;
+};
+
 // Define your application with message types
 using MyApp = commrat::CommRaT<
     commrat::Message::Data<TemperatureData>,
     commrat::Message::Data<StatusData>
 >;
-
-template<typename OutputData, typename InputMode, typename... Commands>
-using Module = commrat::Module<AppRegistry, OutputData, InputMode, Commands...>;
 ```
 
 **Step 2: Create Modules**
 ```cpp
 // Producer: publishes temperature every 500ms
-class SensorModule : public Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public MyApp::Module<
+    commrat::Output<TemperatureData>,
+    commrat::PeriodicInput
+> {
 protected:
     void process(TemperatureData& output) override {
         output = {.temperature_celsius = read_sensor()};
@@ -92,7 +97,10 @@ protected:
 };
 
 // Consumer: processes incoming temperature data
-class MonitorModule : public Module<Output<StatusData>, Input<TemperatureData>> {
+class MonitorModule : public MyApp::Module<
+    commrat::Output<StatusData>,
+    commrat::Input<TemperatureData>
+> {
 protected:
     void process(const TemperatureData& input, StatusData& output) override {
         std::cout << "Temperature: " << input.temperature_celsius << "°C\n";
@@ -101,7 +109,14 @@ protected:
 };
 
 // Multi-Output Producer: generates multiple message types simultaneously
-class SensorFusion : public Module<Outputs<RawData, FilteredData, Diagnostics>, PeriodicInput> {
+struct RawData { /* ... */ };
+struct FilteredData { /* ... */ };
+struct Diagnostics { /* ... */ };
+
+class SensorFusion : public MyApp::Module<
+    commrat::Outputs<RawData, FilteredData, Diagnostics>,
+    commrat::PeriodicInput
+> {
 protected:
     void process(RawData& raw, FilteredData& filtered, Diagnostics& diag) override {
         raw = read_sensors();
@@ -115,8 +130,24 @@ protected:
 **Step 3: Run**
 ```cpp
 int main() {
-    SensorModule sensor(config);
-    MonitorModule monitor(config);
+    
+    commrat::ModuleConfig sensor_config{
+        .name = "Sensor",
+        .system_id = 10,
+        .instance_id = 1,
+        .period = commrat::Milliseconds(500)
+    };
+    
+    commrat::ModuleConfig monitor_config{
+        .name = "Monitor",
+        .system_id = 20,
+        .instance_id = 1,
+        .source_system_id = 10,
+        .source_instance_id = 1
+    };
+    
+    SensorModule sensor(sensor_config);
+    MonitorModule monitor(monitor_config);
     
     sensor.start();
     monitor.start();  // Auto-subscribes to sensor
