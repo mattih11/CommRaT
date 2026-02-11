@@ -37,11 +37,9 @@
 
 namespace commrat {
 
-// Empty base classes for conditional inheritance
-struct EmptyBase {};
-struct EmptyBase2 {};  // Need separate empty bases to avoid duplicate base class error
-struct EmptyBase3 {};
-struct EmptyBase4 {};
+// Empty base classes for conditional multi-input mixin inheritance
+struct EmptyBase2 {};  // MultiInputInfrastructure conditional base
+struct EmptyBase3 {};  // MultiInputProcessor conditional base
 
 // ============================================================================
 // Automatic Timestamp Management
@@ -93,6 +91,9 @@ template<typename UserRegistry,
          typename InputSpec_,
          typename... CommandTypes>
 class Module 
+    // ========================================================================
+    // Processing Virtual Function Providers (conditional based on I/O specs)
+    // ========================================================================
     : public ContinuousProcessorBase<
         typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
@@ -105,10 +106,18 @@ class Module
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
+    
+    // ========================================================================
+    // Core Module Infrastructure (CRTP mixins - always active)
+    // ========================================================================
     , public MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>
+    
+    // ========================================================================
+    // Multi-Input Support (conditional - only when Inputs<T,U,V> specified)
+    // ========================================================================
     , public std::conditional_t<
         module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::has_multi_input,
         MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
@@ -119,6 +128,10 @@ class Module
         MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
         EmptyBase3
       >
+    
+    // ========================================================================
+    // Lifecycle & Infrastructure (CRTP mixins - always active)
+    // ========================================================================
     , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>
@@ -275,11 +288,10 @@ protected:
     std::atomic<bool> running_;
     
     // Module threads
-    std::optional<std::thread> data_thread_;
-    std::optional<std::thread> command_thread_;
-    std::optional<std::thread> work_thread_;              // Single-output: one WORK mailbox
-    // Multi-output: output_work_threads_ in MultiOutputManager mixin
-    // Multi-input: secondary_input_threads_ in MultiInputInfrastructure mixin
+    std::optional<std::thread> data_thread_;       // Periodic/loop/continuous/multi-input processing
+    std::optional<std::thread> command_thread_;     // User commands on CMD mailbox
+    // Work threads: output_work_threads_ in MultiOutputManager mixin (ALL modules)
+    // Secondary input threads: secondary_input_threads_ in MultiInputInfrastructure mixin
     
     // Subscriber management - inherited from MultiOutputManager mixin
     // ALL modules now use per-output subscriber lists (post-unification):
