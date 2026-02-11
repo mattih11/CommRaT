@@ -24,6 +24,7 @@
 #include "commrat/module/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
 #include "commrat/module/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
 #include "commrat/module/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
+#include "commrat/module/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -123,6 +124,11 @@ class Module
         MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
         EmptyBase2  // Single-input modules don't need multi-input infrastructure
       >  // Phase 4: Multi-input infrastructure
+    , public std::conditional_t<
+        module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::has_multi_input,
+        MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
+        EmptyBase3  // Single-input modules don't need multi-input processor
+      >  // Phase 5: Multi-input processing
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -130,6 +136,7 @@ class Module
     friend class InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>;
     friend class MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
+    friend class MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     
 private:
     // ========================================================================
@@ -855,122 +862,16 @@ private:
     // - start_secondary_input_threads()
     // - start_secondary_threads_impl()
     
-    // Helper: Receive from primary input mailbox
-    template<size_t PrimaryIdx>
-    auto receive_primary_input() -> MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>> {
-        if (!this->input_mailboxes_) {
-            return MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>(MailboxError::NotInitialized);
-        }
-        
-        using PrimaryType = std::tuple_element_t<PrimaryIdx, InputTypesTuple>;
-        auto& primary_mailbox = std::get<PrimaryIdx>(*this->input_mailboxes_);
-        
-        // BLOCKING receive - drives execution rate
-        return primary_mailbox.template receive<PrimaryType>();
-    }
-    
-    // Helper: Gather all inputs synchronized to primary timestamp
-    template<size_t PrimaryIdx, typename PrimaryMsgType>
-    std::optional<InputTypesTuple> gather_all_inputs(const PrimaryMsgType& primary_msg) {
-        if (!this->input_mailboxes_) {
-            return std::nullopt;
-        }
-        
-        // Create tuple to hold all inputs
-        InputTypesTuple all_inputs{};
-        
-        // Place primary input at its index
-        std::get<PrimaryIdx>(all_inputs) = primary_msg.payload;
-        
-        // Phase 6.10: Sync secondary inputs using getData with primary timestamp from header
-        // TimsMessage.header.timestamp is the authoritative timestamp
-        bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.header.timestamp, all_inputs);
-        
-        if (!all_synced) {
-            return std::nullopt;
-        }
-        
-        return all_inputs;
-    }
-    
-    // Helper: Sync all secondary inputs via getData
-    template<size_t PrimaryIdx>
-    bool sync_secondary_inputs(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
-        return sync_secondary_inputs_impl<PrimaryIdx>(primary_timestamp, all_inputs, 
-                                                       std::make_index_sequence<InputCount>{});
-    }
-    
-    template<size_t PrimaryIdx, size_t... Is>
-    bool sync_secondary_inputs_impl(uint64_t primary_timestamp, InputTypesTuple& all_inputs,
-                                     std::index_sequence<Is...>) {
-        // For each input index (except primary), call getData
-        bool all_success = true;
-        
-        // Fold expression: process each secondary input
-        ((Is != PrimaryIdx ? 
-          (all_success = sync_input_at_index<Is>(primary_timestamp, all_inputs) && all_success) : 
-          true), ...);
-        
-        return all_success;
-    }
-    
-    template<size_t Index>
-    bool sync_input_at_index(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
-        using InputType = std::tuple_element_t<Index, InputTypesTuple>;
-        auto& mailbox = std::get<Index>(*this->input_mailboxes_);
-        
-        // Non-blocking getData with tolerance
-        auto result = mailbox.template getData<InputType>(
-            primary_timestamp,
-            config_.sync_tolerance,
-            InterpolationMode::NEAREST
-        );
-        
-        if (!result.has_value()) {
-            // Phase 6.10: Mark input as invalid
-            mark_input_invalid(Index);
-            return false;  // getData failed
-        }
-        
-        // Phase 6.10: Populate metadata for this input
-        // Index matches position in Inputs<T1, T2, T3, ...>
-        // getData succeeded - data is "new" (successfully retrieved from buffer)
-        // Note: is_new_data = true means getData returned a value (not nullopt)
-        //       is_new_data = false would indicate using fallback/default data
-        update_input_metadata(Index, result.value(), true);
-        
-        // Store payload in tuple
-        std::get<Index>(all_inputs) = result->payload;
-        return true;
-    }
-    
-    // Phase 6.7: Call multi-input process with single output
-    OutputData call_multi_input_process(const InputTypesTuple& inputs) {
-        return call_multi_input_process_impl(inputs, std::make_index_sequence<InputCount>{});
-    }
-    
-    template<size_t... Is>
-    OutputData call_multi_input_process_impl(const InputTypesTuple& inputs, std::index_sequence<Is...>) {
-        // Unpack tuple and call process(const T1&, const T2&, ...)
-        using Base = MultiInputProcessorBase<InputTypesTuple, OutputData, InputCount>;
-        return static_cast<Base*>(this)->process(std::get<Is>(inputs)...);
-    }
-    
-    // Phase 6.7: Call multi-input process with multi-output
-    void call_multi_input_multi_output_process(const InputTypesTuple& inputs, OutputTypesTuple& outputs) {
-        call_multi_input_multi_output_process_impl(inputs, outputs, 
-                                                    std::make_index_sequence<InputCount>{},
-                                                    std::make_index_sequence<std::tuple_size_v<OutputTypesTuple>>{});
-    }
-    
-    template<size_t... InputIs, size_t... OutputIs>
-    void call_multi_input_multi_output_process_impl(const InputTypesTuple& inputs, OutputTypesTuple& outputs,
-                                                      std::index_sequence<InputIs...>,
-                                                      std::index_sequence<OutputIs...>) {
-        // Unpack both tuples and call process(const T1&, ..., O1&, O2&, ...)
-        using Base = MultiInputProcessorBase<InputTypesTuple, OutputTypesTuple, InputCount>;
-        static_cast<Base*>(this)->process(std::get<InputIs>(inputs)..., std::get<OutputIs>(outputs)...);
-    }
+    // Phase 5: Multi-input processing moved to MultiInputProcessor mixin
+    // - receive_primary_input<PrimaryIdx>()
+    // - gather_all_inputs<PrimaryIdx>()
+    // - sync_secondary_inputs<PrimaryIdx>()
+    // - sync_secondary_inputs_impl<PrimaryIdx>()
+    // - sync_input_at_index<Index>()
+    // - call_multi_input_process()
+    // - call_multi_input_process_impl()
+    // - call_multi_input_multi_output_process()
+    // - call_multi_input_multi_output_process_impl()
 };
 
 } // namespace commrat
