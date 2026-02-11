@@ -33,27 +33,32 @@ int main() {
         
         TimestampedRingBuffer<TestMessage, 10> buffer;
         
-        buffer.push(TestMessage{.timestamp = 1000, .value = 1, .data = 1.0f});
-        buffer.push(TestMessage{.timestamp = 1100, .value = 2, .data = 2.0f});
-        buffer.push(TestMessage{.timestamp = 1200, .value = 3, .data = 3.0f});
+        // Use nanosecond timestamps
+        uint64_t t1 = 1000000000ULL;  // 1 second
+        uint64_t t2 = 1100000000ULL;  // 1.1 seconds
+        uint64_t t3 = 1200000000ULL;  // 1.2 seconds
+        
+        buffer.push(TestMessage{.timestamp = t1, .value = 1, .data = 1.0f});
+        buffer.push(TestMessage{.timestamp = t2, .value = 2, .data = 2.0f});
+        buffer.push(TestMessage{.timestamp = t3, .value = 3, .data = 3.0f});
         
         assert(buffer.size() == 3);
         
         // Exact match
-        auto result = buffer.getData(1100);
+        auto result = buffer.getData(t2);
         assert(result.has_value());
-        assert(result->timestamp == 1100);
+        assert(result->timestamp == t2);
         assert(result->value == 2);
         
-        // Nearest (closer to 1100)
-        result = buffer.getData(1120);
+        // Nearest (closer to t2) - 20ms from t2
+        result = buffer.getData(t2 + 20'000'000);
         assert(result.has_value());
-        assert(result->timestamp == 1100);
+        assert(result->timestamp == t2);
         
-        // Nearest (closer to 1200)
-        result = buffer.getData(1180);
+        // Nearest (closer to t3) - 80ms from t2, 20ms from t3
+        result = buffer.getData(t2 + 80'000'000);
         assert(result.has_value());
-        assert(result->timestamp == 1200);
+        assert(result->timestamp == t3);
         
         std::cout << "  PASS: Basic getData working correctly\n\n";
     }
@@ -64,24 +69,28 @@ int main() {
         
         TimestampedRingBuffer<TestMessage, 10> buffer;
         
-        buffer.push(TestMessage{.timestamp = 1000, .value = 1, .data = 1.0f});
-        buffer.push(TestMessage{.timestamp = 1100, .value = 2, .data = 2.0f});
-        buffer.push(TestMessage{.timestamp = 1200, .value = 3, .data = 3.0f});
+        uint64_t t1 = 1000000000ULL;
+        uint64_t t2 = 1100000000ULL;
+        uint64_t t3 = 1200000000ULL;
         
-        // Get message at or before 1150
-        auto result = buffer.getData(1150, std::chrono::milliseconds(100), 
+        buffer.push(TestMessage{.timestamp = t1, .value = 1, .data = 1.0f});
+        buffer.push(TestMessage{.timestamp = t2, .value = 2, .data = 2.0f});
+        buffer.push(TestMessage{.timestamp = t3, .value = 3, .data = 3.0f});
+        
+        // Get message at or before t2+50ms
+        auto result = buffer.getData(t2 + 50'000'000, std::chrono::milliseconds(100), 
                                      InterpolationMode::BEFORE);
         assert(result.has_value());
-        assert(result->timestamp == 1100);  // Newest before 1150
+        assert(result->timestamp == t2);  // Newest before query
         
-        // Get message at or before 1250
-        result = buffer.getData(1250, std::chrono::milliseconds(100),
+        // Get message at or before t3+50ms
+        result = buffer.getData(t3 + 50'000'000, std::chrono::milliseconds(100),
                                InterpolationMode::BEFORE);
         assert(result.has_value());
-        assert(result->timestamp == 1200);  // Newest before 1250
+        assert(result->timestamp == t3);  // Newest before query
         
-        // Too far before
-        result = buffer.getData(800, std::chrono::milliseconds(50),
+        // Too far before (200ms before t1, only 50ms tolerance)
+        result = buffer.getData(t1 - 200'000'000, std::chrono::milliseconds(50),
                                InterpolationMode::BEFORE);
         assert(!result.has_value());  // No message within tolerance
         
@@ -94,50 +103,56 @@ int main() {
         
         TimestampedRingBuffer<TestMessage, 10> buffer;
         
-        buffer.push(TestMessage{.timestamp = 1000, .value = 1, .data = 1.0f});
-        buffer.push(TestMessage{.timestamp = 1100, .value = 2, .data = 2.0f});
-        buffer.push(TestMessage{.timestamp = 1200, .value = 3, .data = 3.0f});
+        uint64_t t1 = 1000000000ULL;
+        uint64_t t2 = 1100000000ULL;
+        uint64_t t3 = 1200000000ULL;
         
-        // Get message at or after 1050
-        auto result = buffer.getData(1050, std::chrono::milliseconds(100),
+        buffer.push(TestMessage{.timestamp = t1, .value = 1, .data = 1.0f});
+        buffer.push(TestMessage{.timestamp = t2, .value = 2, .data = 2.0f});
+        buffer.push(TestMessage{.timestamp = t3, .value = 3, .data = 3.0f});
+        
+        // Get message at or after t1+50ms
+        auto result = buffer.getData(t1 + 50'000'000, std::chrono::milliseconds(100),
                                      InterpolationMode::AFTER);
         assert(result.has_value());
-        assert(result->timestamp == 1100);  // Oldest after 1050
+        assert(result->timestamp == t2);  // Oldest after query
         
-        // Get message at or after 950
-        result = buffer.getData(950, std::chrono::milliseconds(100),
+        // Get message at or after t1-50ms
+        result = buffer.getData(t1 - 50'000'000, std::chrono::milliseconds(100),
                                InterpolationMode::AFTER);
         assert(result.has_value());
-        assert(result->timestamp == 1000);  // Oldest after 950
+        assert(result->timestamp == t1);  // Oldest after query
         
-        // Too far after
-        result = buffer.getData(1300, std::chrono::milliseconds(50),
+        // Too far after (200ms after t3, only 50ms tolerance)
+        result = buffer.getData(t3 + 200'000'000, std::chrono::milliseconds(50),
                                InterpolationMode::AFTER);
         assert(!result.has_value());  // No message within tolerance
         
         std::cout << "  PASS: AFTER mode working correctly\n\n";
     }
 
-    // Test 4: Tolerance behavior
+    // Test 4: Tolerance behavior (using nanosecond timestamps)
     {
         std::cout << "Test 4: Tolerance handling\n";
         
         TimestampedRingBuffer<TestMessage, 10> buffer(std::chrono::milliseconds(30));
         
-        buffer.push(TestMessage{.timestamp = 1000, .value = 1, .data = 1.0f});
-        buffer.push(TestMessage{.timestamp = 1100, .value = 2, .data = 2.0f});
+        // Use nanosecond timestamps (as expected by getData implementation)
+        uint64_t base_ns = 1000000000ULL;  // 1 second in nanoseconds
+        buffer.push(TestMessage{.timestamp = base_ns, .value = 1, .data = 1.0f});
+        buffer.push(TestMessage{.timestamp = base_ns + 100'000'000, .value = 2, .data = 2.0f});  // +100ms
         
-        // Within tolerance
-        auto result = buffer.getData(1025);  // Uses default 30ms tolerance
+        // Within tolerance (25ms from base, 30ms tolerance)
+        auto result = buffer.getData(base_ns + 25'000'000);
         assert(result.has_value());
-        assert(result->timestamp == 1000);
+        assert(result->timestamp == base_ns);
         
-        // Outside tolerance
-        result = buffer.getData(1050);  // 50ms from nearest (1000 and 1100)
+        // Outside tolerance (50ms from both messages, 30ms tolerance)
+        result = buffer.getData(base_ns + 50'000'000);
         assert(!result.has_value());
         
-        // Override tolerance
-        result = buffer.getData(1050, std::chrono::milliseconds(100));
+        // Override tolerance (50ms within 100ms tolerance)
+        result = buffer.getData(base_ns + 50'000'000, std::chrono::milliseconds(100));
         assert(result.has_value());  // Now within 100ms tolerance
         
         std::cout << "  PASS: Tolerance correctly enforced\n\n";
