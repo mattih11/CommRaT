@@ -164,7 +164,7 @@ cd build
 - **3-Mailbox System**: Separate CMD/WORK/DATA mailboxes per module (RACK-style)
 - **Blocking Receives**: 0% CPU when idle, immediate response when active
 - **Compile-Time IDs**: Message IDs calculated at compile time with collision detection
-- **Auto-Subscription**: `ContinuousInput<T>` automatically handles subscription protocol
+- **Auto-Subscription**: `Input<T>` automatically handles subscription protocol
 - **Type-Safe Dispatch**: Visitor pattern for runtime dispatch without virtual functions
 - **Real-Time Safe**: No dynamic allocation in hot paths, deterministic behavior
 

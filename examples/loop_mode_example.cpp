@@ -55,8 +55,7 @@ public:
     {}
 
 protected:
-    CounterData process() override {
-        CounterData output;
+    void process(CounterData& output) override {
         output.value = value_++;
         
         // Calculate throughput every second
@@ -80,8 +79,6 @@ protected:
         } else {
             output.iterations_per_second = 0;  // Not ready yet
         }
-        
-        return output;
     }
 
 private:
@@ -117,7 +114,7 @@ public:
     {}
 
 protected:
-    CounterData process_continuous(const CounterData& input) override {
+    void process(const CounterData& input, CounterData& output) override {
         ++total_messages_;
         
         // Track throughput statistics (only when report is available)
@@ -138,7 +135,7 @@ protected:
         }
         
         // Return pass-through data
-        return input;
+        output = input;
     }
     
     void on_stop() override {

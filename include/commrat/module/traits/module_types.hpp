@@ -1,6 +1,7 @@
 #pragma once
 
 #include "commrat/module/io_spec.hpp"
+#include "commrat/module/traits/type_extraction.hpp"
 #include "commrat/module/mailbox/mailbox_set.hpp"
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
@@ -14,37 +15,6 @@ namespace module_traits {
 // ============================================================================
 // Phase 1: Type Computation Helpers (Extracted from registry_module.hpp)
 // ============================================================================
-
-/**
- * @brief Helper to extract InputData type from InputSpec (single input)
- */
-template<typename T>
-struct ExtractInputData {
-    using type = void;
-};
-
-template<typename T>
-struct ExtractInputData<Input<T>> {
-    using type = T;
-};
-
-/**
- * @brief Helper to extract input types tuple from InputSpec
- */
-template<typename T>
-struct ExtractInputTypes {
-    using type = std::tuple<>;  // No inputs
-};
-
-template<typename T>
-struct ExtractInputTypes<Input<T>> {
-    using type = std::tuple<T>;  // Single input
-};
-
-template<typename... Ts>
-struct ExtractInputTypes<Inputs<Ts...>> {
-    using type = std::tuple<Ts...>;  // Multi-input
-};
 
 /**
  * @brief Helper to check if there's an explicit PrimaryInput in CommandTypes
@@ -75,42 +45,6 @@ struct ExtractPrimaryPayloadHelper<PrimaryInput<T>, Rest...> {
 
 template<typename First, typename... Rest>
 struct ExtractPrimaryPayloadHelper<First, Rest...> : ExtractPrimaryPayloadHelper<Rest...> {};
-
-/**
- * @brief Helper to extract OutputData type from OutputSpec
- */
-template<typename T>
-struct ExtractOutputData {
-    using type = T;  // Raw type passes through
-};
-
-template<typename T>
-struct ExtractOutputData<Output<T>> {
-    using type = T;
-};
-
-template<typename... Ts>
-struct ExtractOutputData<Outputs<Ts...>> {
-    using type = void;  // Multi-output: void process(T1& out1, T2& out2, ...)
-};
-
-/**
- * @brief Helper to get output types as tuple
- */
-template<typename T>
-struct OutputTypes {
-    using type = std::tuple<T>;
-};
-
-template<typename T>
-struct OutputTypes<Output<T>> {
-    using type = std::tuple<T>;
-};
-
-template<typename... Ts>
-struct OutputTypes<Outputs<Ts...>> {
-    using type = std::tuple<Ts...>;
-};
 
 /**
  * @brief Generate MailboxSet tuple for each output type (Phase 7.4)
@@ -205,7 +139,7 @@ struct ModuleTypes {
     using PrimaryPayloadType = typename ExtractPrimaryPayloadHelper<CommandTypes...>::type;
     
     // Output type analysis
-    using OutputTypesTuple = typename OutputTypes<OutputSpec>::type;
+    using OutputTypesTuple = typename ::commrat::OutputTypesTuple<OutputSpec>::type;
     static constexpr size_t num_output_types = std::tuple_size_v<OutputTypesTuple>;
     static constexpr bool has_multi_output = OutputCount_v<OutputSpec> > 1;
     
@@ -230,8 +164,8 @@ struct ModuleTypes {
     using DataMailbox = typename MakeTypedDataMailbox<UserRegistry, DataTypesTuple>::type;
     
     // Public type aliases (user-visible)
-    using OutputData = typename ExtractOutputData<OutputSpec>::type;
-    using InputData = typename ExtractInputData<InputSpec>::type;
+    using OutputData = typename ExtractOutputPayload<OutputSpec>::type;
+    using InputData = typename ExtractInputPayload<InputSpec>::type;
     
     // Input mode flags
     static constexpr bool has_continuous_input = HasContinuousInput<InputSpec>;

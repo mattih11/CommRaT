@@ -4,7 +4,7 @@
  * 
  * Tests that multi-output modules generate correct signatures:
  * - Outputs<T, U> + PeriodicInput → void process(T& out1, U& out2)
- * - Outputs<T, U> + Input<V> → void process_continuous(const V& in, T& out1, U& out2)
+ * - Outputs<T, U> + Input<V> → void process(const V& in, T& out1, U& out2)
  */
 
 #include <commrat/commrat.hpp>
@@ -89,7 +89,7 @@ public:
     int process_call_count = 0;
     
     // Multi-output continuous signature: void process_continuous(const Input&, T1& out1, T2& out2)
-    void process_continuous(const InputData& input, DataA& out1, DataB& out2) override {
+    void process(const InputData& input, DataA& out1, DataB& out2) override {
         process_call_count++;
         out1 = DataA{
             .value_a = input.input_value * 1.5f
@@ -101,7 +101,7 @@ public:
 };
 
 void test_multi_output_continuous() {
-    std::cout << "\n[Test 2] Outputs<A, B> + Input<C> → void process_continuous(const C&, A&, B&)\n";
+    std::cout << "\n[Test 2] Outputs<A, B> + Input<C> → void process(const C&, A&, B&)\n";
     
     ModuleConfig config{
         .name = "MultiOutputContinuous",
@@ -118,10 +118,10 @@ void test_multi_output_continuous() {
     InputData input{.input_value = 10.0f};
     DataA a{};
     DataB b{};
-    module.process_continuous(input, a, b);
+    module.process(input, a, b);
     
     if (a.value_a == 15.0f && b.value_b == 20.0f) {
-        std::cout << "  ✓ Multi-output process_continuous(const C&, A&, B&) signature correct\n";
+        std::cout << "  ✓ Multi-output process(const C&, A&, B&) signature correct\n";
         std::cout << "  ✓ Multi-output continuous processing works\n";
     } else {
         std::cout << "  ✗ Multi-output continuous processing failed\n";

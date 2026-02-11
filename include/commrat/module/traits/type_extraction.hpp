@@ -22,11 +22,6 @@ struct ExtractInputPayload<Input<T>> {
     using type = T;
 };
 
-template<typename T>
-struct ExtractInputPayload<ContinuousInput<T>> {
-    using type = T;  // Legacy support
-};
-
 // Helper to extract input types tuple from InputSpec (outside Module)
 template<typename T>
 struct ExtractInputTypes {
@@ -52,6 +47,11 @@ struct ExtractOutputPayload {
 template<typename T>
 struct ExtractOutputPayload<Output<T>> {
     using type = T;
+};
+
+template<typename... Ts>
+struct ExtractOutputPayload<Outputs<Ts...>> {
+    using type = void;  // Multi-output: void process(T1& out1, T2& out2, ...)
 };
 
 // Helper to get output types as tuple (outside Module class)

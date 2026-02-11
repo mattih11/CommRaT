@@ -32,13 +32,13 @@ public:
     
 protected:
     // Return payload type directly
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         float temp = base_temp_ + std::sin(counter_ * 0.1f) * 5.0f;
         counter_++;
         
         std::cout << "[Producer] Temperature: " << temp << "°C\n";
         
-        return TemperatureData{
+        output ={
             .temperature_celsius = temp
         };
     }
@@ -62,7 +62,7 @@ public:
     
 protected:
     // Receives payload, returns payload
-    TemperatureData process_continuous(const TemperatureData& input) override {
+    void process(const TemperatureData& input, TemperatureData& output) override {
         window_[index_] = input.temperature_celsius;
         index_ = (index_ + 1) % WINDOW_SIZE;
         if (count_ < WINDOW_SIZE) count_++;
@@ -76,7 +76,7 @@ protected:
         std::cout << "[Consumer] Filtered: " << filtered << "°C (raw: " 
                   << input.temperature_celsius << "°C)\n";
         
-        return TemperatureData{
+        output =  {
             .temperature_celsius = filtered
         };
     }

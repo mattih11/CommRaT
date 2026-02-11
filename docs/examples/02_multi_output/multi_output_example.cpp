@@ -155,7 +155,7 @@ public:
     }
 
 protected:
-    TemperatureData process_continuous(const TemperatureData& input) override {
+    void process(const TemperatureData& input, TemperatureData& output) override {
         count_++;
         
         std::cout << "[TempMonitor] #" << count_ 
@@ -172,8 +172,7 @@ protected:
         }
         
         std::cout << "\n";
-        
-        return input;  // Pass-through
+        output = input;  // Pass-through
     }
 
 private:
@@ -205,7 +204,7 @@ public:
     }
 
 protected:
-    PressureData process_continuous(const PressureData& input) override {
+    void process(const PressureData& input, PressureData& output) override {
         count_++;
         
         std::cout << "[PressureMonitor] #" << count_
@@ -215,15 +214,15 @@ protected:
         
         // Check for extreme conditions
         if (input.pressure_hpa < 990.0f) {
-            std::cout << " 🌧 LOW PRESSURE";
+            std::cout << " LOW PRESSURE";
         }
         if (input.pressure_hpa > 1010.0f) {
-            std::cout << " ☀ HIGH PRESSURE";
+            std::cout << " HIGH PRESSURE";
         }
         
         std::cout << "\n";
         
-        return input;  // Pass-through
+        output = input;  // Pass-through
     }
 
 private:
@@ -306,7 +305,7 @@ int main() {
     // Run Until Signal
     // ========================================================================
     
-    std::cout << "\n🌡️  Running weather monitoring... (Press Ctrl+C to stop)\n\n";
+    std::cout << "\nRunning weather monitoring... (Press Ctrl+C to stop)\n\n";
     
     while (!shutdown_requested.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -316,14 +315,14 @@ int main() {
     // Clean Shutdown
     // ========================================================================
     
-    std::cout << "\n🛑 Shutting down...\n";
+    std::cout << "\nShutting down...\n";
     
     // Stop in reverse order
     pressure_monitor.stop();
     temp_monitor.stop();
     station.stop();
     
-    std::cout << "✅ Done!\n";
+    std::cout << "Done!\n";
     
     return 0;
 }

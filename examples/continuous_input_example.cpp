@@ -31,14 +31,14 @@ public:
     explicit SensorModule(const ModuleConfig& config) : ExampleApp::Module<Output<TemperatureData>, PeriodicInput>(config) {}
     
 protected:
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         // Simulate temperature sensor
         static float temp = 20.0f;
         temp += 0.1f * (std::rand() % 10 - 5);  // Random walk
         
         std::cout << "[Producer] Published temperature: " << temp << "°C\n";
         
-        return TemperatureData{
+        output = {
             .sensor_id = config_.instance_id,
             .temperature_c = temp,
             .confidence = 1.0f
@@ -60,7 +60,7 @@ protected:
     size_t history_index_{0};
 
 protected:
-    TemperatureData process_continuous(const TemperatureData& input) override {
+    void process(const TemperatureData& input, TemperatureData& output) override {
         // Apply simple moving average filter
         history_[history_index_] = input.temperature_c;
         history_index_ = (history_index_ + 1) % HISTORY_SIZE;
@@ -74,7 +74,7 @@ protected:
         std::cout << "[Consumer] Received: " << input.temperature_c << "°C "
                   << "→ Filtered: " << filtered << "°C\n";
         
-        return TemperatureData{
+        output = {
             .sensor_id = input.sensor_id,
             .temperature_c = filtered,
             .confidence = input.confidence

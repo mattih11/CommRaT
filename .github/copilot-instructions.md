@@ -2,149 +2,80 @@
 
 ## Project Overview
 
-**CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on top of TiMS (TIMS Interprocess Message System). It provides a modern, type-safe, compile-time message passing system with zero runtime overhead.
+**CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Phase 6.10 COMPLETE! Timestamp metadata accessors fully functional  
-**Next Evolution**: Phase 7 - Advanced features (optional inputs, buffering, ROS 2 adapter)
+**Current Status**: Phase 6.10 COMPLETE (timestamp metadata accessors)  
+**Next**: Phase 7 (optional inputs, buffering, ROS 2 adapter)
 
 ### Core Philosophy
-- **Compile-time everything**: Message IDs, registries, and type safety computed at compile time
-- **Zero-copy where possible**: Direct memory access, no unnecessary allocations
-- **Real-time safe**: No dynamic allocation in hot paths, deterministic execution
-- **Template metaprogramming**: Heavy use of C++20 concepts, SFINAE, and compile-time dispatch
-- **Simple user-facing API**: Complex template logic should be invisible to users - they only see their message types and simple module interfaces. All the metaprogramming machinery (reflection, type dispatch, ID calculation) happens automatically at compile time behind the scenes
+- **Compile-time everything**: Message IDs, type safety computed at compile time
+- **Zero-copy where possible**: Direct memory access, no allocations
+- **Real-time safe**: No dynamic allocation in hot paths
+- **Simple user API**: Users only see message types and Module interface - metaprogramming hidden
 
 ## Architecture
 
-### 3-Mailbox System (RACK-style)
-Each module has **three separate mailboxes** with hierarchical addressing:
+### 3-Mailbox System
+Each module has three mailboxes:
 
 ```cpp
-// Address format: [data_type_id:16][system_id:8][instance_id:8] + mailbox_offset
 CMD  mailbox: base_address + 0   // User commands
-WORK mailbox: base_address + 16  // Subscription protocol (SubscribeRequest/Reply)
-DATA mailbox: base_address + 32  // Input data streams (ContinuousInput)
+WORK mailbox: base_address + 16  // Subscription protocol
+DATA mailbox: base_address + 32  // Input data streams
 ```
 
-**Key principle**: Separate concerns → separate mailboxes → no interference between command, control, and data flows.
+**Threading**: command_loop() + work_loop() + data_thread_, all use blocking receives (0% CPU when idle)
 
-### Threading Model
-- `command_loop()`: Handles user commands on CMD mailbox (blocking receive)
-- `work_loop()`: Handles subscription protocol on WORK mailbox (blocking receive)
-- `data_thread_`: Runs periodic/continuous/loop processing
-- **All use blocking receives** - no polling, 0% CPU when idle
-
-### Message Flow
-1. **Subscription**: Consumer sends SubscribeRequest to producer's WORK mailbox
-2. **Acknowledgment**: Producer adds subscriber, replies to consumer's WORK mailbox
-3. **Data**: Producer publishes to subscriber's DATA mailbox
-4. **Unsubscription**: Consumer sends UnsubscribeRequest on shutdown
+**Message Flow**: Consumer subscribes → Producer acknowledges → Producer publishes to subscriber's DATA mailbox
 
 ## Code Style & Conventions
 
 ### Real-Time Constraints
 
-**NEVER use in hot paths (periodic_loop, continuous_loop, process functions):**
+**FORBIDDEN in hot paths:**
 ```cpp
-// ❌ FORBIDDEN in real-time code:
-new / delete
-malloc / free
-std::vector::push_back() // May allocate
-std::string operations   // May allocate
-std::cout in loops       // Blocking I/O
-std::lock_guard          // May block (use lock-free if needed)
-throw exceptions         // Unpredictable timing
+new/delete, malloc/free
+std::vector::push_back()  // May allocate
+std::string operations    // May allocate
+std::cout in loops        // Blocking I/O
+throw exceptions          // Unpredictable timing
 ```
 
-**DO use:**
+**ALWAYS use:**
 ```cpp
-// ✅ REAL-TIME SAFE:
-std::array<T, N>              // Fixed-size, stack-allocated
-sertial::fixed_vector<T, N>   // Fixed capacity, no allocation
-sertial::RingBuffer<T, N>     // Circular buffer (Phase 6)
-std::atomic<T>                // Lock-free operations
-constexpr functions           // Compile-time computation
-Templates with static_assert  // Compile-time validation
+std::array<T, N>              // Fixed-size
+sertial::fixed_vector<T, N>   // Fixed capacity
+sertial::RingBuffer<T, N>     // Circular buffer
+std::atomic<T>                // Lock-free
+constexpr / static_assert     // Compile-time
 ```
 
 ### Threading and Timestamp Abstractions
 
-**ALWAYS use CommRaT's unified abstractions** instead of raw std:: types - NO EXCEPTIONS:
+**ALWAYS use CommRaT abstractions** instead of std:: types:
 
 ```cpp
-// ❌ NEVER USE raw std types - even in public APIs:
+// NEVER:
 #include <thread>
 #include <mutex>
-#include <shared_mutex>
 #include <chrono>
+std::thread, std::mutex, std::chrono::steady_clock::now()
 
-std::thread my_thread;
-std::mutex my_mutex;
-std::shared_mutex my_shared_mutex;
-std::lock_guard<std::mutex> lock(mtx);
-std::chrono::steady_clock::now();
-std::chrono::milliseconds timeout(100);
-std::this_thread::sleep_for(ms);
-
-// ✅ ALWAYS USE CommRaT abstractions:
+// ALWAYS:
 #include <commrat/threading.hpp>
 #include <commrat/timestamp.hpp>
-
-Thread my_thread;                    // Wrapper with realtime priorities
-Mutex my_mutex;                      // Priority-inheritance support
-SharedMutex my_shared_mutex;         // Reader-writer lock
-Lock lock(mtx);                      // RAII lock guard
-SharedLock lock(shared_mtx);         // Shared (read) lock
-UniqueLockShared lock(shared_mtx);   // Unique (write) lock on SharedMutex
-Timestamp ts = Time::now();          // Get current timestamp (ns since epoch)
-Duration timeout = Milliseconds(100); // Type-safe duration
-Time::sleep(Milliseconds(10));       // Sleep (realtime-compatible)
-
-// Why NO exceptions?
-// - Realtime kernel syscalls (SCHED_FIFO, SCHED_RR) require consistent API
-// - Priority-inheritance mutexes need special pthread calls
-// - Alternative clock sources (CLOCK_MONOTONIC, PTP, TSC) not in std::chrono
-// - std::thread doesn't support realtime thread attributes
-// - Must control thread affinity and CPU pinning
-// - Need deterministic timing guarantees across entire codebase
-
-// NOTE: Only timestamp.hpp and threading.hpp themselves include std headers
-// (they are the abstraction layer). All other code uses the abstractions.
-
-### Template Metaprogramming
-
-CommRaT heavily uses **compile-time dispatch** via templates:
-
-```cpp
-// Use concepts for constraints
-template<typename T>
-concept IsCommRatMessage = requires(T msg) {
-    { msg.timestamp } -> std::convertible_to<uint64_t>;
-};
-
-// SFINAE for conditional compilation
-template<typename T>
-static constexpr bool has_continuous_input = 
-    HasContinuousInput<InputSpec>;
-
-if constexpr (has_continuous_input) {
-    // Compile-time branch - no runtime cost
-}
-
-// Variadic templates for message registries
-template<typename... MessageDefs>
-class MessageRegistry {
-    static constexpr size_t num_types = sizeof...(MessageDefs);
-};
+Thread, Mutex, SharedMutex, Lock, SharedLock
+Timestamp ts = Time::now();
+Duration timeout = Milliseconds(100);
+Time::sleep(Milliseconds(10));
 ```
 
 ### Message Definitions
 
-Messages are defined with the **Message::** namespace for clean, simple syntax:
+Messages use **Message::** namespace for clean syntax:
 
 ```cpp
 // Message structure (plain POD, sertial-serializable)
-// USER SEES: Just a simple struct
 struct TemperatureData {
     uint64_t timestamp;
     uint32_t sensor_id;
@@ -153,43 +84,27 @@ struct TemperatureData {
 };
 
 // Registry entry (compile-time ID calculation)
-// USER SEES: Simple, clean type alias
 using TempMsg = Message::Data<TemperatureData>;
-
-// Advanced usage (explicit prefix/ID if needed)
-using CustomMsg = Message::Data<MyData, MessagePrefix::UserDefined, 42>;
-
-// BEHIND THE SCENES: Template magic computes unique IDs, validates structure,
-// calculates buffer sizes, generates serialization code - all at compile time
-// Message ID format: [prefix:8][subprefix:8][local_id:16]
-// Example: 0x01000002 = UserDefined (0x01) + Data (0x00) + ID (0x0002)
 ```
 
-### Application Definition & Module Pattern (Phase 5.3)
+### Application Definition & Module Pattern
 
-**CommRaT<>** is the main user-facing template that defines your application. It combines MessageRegistry with Module/Mailbox for a clean API:
+**CommRaT<>** defines your application - combines message registry with Module/Mailbox:
 
 ```cpp
-// 1. DEFINE YOUR APPLICATION (replaces MessageRegistry in user code)
+// 1. DEFINE YOUR APPLICATION
 using MyApp = CommRaT<
     Message::Data<TemperatureData>,
     Message::Data<FilteredData>,
     Message::Command<ResetCmd>
 >;
 
-// Now MyApp provides:
-//   MyApp::Module<OutputSpec, InputSpec, ...Commands> - Module template
-//   MyApp::Mailbox<T>                                  - Mailbox template
-//   MyApp::serialize(msg) / deserialize<T>(data)      - Serialization
-//   MyApp::get_message_id<T>()                        - Message IDs
-
-// 2. CREATE MODULES using MyApp::Module
+// 2. CREATE MODULES
 // Producer (periodic publishing)
 class SensorModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput> {
 protected:
     TemperatureData process() override {
         // Called every config_.period
-        // MUST be real-time safe (no malloc/IO)
         return TemperatureData{...};
     }
 };
@@ -197,181 +112,105 @@ protected:
 // Consumer (continuous input processing)
 class FilterModule : public MyApp::Module<Output<FilteredData>, Input<TemperatureData>> {
 protected:
-    FilteredData process_continuous(const TemperatureData& input) override {
+    FilteredData process(const TemperatureData& input) override {
         // Called for each received message
-        // MUST be real-time safe
-        // NOTE: Must use 'override' keyword - this is a virtual function!
         return apply_filter(input);
     }
 };
 
-// Command handler with multiple command types
-class CommandableModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput, ResetCmd, CalibrateCmd> {
-protected:
-    TemperatureData process() override {
-        return read_sensor();
-    }
-    
-    void on_command(const ResetCmd& cmd) override {
-        // Handle reset command
-    }
-    
-    void on_command(const CalibrateCmd& cmd) override {
-        // Handle calibrate command
-    }
-};
-
-// 3. MULTI-OUTPUT (Phase 5.3) - void process with output references
+// Multi-output (void process with output references)
 class MultiOutputModule : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
 protected:
     void process(DataA& out1, DataB& out2) override {
-        // Fill multiple outputs
         out1 = DataA{...};
         out2 = DataB{...};
     }
 };
 
-// Multi-output with continuous input
-class MultiOutputFilter : public MyApp::Module<Outputs<DataA, DataB>, Input<SensorData>> {
+// Multi-input (first type is automatically primary)
+class SensorFusion : public MyApp::Module<
+    Output<FusedData>,
+    Inputs<IMUData, GPSData>  // IMU (first) drives execution
+> {
 protected:
-    void process_continuous(const SensorData& input, DataA& out1, DataB& out2) override {
-        // Process input, fill multiple outputs
-        out1 = transform_a(input);
-        out2 = transform_b(input);
+    FusedData process(const IMUData& imu, const GPSData& gps) override {
+        // GPS synchronized to IMU timestamp via getData
+        return fuse_sensors(imu, gps);
     }
 };
-
-// 4. BACKWARD COMPATIBLE - raw types auto-normalized to Output<T>
-class LegacyModule : public MyApp::Module<TemperatureData, PeriodicInput> {
-protected:
-    TemperatureData process() override {
-        return TemperatureData{...};
-    }
-};
-
-// ARCHITECTURE NOTES:
-// - CommRaT<...> = Application definition (combines registry + Module/Mailbox)
-// - MessageRegistry<...> = Internal type registry (use CommRaT instead)
-// - Module base class creates 3 mailboxes, spawns threads, handles subscription
-// - All complexity hidden behind simple MyApp::Module<Output, Input> syntax
 ```
 
 **Key Points:**
-- **Use `CommRaT<...>` not `MessageRegistry<...>`** - CommRaT is the user-facing application template
-- **Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`** - clean, no repetition
-- Output/Input specs: `Output<T>`, `Outputs<T, U>`, `Input<T>`, `Inputs<T, U, V>`, `PeriodicInput`, `LoopInput`
-- Virtual `process()` and `process_continuous()` **must use `override` keyword**
-- Multi-output: `void process(T1& out1, T2& out2)` - outputs passed by reference
-- Multi-input: `process_multi_input(const T1&, const T2&, const T3&)` - synchronized inputs
-- Raw types auto-normalized: `TemperatureData` → `Output<TemperatureData>`
+- Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`
+- Output specs: `Output<T>`, `Outputs<T, U>`
+- Input specs: `Input<T>`, `Inputs<T, U, V>`, `PeriodicInput`, `LoopInput`
+- Multi-input: First type in `Inputs<>` is automatically primary
+- Virtual `process()` **must use `override` keyword**
+- Multi-output: `void process(T1& out1, T2& out2)`
 
-### Multi-Input Pattern (Phase 6.9)
+### Multi-Input Synchronization
 
-**Synchronized multi-input processing** with automatic getData synchronization:
+**Multi-input modules** synchronize different-rate sensors:
 
 ```cpp
-// Multi-input fusion module
 class SensorFusion : public MyApp::Module<
     Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,  // Multiple inputs
-    PrimaryInput<IMUData>                  // Primary drives execution
+    Inputs<IMUData, GPSData>  // IMU first = primary
 > {
 protected:
-    FusedData process_multi_input(
-        const IMUData& imu,      // PRIMARY - received (blocking)
-        const GPSData& gps,      // SECONDARY - fetched via getData
-        const LidarData& lidar   // SECONDARY - fetched via getData
-    ) override {
-        // All inputs time-aligned to imu.header.timestamp
-        return fuse_sensors(imu, gps, lidar);
+    FusedData process(const IMUData& imu, const GPSData& gps) override {
+        // Access metadata for freshness/validity
+        auto gps_meta = get_input_metadata<1>();  // Index-based
+        bool fresh = has_new_data<1>();
+        bool valid = is_input_valid<1>();
+        
+        // GPS automatically synchronized to IMU timestamp via getData
+        return fuse_sensors(imu, gps);
     }
 };
 
-// Configuration for multi-input module
+// Configuration
 ModuleConfig fusion_config{
     .name = "SensorFusion",
     .system_id = 20,
     .instance_id = 1,
     .period = Milliseconds(10),  // Primary input rate (100Hz)
     .input_sources = {
-        {10, 1},  // IMU sensor (primary)
-        {11, 1},  // GPS sensor (secondary)
-        {12, 1}   // Lidar sensor (secondary)
+        {10, 1},  // IMU (primary)
+        {11, 1}   // GPS (secondary)
     },
     .sync_tolerance = 50'000'000  // 50ms tolerance for getData
 };
 ```
 
-**How Multi-Input Works:**
-1. **Primary Input**: Blocks on receive() - drives execution rate
-2. **Secondary Inputs**: Use getData(primary_timestamp, tolerance) for sync
-3. **HistoricalMailbox**: Circular buffer stores recent messages for getData queries
-4. **Time Alignment**: All inputs synchronized to primary timestamp
-5. **Freshness Tracking**: Can detect stale vs fresh secondary data
+**How it works:**
+1. Primary input blocks on receive() - drives execution
+2. Secondary inputs use getData(primary_timestamp, tolerance)
+3. HistoricalMailbox buffers recent messages
+4. Metadata tracks freshness and validity
 
-### Timestamp Management (Phase 6.10)
+### Timestamp Management
 
 **Single Source of Truth**: `TimsHeader.timestamp` ONLY - no payload timestamp fields!
 
 **Automatic Timestamp Assignment:**
-- `PeriodicInput`: `timestamp = Time::now()` at generation moment
-- `ContinuousInput`: `timestamp = input.header.timestamp` (exact propagation)
-- `Multi-input`: `timestamp = primary_input.header.timestamp` (synchronization point)
+- `PeriodicInput`: `timestamp = Time::now()` at generation
+- `Input<T>`: `timestamp = input.header.timestamp` (propagation)
+- `Multi-input`: `timestamp = primary_input.header.timestamp` (sync point)
 
-**Accessing Input Metadata in process():**
+**Accessing Metadata:**
 
 ```cpp
-class TimestampAwareModule : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
+class FilterModule : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
 protected:
-    FilteredData process_continuous(const SensorData& input) override {
-        // INDEX-BASED ACCESS (always works)
-        auto meta = get_input_metadata<0>();  // Get metadata for input 0
-        uint64_t ts = get_input_timestamp<0>();  // Just timestamp
-        bool fresh = has_new_data<0>();       // Freshness flag
-        bool valid = is_input_valid<0>();     // Validity flag
-        
-        // Verify timestamp
-        assert(meta.timestamp > 0);
-        assert(meta.is_new_data);  // Always true for continuous
-        assert(meta.is_valid);     // Always true for continuous
+    FilteredData process(const SensorData& input) override {
+        // Index-based access (always works)
+        auto meta = get_input_metadata<0>();
+        uint64_t ts = get_input_timestamp<0>();
+        bool fresh = has_new_data<0>();
+        bool valid = is_input_valid<0>();
         
         return apply_filter(input);
-    }
-};
-
-// Multi-input with metadata access
-class MultiInputFusion : public MyApp::Module<
-    Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,
-    PrimaryInput<IMUData>
-> {
-protected:
-    FusedData process_multi_input(
-        const IMUData& imu,
-        const GPSData& gps,
-        const LidarData& lidar
-    ) override {
-        // INDEX-BASED: Always works
-        auto imu_meta = get_input_metadata<0>();    // Primary
-        auto gps_meta = get_input_metadata<1>();    // Secondary
-        auto lidar_meta = get_input_metadata<2>();  // Secondary
-        
-        // TYPE-BASED: When types unique (compile-time checked)
-        auto imu_ts = get_input_timestamp<IMUData>();
-        auto gps_ts = get_input_timestamp<GPSData>();
-        
-        // Check secondary freshness
-        if (!has_new_data<1>()) {
-            uint64_t age = imu_meta.timestamp - gps_meta.timestamp;
-            std::cout << "GPS stale (age: " << age / 1'000'000 << " ms)\n";
-        }
-        
-        // Check secondary validity
-        if (!is_input_valid<2>()) {
-            std::cerr << "Lidar getData failed\n";
-        }
-        
-        return fuse_sensors(imu, gps, lidar);
     }
 };
 ```
@@ -380,118 +219,19 @@ protected:
 ```cpp
 struct InputMetadata<T> {
     uint64_t timestamp;       // From TimsHeader (ns since epoch)
-    uint32_t sequence_number; // From TimsHeader
-    uint32_t message_id;      // From TimsHeader
-    bool is_new_data;         // True if fresh, false if stale/reused
+    uint32_t sequence_number;
+    uint32_t message_id;
+    bool is_new_data;         // True if fresh
     bool is_valid;            // True if getData succeeded
 };
 ```
 
-**When to Use:**
-- **Index-based** (`get_input_metadata<0>()`): Always works, aligns with input order
-- **Type-based** (`get_input_metadata<IMUData>()`): Cleaner code when types unique (compile error if duplicate types)
-- **Freshness checks**: Detect stale secondary inputs in multi-input modules
-- **Validity checks**: Handle optional secondary inputs that may fail getData
-- **Monotonicity verification**: Ensure timestamps increase (for debugging)
+### Multi-Output Type Filtering
 
-**Key Insights:**
-- NO payload timestamp fields - header only!
-- Module automatically populates metadata before process() calls
-- Zero overhead: Fixed-size array, only allocated when inputs exist
-- Compile-time validation: Invalid indices/duplicate types caught at compile time
-
-### Helper Base Class Pattern (Phase 5.3)
-
-For conditionally providing virtual functions based on template parameters, use the **helper base class with specialization** pattern:
+Multi-output producers generate multiple message types. Subscribers filter by type:
 
 ```cpp
-// Problem: Cannot declare `const void&` parameter for PeriodicInput/LoopInput modules
-// Solution: Helper base class with void specialization
-
-// Non-void specialization: Provides virtual process_continuous
-template<typename InputData_, typename OutputData_>
-class ContinuousProcessorBase {
-protected:
-    virtual OutputData_ process_continuous(const InputData_& input) {
-        std::cerr << "[Module] ERROR: process_continuous not overridden!\n";
-        return OutputData_{};
-    }
-};
-
-// Void specialization: No process_continuous function
-template<typename OutputData_>
-class ContinuousProcessorBase<void, OutputData_> {
-    // Empty - PeriodicInput/LoopInput modules have no continuous input
-};
-
-// Multi-output specialization (Phase 5.3): void process(T1& out1, T2& out2)
-template<typename... Ts>
-    requires (sizeof...(Ts) > 1)
-class MultiOutputProcessorBase<std::tuple<Ts...>, void> {
-protected:
-    virtual void process(Ts&... outputs) {
-        std::cerr << "[Module] ERROR: Multi-output process(...) not overridden!\n";
-    }
-};
-
-// Module inherits from both helper base classes
-template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
-class Module 
-    : public ContinuousProcessorBase<...>
-    , public MultiOutputProcessorBase<...>
-{
-    // Module implementation
-};
-
-// Derived class properly overrides virtual function (MUST use 'override' keyword)
-class FilterModule : public Module<Registry, Output<TempData>, Input<TempData>> {
-protected:
-    TempData process_continuous(const TempData& input) override {
-        // Now correctly overrides base class virtual function
-        return filtered_data;
-    }
-};
-```
-
-**Key Insights:**
-- **Virtual dispatch required**: process_continuous must be virtual for derived class overrides to work
-- **Template shadowing pitfall**: Template functions in derived classes shadow base class virtuals - avoid this
-- **Void reference problem**: Cannot have `const void&` parameter → use helper base class specialization
-- **Override keyword mandatory**: Use `override` for compile-time validation that virtual function exists in base
-- **Helper outside Module**: Place ContinuousProcessorBase outside Module class for clean inheritance
-
-### Type-Specific Multi-Output Publishing (Phase 5.3)
-
-**Problem**: Multi-output producers generate multiple message types. How do subscribers receive only their desired type?
-
-**Solution**: Type filtering based on subscriber base address
-
-```cpp
-// Subscriber's base address encodes their expected message type
-// Format: [data_type_id_low16:16][system_id:8][instance_id:8]
-
-// Extract subscriber's expected type from address
-uint16_t subscriber_type_id_low = extract_message_type_from_address(subscriber_base_addr);
-
-// Only send outputs that match subscriber's type
-template<typename OutputType>
-void send_if_type_matches(uint16_t subscriber_type_id_low, OutputType& output, uint32_t dest_mailbox) {
-    constexpr uint32_t output_msg_id = UserRegistry::template get_message_id<OutputType>();
-    constexpr uint16_t output_type_id_low = static_cast<uint16_t>(output_msg_id & 0xFFFF);
-    
-    if (output_type_id_low == subscriber_type_id_low) {
-        cmd_mailbox_.send(output, dest_mailbox);  // Type matches - deliver!
-    }
-}
-```
-
-**Multi-Output Producer Subscription**:
-
-```cpp
-// Problem: Producer's base address uses FIRST output type (TemperatureData)
-// But PressureData subscriber calculates address using PressureData → wrong address!
-
-// Solution: source_primary_output_type_id in ModuleConfig
+// Multi-output configuration
 ModuleConfig pressure_receiver_config{
     .name = "PressureReceiver",
     .system_id = 30,
@@ -502,7 +242,7 @@ ModuleConfig pressure_receiver_config{
 };
 ```
 
-**Result**: Clean type-specific delivery - each subscriber receives ONLY their subscribed message type!
+Result: Each subscriber receives ONLY their subscribed message type!
 
 ## Directory Structure
 
@@ -517,7 +257,6 @@ CommRaT/
 │   ├── messages.hpp         # Core message types
 │   └── tims_wrapper.hpp     # TiMS C API wrapper
 ├── src/                     # Implementation files
-│   ├── message_service.cpp  # Legacy (being phased out)
 │   └── tims_wrapper.cpp     # TiMS initialization
 ├── examples/                # Usage examples
 │   ├── continuous_input_example.cpp  # Producer→Consumer pattern
@@ -539,15 +278,16 @@ CommRaT/
 
 ### Emoji Usage Policy
 
-**NEVER use emojis in user-facing documentation:**
-- **Forbidden locations**: README.md, docs/*.md, examples/*.md, any user-visible markdown files
+**NEVER use emojis anywhere in the codebase:**
+- **Forbidden in**: All .md files (README.md, docs/*.md, examples/*.md), all source code (.cpp, .hpp)
 - **Only allowed in**: .github/copilot-instructions.md (internal guidance only)
 
 **Rationale:**
 - Professional appearance for production library
 - Accessibility (screen readers, plain text compatibility)
 - Consistency with technical documentation standards
-- Avoid visual clutter in code examples
+- Avoid visual clutter in code examples and console output
+- No emojis in std::cout/std::cerr output
 
 **Instead of emojis, use clear text:**
 ```markdown
@@ -559,6 +299,12 @@ CommRaT/
 
 // DON'T: // ❌ Not supported
 // DO:    // ERROR: Not supported
+
+// DON'T: std::cout << "✅ Done!\n";
+// DO:    std::cout << "Done!\n";
+
+// DON'T: std::cout << "🚗 Running...\n";
+// DO:    std::cout << "Running...\n";
 ```
 
 ### Documentation Structure
@@ -613,27 +359,9 @@ auto send(T& message, uint32_t dest_mailbox) -> MailboxResult<void>;
 
 ## Common Patterns
 
-### Compile-Time Registry Expansion
-```cpp
-// User defines messages with clean syntax
-using MyRegistry = MessageRegistry<
-    Message::Data<DataA>,
-    Message::Data<DataB>
->;
-
-// System automatically adds subscription messages
-using FullRegistry = CombinedRegistry<
-    SystemRegistry,  // SubscribeRequest, SubscribeReply, etc.
-    MyRegistry
->;
-```
-
 ### Address Calculation
 ```cpp
-// Hierarchical addressing (compile-time friendly)
 uint32_t base = calculate_base_address(system_id, instance_id);
-// base = (data_type_id & 0xFFFF) | (system_id << 8) | instance_id
-
 uint32_t cmd_mbx  = base + 0;   // Command mailbox
 uint32_t work_mbx = base + 16;  // Subscription protocol
 uint32_t data_mbx = base + 32;  // Data streaming
@@ -641,7 +369,6 @@ uint32_t data_mbx = base + 32;  // Data streaming
 
 ### Visitor Pattern for Type Dispatch
 ```cpp
-// Runtime message type dispatch (efficient)
 mailbox.receive_any([](auto&& received_msg) {
     using MsgType = std::decay_t<decltype(received_msg.message)>;
     
@@ -652,99 +379,6 @@ mailbox.receive_any([](auto&& received_msg) {
     }
 });
 ```
-
-### Type Traits Pattern
-
-All type analysis follows a consistent pattern:
-
-```cpp
-// 1. Primary template (default case)
-template<typename T>
-struct trait_name : std::false_type {};
-
-// 2. Specializations for known types
-template<typename T, std::size_t N>
-struct trait_name<sertial::fixed_vector<T, N>> : std::true_type {};
-
-template<typename InputT>
-struct trait_name<Input<InputT>> : std::true_type {};
-
-// 3. Convenience variable template
-template<typename T>
-inline constexpr bool trait_name_v = trait_name<T>::value;
-
-// 4. Usage in compile-time dispatch
-if constexpr (trait_name_v<FieldType>) {
-    // Handle special case
-} else {
-    // Default case
-}
-```
-
-## Testing Guidelines
-
-### Unit Tests
-Focus on:
-- Compile-time correctness (static_assert)
-- Message ID uniqueness
-- Address collision detection
-- Serialization round-trip
-
-### Integration Tests
-- Multi-module communication
-- Subscription protocol correctness
-- Message delivery guarantees
-- Graceful shutdown
-
-### Performance Tests
-- Real-time constraints verification
-- CPU usage when idle (should be ~0%)
-- Message latency measurement
-- Memory footprint validation
-
-## Migration Notes
-
-### Recent Changes (Phase 6.9 → Phase 6.10)
-- **Phase 6.9**: Multi-input with synchronized getData
-  - `Inputs<T, U, V>` for multiple input types
-  - `PrimaryInput<T>` designates synchronization driver
-  - `process_multi_input(const T&, const U&, const V&)` for fusion
-  - HistoricalMailbox with circular buffer for getData queries
-  - Automatic time synchronization via getData(timestamp, tolerance)
-- **Phase 6.10**: Timestamp metadata accessors
-  - Single source of truth: `TimsHeader.timestamp` only (NO payload timestamps)
-  - Input metadata API: `get_input_metadata<Index>()`, `get_input_timestamp<Index>()`
-  - Type-based access: `get_input_metadata<IMUData>()` when types unique
-  - Freshness tracking: `is_new_data` flag for multi-input sync status
-  - Validity tracking: `is_valid` flag for optional inputs
-  - Automatic population before process() calls
-
-### Recent Changes (Phase 5.1 → Phase 5.3)
-- **Phase 5.1**: I/O specification types (Output<T>, Input<T>, Inputs<T, U>)
-- **Phase 5.2**: Helper base classes for conditional virtual functions
-- **Phase 5.3**: Multi-output with type-specific filtering
-- **Normalization**: Raw types automatically converted (T → Output<T>)
-- **Impact**: 
-  - Module signature: `Module<Registry, OutputSpec, InputSpec, ...Commands>`
-  - Backward compatible: Raw types still work (auto-normalized)
-  - Must use `override` keyword for process methods (virtual functions)
-
-### Phase 4 → Phase 5.1 Changes
-- **OLD**: Single mailbox with polling (100ms timeout)
-- **NEW**: 3 separate mailboxes with blocking receives
-- **Impact**: 
-  - Config changed: `mailbox_id` → `system_id` + `instance_id`
-  - Subscription uses WORK mailbox now
-  - Data streams use DATA mailbox
-  - Commands use CMD mailbox
-
-### Backward Compatibility
-Legacy examples may still use old single-mailbox API or raw types. When updating:
-1. Change `ModuleConfig` to use `system_id`/`instance_id`
-2. Update subscription to use source IDs, not mailbox ID
-3. Test with 3-mailbox addressing scheme
-4. Raw types (e.g., `TemperatureData`) still work - auto-normalized to `Output<T>`
-5. Add `override` keyword to process_continuous implementations
 
 ## SeRTial Integration
 
@@ -814,75 +448,6 @@ void process_data(const T& input) {
 }
 ```
 
-### Type Safety
-Leverage C++20 type system to catch errors early:
-
-```cpp
-// VALID: Concept-based constraints
-template<RegisteredMessage T>
-auto publish(const T& msg) { /* ... */ }
-
-// Attempting to publish unregistered type:
-struct UnregisteredData { int x; };
-publish(UnregisteredData{42});  // Compile error: not RegisteredMessage
-
-// ERROR: Runtime type check
-if (!is_registered_message(msg)) {
-    throw std::runtime_error("Message not registered");
-}
-```
-
-## Performance Considerations
-
-### Hot Path Optimization
-Real-time message processing must be deterministic and fast:
-
-1. **Avoid branching**: Use compile-time dispatch (`if constexpr`)
-2. **Minimize copies**: Use `std::span` for views, not copies
-3. **Batch operations**: Process multiple messages efficiently
-4. **Cache-friendly**: Sequential memory access patterns
-
-```cpp
-// VALID: Compile-time dispatch
-template<typename InputSpec>
-void process_input() {
-    if constexpr (HasContinuousInput<InputSpec>) {
-        return process_continuous();
-    } else if constexpr (HasPeriodicInput<InputSpec>) {
-        return process_periodic();
-    }
-}
-
-// ERROR: Runtime polymorphism
-void process_input() {
-    if (mode.is_continuous()) {  // Runtime branch
-        return process_continuous();
-    }
-}
-```
-
-### Memory Layout
-Pay attention to struct padding for optimal message packing:
-
-```cpp
-// ERROR: 8 bytes of padding wasted
-struct BadLayout {
-    uint8_t  a;  // 1 byte + 3 padding
-    uint32_t b;  // 4 bytes
-    uint8_t  c;  // 1 byte + 3 padding
-    uint32_t d;  // 4 bytes
-};  // Total: 16 bytes (8 wasted)
-
-// VALID: Optimal packing
-struct GoodLayout {
-    uint32_t b;  // 4 bytes
-    uint32_t d;  // 4 bytes
-    uint8_t  a;  // 1 byte
-    uint8_t  c;  // 1 byte
-    // 2 bytes padding at end
-};  // Total: 12 bytes (2 wasted, but necessary)
-```
-
 ## When Suggesting Code
 
 **DO:**
@@ -907,36 +472,12 @@ struct GoodLayout {
 - Require users to understand reflection, type dispatch, or ID calculation mechanisms
 - Add configuration parameters that users must understand - compute automatically when possible
 
-## Error Handling
-
-Prefer **std::expected-like** pattern (MailboxResult):
-
-```cpp
-// Return type that can be success or error
-template<typename T>
-class MailboxResult {
-    std::optional<T> value_;
-    std::optional<MailboxError> error_;
-public:
-    explicit operator bool() const { return value_.has_value(); }
-    T& value() { return *value_; }
-    MailboxError error() const { return *error_; }
-};
-
-// Usage
-auto result = mailbox.send(msg, dest);
-if (!result) {
-    std::cerr << "Send failed: " << to_string(result.error()) << "\n";
-    return;
-}
-```
-
 ## Future Considerations
 
 ### Completed Features
-- ✅ Phase 5.3: Multi-output with type-specific filtering
-- ✅ Phase 6.9: Multi-input with synchronized getData (RACK-style)
-- ✅ Phase 6.10: Timestamp metadata accessors
+- Phase 5.3: Multi-output with type-specific filtering
+- Phase 6.9: Multi-input with synchronized getData (RACK-style)
+- Phase 6.10: Timestamp metadata accessors
 
 ### Planned Features (Phase 7+)
 - Optional secondary inputs (getData failure handling)
@@ -948,10 +489,9 @@ if (!result) {
 - Static analysis for real-time safety
 
 ### Technical Debt
-- Command dispatch (on_command overloads) needs improvement
-- Legacy MessageService being phased out
-- Type-based metadata accessors need full tuple unpacking (currently limited to 2 types)
-- Multi-input getData synchronization not working (see KNOWN_ISSUES.md #1)
+- Command dispatch (on_command overloads) needs better ergonomics
+- Multi-input getData synchronization has timing issues (see KNOWN_ISSUES.md #1)
+- Type-based metadata accessors incomplete (index-based works, type-based needs full tuple unpacking)
 
 ## Questions to Ask Yourself
 

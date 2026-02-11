@@ -53,8 +53,8 @@ using TestApp = CommRaT<
 
 class IMUModule : public TestApp::Module<Output<IMUData>, PeriodicInput> {
 protected:
-    IMUData process() override {
-        return IMUData{
+    void process(IMUData& output) override {
+        output = IMUData{
             .accel_x = 1.0f, .accel_y = 0.0f, .accel_z = 9.81f,
             .gyro_x = 0.0f, .gyro_y = 0.0f, .gyro_z = 0.0f
         };
@@ -66,8 +66,8 @@ private:
 
 class GPSModule : public TestApp::Module<Output<GPSData>, PeriodicInput> {
 protected:
-    GPSData process() override {
-        return GPSData{
+    void process(GPSData& output) override {
+        output = GPSData{
             .latitude = 37.7749,
             .longitude = -122.4194,
             .altitude = 100.0

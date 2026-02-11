@@ -56,7 +56,7 @@ public:
         : ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>(config) {}
     
 protected:
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         float raw_temp = 20.0f + std::sin(counter_++ * 0.1f) * 5.0f;
         float calibrated_temp = raw_temp + calibration_offset_;
         
@@ -64,7 +64,7 @@ protected:
                   << " Temp=" << calibrated_temp << "°C"
                   << " (offset=" << calibration_offset_ << ")\n";
         
-        return TemperatureData{
+        output = {
             .temperature_celsius = calibrated_temp
         };
     }

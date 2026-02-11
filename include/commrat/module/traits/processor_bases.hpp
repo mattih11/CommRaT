@@ -10,20 +10,33 @@ namespace commrat {
 // Helper Base Classes for Conditional Virtual Functions
 // ============================================================================
 
-// Base class providing process_continuous when InputData is not void
+// Base class providing process when InputData is not void
 template<typename InputData_, typename OutputData_>
 class ContinuousProcessorBase {
 protected:
-    virtual OutputData_ process_continuous(const InputData_& input) {
-        std::cerr << "[Module] ERROR: process_continuous not overridden in derived class!\n";
-        return OutputData_{};
+    virtual void process(const InputData_& input, OutputData_& output) {
+        std::cerr << "[Module] ERROR: process(const Input&, Output&) not overridden in derived class!\n";
+        (void)input;  // Suppress unused warning
+        output = OutputData_{};
     }
 };
 
-// Specialization for void InputData (no process_continuous function)
+// Specialization for void InputData (no process function)
 template<typename OutputData_>
 class ContinuousProcessorBase<void, OutputData_> {
-    // No process_continuous for periodic/loop modes
+    // No process for periodic/loop modes
+};
+
+// Specialization for void OutputData (multi-output)
+template<typename InputData_>
+class ContinuousProcessorBase<InputData_, void> {
+    // No process for multi-output modules (use MultiOutputProcessorBase instead)
+};
+
+// Full specialization for both void
+template<>
+class ContinuousProcessorBase<void, void> {
+    // No process for multi-output periodic/loop modules
 };
 
 // ============================================================================
@@ -34,7 +47,7 @@ class ContinuousProcessorBase<void, OutputData_> {
 template<typename OutputTypesTuple, typename InputData_>
 class MultiOutputProcessorBase;
 
-// Single output: OutputData process() or OutputData process_continuous(const InputData&)
+// Single output: OutputData process() or OutputData process(const InputData&)
 template<typename T>
 class MultiOutputProcessorBase<std::tuple<T>, void> {
     // Single output handled by normal process() - no additional signature
@@ -42,7 +55,7 @@ class MultiOutputProcessorBase<std::tuple<T>, void> {
 
 template<typename T, typename InputData_>
 class MultiOutputProcessorBase<std::tuple<T>, InputData_> {
-    // Single output with continuous input - handled by process_continuous()
+    // Single output with continuous input - handled by process()
 };
 
 // Multi-output without continuous input: void process(T1& out1, T2& out2, ...)
@@ -57,14 +70,14 @@ public:
     }
 };
 
-// Multi-output with continuous input: void process_continuous(const InputData&, T1& out1, T2& out2, ...)
+// Multi-output with continuous input: void process(const InputData&, T1& out1, T2& out2, ...)
 template<typename... Ts, typename InputData_>
     requires (sizeof...(Ts) > 1)
 class MultiOutputProcessorBase<std::tuple<Ts...>, InputData_> {
 public:
     // Public virtual function for polymorphic calls from Module
-    virtual void process_continuous(const InputData_& input, Ts&... outputs) {
-        std::cerr << "[Module] ERROR: Multi-output process_continuous(...) not overridden in derived class!\n";
+    virtual void process(const InputData_& input, Ts&... outputs) {
+        std::cerr << "[Module] ERROR: Multi-output process(...) not overridden in derived class!\n";
         // Leave outputs as default-constructed
         (void)input;  // Suppress unused warning
     }
@@ -74,20 +87,33 @@ public:
 // Single-Output Processor Base (conditional process() function)
 // ============================================================================
 
-// Helper base class that provides virtual process() only for single-output modules
-// For multi-output (OutputData = void), this base is empty
-template<typename OutputData_>
+// Helper base class that provides virtual process() only for single-output modules WITHOUT input
+// Takes InputData_ to check if it's void (PeriodicInput/LoopInput)
+template<typename InputData_, typename OutputData_>
 class SingleOutputProcessorBase {
+    // Empty - when InputData is not void, use ContinuousProcessorBase instead
+};
+
+// Specialization for void InputData (PeriodicInput/LoopInput): provides process(output&)
+template<typename OutputData_>
+class SingleOutputProcessorBase<void, OutputData_> {
 protected:
-    // Single output: provide virtual process() returning OutputData
-    virtual OutputData_ process() {
-        return OutputData_{};
+    // Single output with no input: provide virtual process(output&)
+    virtual void process(OutputData_& output) {
+        std::cerr << "[Module] ERROR: process(Output&) not overridden in derived class!\\n";
+        output = OutputData_{};
     }
 };
 
-// Specialization for void (multi-output): no process() function
+// Specialization for void OutputData (multi-output): no process() function
+template<typename InputData_>
+class SingleOutputProcessorBase<InputData_, void> {
+    // Empty - multi-output modules use MultiOutputProcessorBase::process(Ts&...) instead
+};
+
+// Full specialization for both void (multi-output with PeriodicInput/LoopInput)
 template<>
-class SingleOutputProcessorBase<void> {
+class SingleOutputProcessorBase<void, void> {
     // Empty - multi-output modules use MultiOutputProcessorBase::process(Ts&...) instead
 };
 
@@ -115,15 +141,15 @@ class MultiInputProcessorBase<InputTypesTuple_, OutputData_, 1> {
     // Empty - single input, not multi-input
 };
 
-// Multi-input with single output: OutputData process(const T1&, const T2&, ...)
+// Multi-input with single output: void process(const T1&, const T2&, ..., OutputData&)
 template<typename... Ts, typename OutputData_>
     requires (sizeof...(Ts) > 1 && !std::is_void_v<OutputData_>)
 class MultiInputProcessorBase<std::tuple<Ts...>, OutputData_, sizeof...(Ts)> {
 public:
-    virtual OutputData_ process(const Ts&... inputs) {
-        std::cerr << "[Module] ERROR: Multi-input process(...) not overridden in derived class!\n";
+    virtual void process(const Ts&... inputs, OutputData_& output) {
+        std::cerr << "[Module] ERROR: Multi-input process(..., Output&) not overridden in derived class!\n";
         (void)std::make_tuple(inputs...);  // Suppress unused warnings
-        return OutputData_{};
+        output = OutputData_{};
     }
 };
 

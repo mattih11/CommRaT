@@ -101,48 +101,6 @@ void test_multiple_inputs() {
     std::cout << "  ✓ Inputs<Ts...> validation passed\n";
 }
 
-void test_legacy_inputs() {
-    std::cout << "Testing legacy input types...\n";
-    
-    static_assert(is_periodic_input_v<PeriodicInput>, "PeriodicInput detection failed");
-    static_assert(is_loop_input_v<LoopInput>, "LoopInput detection failed");
-    static_assert(is_continuous_input_legacy_v<ContinuousInput<TempData>>, 
-                  "ContinuousInput detection failed");
-    static_assert(ValidInputSpec<PeriodicInput>, "PeriodicInput should be valid");
-    static_assert(ValidInputSpec<LoopInput>, "LoopInput should be valid");
-    static_assert(ValidInputSpec<ContinuousInput<TempData>>, "ContinuousInput should be valid");
-    
-    std::cout << "  ✓ PeriodicInput validation passed\n";
-    std::cout << "  ✓ LoopInput validation passed\n";
-    std::cout << "  ✓ ContinuousInput<T> validation passed\n";
-}
-
-// ============================================================================
-// Backward Compatibility Tests
-// ============================================================================
-
-void test_input_normalization() {
-    std::cout << "Testing input normalization...\n";
-    
-    // ContinuousInput<T> should map to Input<T>
-    static_assert(std::is_same_v<NormalizeInput_t<ContinuousInput<TempData>>,
-                                 Input<TempData>>,
-                  "ContinuousInput normalization failed");
-    
-    // Input<T> should pass through unchanged
-    static_assert(std::is_same_v<NormalizeInput_t<Input<TempData>>,
-                                 Input<TempData>>,
-                  "Input<T> normalization failed");
-    
-    // PeriodicInput should pass through unchanged
-    static_assert(std::is_same_v<NormalizeInput_t<PeriodicInput>,
-                                 PeriodicInput>,
-                  "PeriodicInput normalization failed");
-    
-    std::cout << "  ✓ ContinuousInput<T> -> Input<T> mapping works\n";
-    std::cout << "  ✓ Input normalization passed\n";
-}
-
 void test_output_normalization() {
     std::cout << "Testing output normalization...\n";
     
@@ -197,8 +155,8 @@ void test_payload_type_extraction() {
     static_assert(std::is_same_v<SingleInputType_t<Input<TempData>>, TempData>,
                   "Single input type extraction failed");
     
-    static_assert(std::is_same_v<SingleInputType_t<ContinuousInput<TempData>>, TempData>,
-                  "Legacy continuous input type extraction failed");
+    static_assert(std::is_same_v<SingleInputType_t<Input<TempData>>, TempData>,
+                  "Legacy input data type extraction failed");
     
     std::cout << "  ✓ Input payload type extraction works\n";
     std::cout << "  ✓ Output payload type extraction works\n";
@@ -222,18 +180,18 @@ void test_concepts() {
     static_assert(ValidInputSpec<Inputs<TempData, PressureData>>, "Inputs<Ts...> should satisfy concept");
     static_assert(ValidInputSpec<PeriodicInput>, "PeriodicInput should satisfy concept");
     static_assert(ValidInputSpec<LoopInput>, "LoopInput should satisfy concept");
-    static_assert(ValidInputSpec<ContinuousInput<TempData>>, "ContinuousInput<T> should satisfy concept");
+    static_assert(ValidInputSpec<Input<TempData>>, "Input<T> should satisfy concept");
     
     // PeriodicOrLoop
     static_assert(PeriodicOrLoop<PeriodicInput>, "PeriodicInput should satisfy PeriodicOrLoop");
     static_assert(PeriodicOrLoop<LoopInput>, "LoopInput should satisfy PeriodicOrLoop");
     static_assert(!PeriodicOrLoop<Input<TempData>>, "Input<T> should not satisfy PeriodicOrLoop");
     
-    // HasContinuousInput
-    static_assert(HasContinuousInput<Input<TempData>>, "Input<T> should have continuous input");
-    static_assert(HasContinuousInput<Inputs<TempData, PressureData>>, "Inputs<Ts...> should have continuous input");
-    static_assert(HasContinuousInput<ContinuousInput<TempData>>, "ContinuousInput<T> should have continuous input");
-    static_assert(!HasContinuousInput<PeriodicInput>, "PeriodicInput should not have continuous input");
+    // HasContinuousInput (legacy name, means "has input data")
+    static_assert(HasContinuousInput<Input<TempData>>, "Input<T> should have input data");
+    static_assert(HasContinuousInput<Inputs<TempData, PressureData>>, "Inputs<Ts...> should have input data");
+    static_assert(HasContinuousInput<Input<TempData>>, "Input<T> should have input data");
+    static_assert(!HasContinuousInput<PeriodicInput>, "PeriodicInput should not have input data");
     
     std::cout << "  ✓ ValidOutputSpec concept works\n";
     std::cout << "  ✓ ValidInputSpec concept works\n";
@@ -264,12 +222,6 @@ int main() {
         std::cout << "\n";
         
         test_multiple_inputs();
-        std::cout << "\n";
-        
-        test_legacy_inputs();
-        std::cout << "\n";
-        
-        test_input_normalization();
         std::cout << "\n";
         
         test_output_normalization();

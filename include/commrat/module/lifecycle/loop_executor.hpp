@@ -28,7 +28,7 @@ namespace commrat {
  * 
  * Template parameters match Module's parameters for access to:
  * - config_, running_
- * - process(), process_continuous()
+ * - process()
  * - Publishing methods
  * - Multi-input helper methods
  */
@@ -78,8 +78,9 @@ public:
                 // Phase 6.10: Publish with automatic header.timestamp
                 mod.publish_multi_outputs_with_timestamp(outputs, generation_timestamp);
             } else {
-                // Single output: call process() with virtual dispatch
-                auto output = mod.process();  // Virtual call to derived class
+                // Single output: call process() with output reference
+                typename ModuleType::OutputData output{};
+                mod.process(output);  // Virtual call to derived class
                 // Phase 6.10: Wrap in TimsMessage with header.timestamp = generation time
                 auto tims_msg = mod.create_tims_message(std::move(output), generation_timestamp);
                 mod.publish_tims_message(tims_msg);
@@ -121,7 +122,9 @@ public:
                 mod.publish_multi_outputs_with_timestamp(outputs, generation_timestamp);
             } else {
                 // Single output: call process() with virtual dispatch
-                auto output = mod.process();
+                // TODO: think about where to buffer output memory
+                typename ModuleType::OutputData output{};
+                mod.process(output);
                 auto tims_msg = mod.create_tims_message(std::move(output), generation_timestamp);
                 mod.publish_tims_message(tims_msg);
             }
@@ -149,7 +152,8 @@ public:
                 // Single continuous input always uses index 0
                 mod.update_input_metadata(0, result.value(), true);  // Always new data for continuous
                 
-                auto output = mod.process_continuous_dispatch(result->payload);
+                typename ModuleType::OutputData output{};
+                mod.process_dispatch(result->payload, output);
                 // Phase 6.10: Use input timestamp from header (data validity time)
                 auto tims_msg = mod.create_tims_message(std::move(output), result->header.timestamp);
                 mod.publish_tims_message(tims_msg);
@@ -228,7 +232,8 @@ public:
                 mod.call_multi_input_multi_output_process(*all_inputs, outputs);
                 mod.publish_multi_outputs_with_timestamp(outputs, primary_timestamp);
             } else {
-                auto output = mod.call_multi_input_process(*all_inputs);
+                typename ModuleType::OutputData output{};
+                mod.call_multi_input_process(*all_inputs, output);
                 auto tims_msg = mod.create_tims_message(std::move(output), primary_timestamp);
                 mod.publish_tims_message(tims_msg);
             }

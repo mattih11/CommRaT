@@ -60,9 +60,9 @@ public:
     int process_call_count = 0;
     
     // Make process() public for testing
-    SensorData process() override {
+    void process(SensorData& output) override {
         process_call_count++;
-        return SensorData{
+        output = SensorData{
             .sensor_id = 42,
             .value = 20.5f + process_call_count
         };
@@ -86,7 +86,8 @@ void test_periodic_single_output() {
     PeriodicSingleOutputModule module(config);
     
     // Verify process() is called and returns correct type
-    auto result = module.process();
+    SensorData result;
+    module.process(result);
     assert(result.sensor_id == 42);
     assert(module.process_call_count == 1);
     
@@ -104,9 +105,9 @@ public:
     
     int process_call_count = 0;
     
-    FilteredData process() override {
+    void process(FilteredData& output) override {
         process_call_count++;
-        return FilteredData{
+        output = FilteredData{
             .filtered_value = 15.3f + process_call_count
         };
     }
@@ -127,7 +128,8 @@ void test_loop_single_output() {
     
     LoopSingleOutputModule module(config);
     
-    auto result = module.process();
+    FilteredData result;
+    module.process(result);
     assert(result.filtered_value == 16.3f);  // 15.3 + process_call_count(1)
     assert(module.process_call_count == 1);
     
@@ -145,9 +147,9 @@ public:
     
     int process_call_count = 0;
     
-    FilteredData process_continuous(const SensorData& input) override {
+    void process(const SensorData& input, FilteredData& output) override {
         process_call_count++;
-        return FilteredData{
+        output = FilteredData{
             .filtered_value = input.value * 0.9f  // Simple filter
         };
     }
@@ -171,12 +173,13 @@ void test_continuous_single_output() {
     ContinuousSingleOutputModule module(config);
     
     SensorData input{.sensor_id = 42, .value = 25.0f};
-    auto result = module.process_continuous(input);
+    FilteredData result;
+    module.process(input, result);
     assert(result.filtered_value == 22.5f);  // 25.0 * 0.9
     assert(module.process_call_count == 1);
     
-    std::cout << "  ✓ process_continuous() signature correct: FilteredData process_continuous(const SensorData&)\n";
-    std::cout << "  ✓ process_continuous() callable and returns FilteredData\n";
+    std::cout << "  ✓ process() signature correct: FilteredData process_continuous(const SensorData&)\n";
+    std::cout << "  ✓ process() callable and returns FilteredData\n";
 }
 
 // ============================================================================
@@ -189,9 +192,9 @@ public:
     
     int process_call_count = 0;
     
-    SensorData process() override {
+    void process(SensorData& output) override {
         process_call_count++;
-        return SensorData{
+        output = SensorData{
             .sensor_id = 99,
             .value = 10.0f
         };
@@ -214,7 +217,8 @@ void test_backward_compatible() {
     
     BackwardCompatibleModule module(config);
     
-    auto result = module.process();
+    SensorData result;
+    module.process(result);
     assert(result.sensor_id == 99);
     assert(module.process_call_count == 1);
     

@@ -29,6 +29,16 @@ namespace commrat {
 struct EmptyBase2 {};  // MultiInputInfrastructure conditional base
 struct EmptyBase3 {};  // MultiInputProcessor conditional base
 
+// Type trait: Check if a type is std::tuple
+template<typename T>
+struct is_tuple : std::false_type {};
+
+template<typename... Ts>
+struct is_tuple<std::tuple<Ts...>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_tuple_v = is_tuple<T>::value;
+
 // ============================================================================
 // Automatic Timestamp Management
 // ============================================================================
@@ -40,7 +50,7 @@ struct EmptyBase3 {};  // MultiInputProcessor conditional base
  * Module automatically wraps payloads in TimsMessage and sets header.timestamp:
  * - PeriodicInput/LoopInput: timestamp = Time::now() (data generation time)
  * - Multi-input: timestamp = primary_input.header.timestamp (sync point)
- * - ContinuousInput: timestamp = input.header.timestamp (propagation)
+ * - Input<T>: timestamp = input.header.timestamp (propagation)
  * 
  * Users never deal with timestamps - messages are clean data structures.
  */
@@ -65,7 +75,7 @@ struct EmptyBase3 {};  // MultiInputProcessor conditional base
  * class SensorModule : public Module<Registry, Output<TempData>, PeriodicInput> {
  * protected:
  *     TempData process() override {
- *         return TempData{.temperature_celsius = read_sensor()};
+ *         return TempData{.temperature_celsius = read_sensor()}
  *     }
  * };
  * @endcode
@@ -91,6 +101,7 @@ class Module
         typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type
       >
     , public SingleOutputProcessorBase<
+        typename ExtractInputPayload<typename NormalizeInput<InputSpec_>::Type>::type,
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
@@ -245,7 +256,7 @@ protected:
     
     // Multi-input support
     // Single-input mode
-    std::optional<DataMailbox> data_mailbox_;  // base + 48: Receives input data (only for single ContinuousInput)
+    std::optional<DataMailbox> data_mailbox_;  // base + 48: Receives input data (only for single Input<T>)
     
     // Multi-input mailbox infrastructure (in MultiInputInfrastructure mixin)
     // - input_mailboxes_: Tuple of HistoricalMailbox instances
@@ -383,16 +394,19 @@ public:
     // ========================================================================
 
 protected:
-    // For ContinuousInput: process input and return output
-    // Calls process_continuous which derived classes should hide/override
-    template<typename T = InputData>
-    OutputData process_continuous_dispatch(const T& input) {
-        // This->process_continuous will resolve to derived class version via name hiding
-        return this->process_continuous(input);
+    // For Input<T> with single output: process input and populate output reference
+    // Calls process which derived classes should override
+    // SFINAE: Only enabled for single output (not void, not tuple)
+    // Uses dummy template parameter O to delay evaluation until instantiation
+    template<typename T = InputData, typename O = OutputData,
+             typename = std::enable_if_t<!std::is_void_v<O> && !is_tuple_v<O>>>
+    void process_dispatch(const T& input, O& output) {
+        // this->process will resolve to derived class version
+        this->process(input, output);
     }
     
     // Derived classes define this (non-template) for continuous input:
-    //   OutputData process_continuous(const InputData& input) { ... }
+    //   void process(const InputData& input, OutputData& output) { ... }
 
 
 public:
