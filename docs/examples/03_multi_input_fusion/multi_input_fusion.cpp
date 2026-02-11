@@ -199,22 +199,20 @@ private:
  * 
  * Key features:
  * - Inputs<IMUData, GPSData> declares multiple inputs
- * - PrimaryInput<IMUData> designates IMU as execution driver
- * - process(const IMUData&, const GPSData&) receives both inputs synchronized
+ * - IMU (first) is automatically primary - drives execution at 100Hz
+ * - process_multi_input(const IMUData&, const GPSData&) receives both inputs synchronized
  * - Uses metadata accessors to check GPS freshness
  * - Handles stale GPS data gracefully
  */
 class SensorFusion : public FusionApp::Module<
     commrat::Output<FusedData>,
-    commrat::Inputs<IMUData, GPSData>,
-    commrat::PrimaryInput<IMUData>         // IMU drives execution (100Hz)
+    commrat::Inputs<IMUData, GPSData>  // IMU (first) is automatically primary
 > {
 public:
     SensorFusion(const commrat::ModuleConfig& config)
         : FusionApp::Module<
             commrat::Output<FusedData>,
-            commrat::Inputs<IMUData, GPSData>,
-            commrat::PrimaryInput<IMUData>
+            commrat::Inputs<IMUData, GPSData>
           >(config)
         , imu_count_(0)
         , gps_stale_warnings_(0)
