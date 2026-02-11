@@ -1,18 +1,17 @@
 # CommRaT Documentation
 
-**Last Updated**: February 8, 2026
+**Last Updated**: February 11, 2026
 
 ---
 
 ## Quick Links
 
 - **[Getting Started](GETTING_STARTED.md)** - Installation and first program
-- **[User Guide](USER_GUIDE.md)** - Comprehensive guide (under development)
-- **[API Reference](API_REFERENCE.md)** - API overview (under development)
-- **[Examples](EXAMPLES.md)** - Annotated examples (under development)
-- **[Architecture](ARCHITECTURE.md)** - System design overview (under development)
+- **[User Guide](USER_GUIDE.md)** - Comprehensive guide
+- **[Known Issues](KNOWN_ISSUES.md)** - Active issues and limitations
+- **[Internal Documentation](internal/)** - Design decisions and development history
 
-See **[DOCUMENTATION_STRATEGY.md](DOCUMENTATION_STRATEGY.md)** and **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** for documentation roadmap.
+See **[DOCUMENTATION_STRATEGY.md](DOCUMENTATION_STRATEGY.md)** and **[DOCUMENTATION_TODO.md](DOCUMENTATION_TODO.md)** for documentation roadmap.
 
 ---
 
@@ -20,30 +19,20 @@ See **[DOCUMENTATION_STRATEGY.md](DOCUMENTATION_STRATEGY.md)** and **[IMPLEMENTA
 
 ### User Documentation
 
-- **[USER_GUIDE.md](USER_GUIDE.md)** - Comprehensive user guide (in progress)
-- **[API_REFERENCE.md](API_REFERENCE.md)** - High-level API overview (in progress)
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - User-friendly architecture explanation (in progress)
-- **[EXAMPLES.md](EXAMPLES.md)** - Annotated example catalog (in progress)
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Comprehensive user guide
 - **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start guide
-- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Version migration paths (planned)
-- **[FAQ.md](FAQ.md)** - Frequently asked questions (planned)
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines (planned)
+- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known issues and limitations
 
 ### Internal Documentation
 
-- **[internal/](internal/)** - Design decisions, phase history, refactoring notes
-  - **[design_decisions/](internal/design_decisions/)** - Why technical choices were made
-  - **[phase_history/](internal/phase_history/)** - Development timeline and evolution
+- **[internal/](internal/)** - Design decisions and refactoring documentation
+  - **[design_decisions/](internal/design_decisions/)** - Technical choices and rationale
   - **[refactoring/](internal/refactoring/)** - Major refactoring documentation
 
 ### Visual Assets
 
 - `CommRaT.png` - Project logo (raster)
 - `CommRaT.svg` - Project logo (vector)
-
-### Archived Documentation
-
-See `archive/` directory for historical design documents from earlier development phases.
 
 ---
 
@@ -58,11 +47,12 @@ See `archive/` directory for historical design documents from earlier developmen
 - Zero runtime allocation for message dispatch
 - Type-safe serialization via SeRTial
 
-**3-Mailbox Architecture**
-- Hierarchical addressing: `(system_id << 8) | instance_id` + offset
-- Separate mailboxes for CMD (commands), WORK (subscription), DATA (streams)
+**MailboxSet Architecture**
+- Each output type gets its own MailboxSet (CMD, WORK, PUBLISH mailboxes)
+- Shared DATA mailbox for receiving inputs
+- Hierarchical addressing: base includes output type_id
 - Blocking receives, zero CPU when idle
-- Thread-per-mailbox model
+- Independent subscription per output type
 
 ### Module Framework
 
@@ -175,7 +165,7 @@ test/
 
 ### Module Refactoring (Complete)
 - Updated Module template signature to use I/O specs
-- Fixed process_continuous virtual dispatch bug
+- Fixed process virtual dispatch
 - Helper base class `ContinuousProcessorBase<InputData, OutputData>`
 - Backward compatibility maintained
 
@@ -244,7 +234,7 @@ test/
 
 ---
 
-## 📖 Core Concepts
+## Core Concepts
 
 ### Application Definition
 
@@ -399,7 +389,7 @@ cmd_sender.send(cmd, target_module_cmd_mailbox);
 
 ---
 
-## 🛠️ Design Principles
+## Design Principles
 
 ### 1. Compile-Time Everything
 
@@ -480,16 +470,11 @@ Behind the scenes:
 
 When updating documentation:
 
-1. **Active docs**: Update `work/ARCHITECTURE_ANALYSIS.md` for roadmap changes
-2. **Historical record**: Add to `work/FIXES_APPLIED.md` for bug fixes
-3. **Examples**: Keep examples up-to-date with latest API
-4. **This README**: Update current state section for major changes
+1. **Feature planning**: Update `ROADMAP.md` for long-term ideas
+2. **Active development**: Update docs in `work/` for ongoing design work
+3. **Bug tracking**: Add to `KNOWN_ISSUES.md` for runtime issues
+4. **Historical record**: Document completed work in `internal/refactoring/`
+5. **Examples**: Keep examples up-to-date with latest API
+6. **This README**: Update current state section for major changes
 
-When archiving docs:
-```bash
-mv obsolete_doc.md archive/
-```
-
----
-
-**For detailed architecture analysis and future roadmap, see [ARCHITECTURE_ANALYSIS.md](work/ARCHITECTURE_ANALYSIS.md)**
+See [ROADMAP.md](ROADMAP.md) for planned features and [DOCUMENTATION_TODO.md](DOCUMENTATION_TODO.md) for documentation tasks.
