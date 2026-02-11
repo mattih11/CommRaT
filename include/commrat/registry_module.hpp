@@ -1,25 +1,34 @@
 #pragma once
 
-// Mailbox infrastructure
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/mailbox/historical_mailbox.hpp"
-
-// System messaging
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
-
-// Platform abstractions
 #include "commrat/platform/threading.hpp"
 #include "commrat/platform/timestamp.hpp"
-
-// Module core (config, I/O specs, traits, helpers, metadata)
-#include "commrat/module/module_core.hpp"
-
-// Module mixins (I/O, mailbox, lifecycle, services)
-#include "commrat/module/module_mixins.hpp"
-
-// External dependencies
+#include "commrat/module/io_spec.hpp"
+#include "commrat/module/module_config.hpp"
+#include "commrat/module/traits/type_extraction.hpp"
+#include "commrat/module/traits/processor_bases.hpp"
+#include "commrat/module/traits/multi_input_resolver.hpp"
+#include "commrat/module/traits/module_types.hpp"
+#include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/helpers/tims_helpers.hpp"
+#include "commrat/module/metadata/input_metadata.hpp"
+#include "commrat/module/metadata/input_metadata_accessors.hpp"
+#include "commrat/module/metadata/input_metadata_manager.hpp"
+#include "commrat/module/services/subscription.hpp"
+#include "commrat/module/services/publishing.hpp"
+#include "commrat/module/lifecycle/loop_executor.hpp"
+#include "commrat/module/mailbox/mailbox_set.hpp"
+#include "commrat/module/io/multi_output_manager.hpp"
+#include "commrat/module/lifecycle/command_dispatcher.hpp"
+#include "commrat/module/io/multi_input_infrastructure.hpp"
+#include "commrat/module/io/multi_input_processor.hpp"
+#include "commrat/module/lifecycle/lifecycle_manager.hpp"
+#include "commrat/module/lifecycle/work_loop_handler.hpp"
+#include "commrat/module/mailbox/mailbox_infrastructure_builder.hpp"
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -97,11 +106,7 @@ class Module
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
     , public commrat::SubscriberManager
-    , public std::conditional_t<
-        (module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::num_output_types > 1),
-        MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>,
-        EmptyBase
-      >
+    , public MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>
@@ -195,77 +200,47 @@ public:
 protected:
     ModuleConfig config_;
     
-    // Per-output mailbox infrastructure
-    // For single output: Direct mailboxes
-    // For multi-output: Tuple of MailboxSets (each output at its own base address)
-    std::conditional_t<
-        use_mailbox_sets,
-        MailboxSetTuple,  // Multi-output: tuple of MailboxSets
-        std::tuple<CmdMailbox, WorkMailbox, PublishMailbox>  // Single-output: wrapped in tuple for uniform access
-    > mailbox_infrastructure_;
+    // Mailbox infrastructure: Tuple of MailboxSets (one per output type)
+    // Single-output modules have a tuple with 1 MailboxSet
+    // Multi-output modules have a tuple with N MailboxSets
+    MailboxSetTuple mailbox_infrastructure_;
     
-    // Helper accessors for single-output case (backward compatible)
+    // Helper accessors - always use first MailboxSet
     CmdMailbox& cmd_mailbox() {
-        if constexpr (!use_mailbox_sets) {
-            return std::get<0>(mailbox_infrastructure_);
-        } else {
-            // Multi-output: return first MailboxSet's cmd mailbox
-            return *std::get<0>(mailbox_infrastructure_).cmd;
-        }
+        return *std::get<0>(mailbox_infrastructure_).cmd;
     }
     
     WorkMailbox& work_mailbox() {
-        if constexpr (!use_mailbox_sets) {
-            return std::get<1>(mailbox_infrastructure_);
-        } else {
-            // Multi-output: return first MailboxSet's work mailbox
-            return *std::get<0>(mailbox_infrastructure_).work;
-        }
+        return *std::get<0>(mailbox_infrastructure_).work;
     }
     
     PublishMailbox& publish_mailbox() {
-        static_assert(!use_mailbox_sets, "publish_mailbox() accessor only available for single-output modules. Use get_publish_mailbox_public<Index>() for multi-output");
-        return std::get<2>(mailbox_infrastructure_);
+        static_assert(num_output_types == 1, "publish_mailbox() accessor only available for single-output modules. Use get_publish_mailbox<Index>() for multi-output");
+        return *std::get<0>(mailbox_infrastructure_).publish;
     }
     
-    // Multi-output accessor - get specific MailboxSet by index
+    // Get specific MailboxSet by index
     template<std::size_t Index>
     auto& get_mailbox_set() {
-        static_assert(use_mailbox_sets, "get_mailbox_set() only available for multi-output modules");
         return std::get<Index>(mailbox_infrastructure_);
     }
     
-    // Get publish mailbox by index for multi-output modules
+    // Get publish mailbox by index
     template<std::size_t Index>
     auto& get_publish_mailbox() {
-        if constexpr (use_mailbox_sets) {
-            return *std::get<Index>(mailbox_infrastructure_).publish;
-        } else {
-            static_assert(Index == 0, "Single-output modules only have one publish mailbox (index 0)");
-            return std::get<2>(mailbox_infrastructure_);
-        }
+        return *std::get<Index>(mailbox_infrastructure_).publish;
     }
     
-    // Get work mailbox by index for multi-output modules
+    // Get work mailbox by index
     template<std::size_t Index>
     auto& get_work_mailbox() {
-        if constexpr (use_mailbox_sets) {
-            return *std::get<Index>(mailbox_infrastructure_).work;
-        } else {
-            static_assert(Index == 0, "Single-output modules only have one work mailbox (index 0)");
-            return std::get<1>(mailbox_infrastructure_);
-        }
+        return *std::get<Index>(mailbox_infrastructure_).work;
     }
     
-    // Get cmd mailbox by index for multi-output modules
+    // Get cmd mailbox by index
     template<std::size_t Index>
     auto& get_cmd_mailbox() {
-        if constexpr (use_mailbox_sets) {
-            return *std::get<Index>(mailbox_infrastructure_).cmd;
-        } else {
-            static_assert(Index == 0, "Single-output modules only have one cmd mailbox (index 0)");
-            return std::get<0>(mailbox_infrastructure_);
-        }
+        return *std::get<Index>(mailbox_infrastructure_).cmd;
     }
     
     // Multi-input support
@@ -363,10 +338,8 @@ public:
         // Initialize SubscriberManager
         this->set_max_subscribers(config.max_subscribers);
         
-        // Initialize per-output subscriber lists for multi-output modules
-        if constexpr (use_mailbox_sets) {
-            this->initialize_output_subscribers();
-        }
+        // Initialize per-output subscriber lists
+        this->initialize_output_subscribers();
         
         // Initialize subscription protocol
         subscription_protocol_.set_config(&config_);
@@ -375,14 +348,7 @@ public:
         
         // Initialize publisher
         publisher_.set_subscriber_manager(this);  // Module inherits from SubscriberManager
-        publisher_.set_module_ptr(this);  // For multi-output mailbox access
-        
-        // Only set publish mailbox for single-output modules
-        if constexpr (!use_mailbox_sets) {
-            publisher_.set_publish_mailbox(&publish_mailbox());
-        }
-        // Multi-output modules access mailboxes via get_publish_mailbox<Index>()
-        
+        publisher_.set_module_ptr(this);  // For mailbox access via get_publish_mailbox<Index>()
         publisher_.set_module_name(config.name);
         
         // Initialize multi-input mailboxes
@@ -436,12 +402,7 @@ public:
      */
     template<std::size_t Index>
     auto& get_publish_mailbox_public() {
-        if constexpr (use_mailbox_sets) {
-            return *std::get<Index>(mailbox_infrastructure_).publish;
-        } else {
-            static_assert(Index == 0, "Single-output modules only have one publish mailbox (index 0)");
-            return std::get<2>(mailbox_infrastructure_);
-        }
+        return *std::get<Index>(mailbox_infrastructure_).publish;
     }
     
     // ========================================================================
@@ -484,16 +445,11 @@ protected:
     /**
      * @brief Add subscriber to correct output-specific list
      * 
-     * Delegates to MultiOutputManager mixin for multi-output modules.
+     * Delegates to MultiOutputManager mixin.
      */
     void add_subscriber_to_output(uint32_t subscriber_base_addr) {
-        if constexpr (use_mailbox_sets) {
-            // Multi-output: delegate to inherited MultiOutputManager::add_subscriber_to_output
-            this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr);
-        } else {
-            // Single-output: use inherited SubscriberManager::add_subscriber
-            this->add_subscriber(subscriber_base_addr);
-        }
+        // Delegate to inherited MultiOutputManager::add_subscriber_to_output
+        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr);
     }
     
 protected:
