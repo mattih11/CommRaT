@@ -128,6 +128,12 @@ target_link_libraries(test_multi_input_module PRIVATE commrat)
 target_include_directories(test_multi_input_module PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 add_test(NAME test_multi_input_module COMMAND test_multi_input_module)
 
+# Phase 7.1: New module architecture proof of concept
+add_executable(test_new_module_arch test/test_new_module_arch.cpp)
+target_link_libraries(test_new_module_arch PRIVATE commrat)
+target_include_directories(test_new_module_arch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+add_test(NAME test_new_module_arch COMMAND test_new_module_arch)
+
 # Phase 6.8: Multi-input compilation tests (type safety validation)
 add_executable(test_multi_input_compilation test/test_multi_input_compilation.cpp)
 target_link_libraries(test_multi_input_compilation PRIVATE commrat)

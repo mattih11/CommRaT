@@ -25,6 +25,7 @@
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/registry_module.hpp"
+#include "commrat/module.hpp"  // ModuleV2 - new layered architecture
 
 /**
  * @namespace commrat
@@ -81,7 +82,7 @@ public:
     using Registry::max_message_size;
     
     /**
-     * @brief Module template - create modules for this application
+     * @brief Module template - inherit from this to create modules
      * 
      * Preferred user-facing API for defining modules:
      *   class MyModule : public MyApp::Module<OutputSpec, InputSpec, ...Commands> {
@@ -90,6 +91,20 @@ public:
      */
     template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
     using Module = commrat::Module<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
+    
+    /**
+     * @brief ModuleV2 template - new layered architecture (Phase 1 testing)
+     * 
+     * Experimental refactored architecture with specialized base classes.
+     * Currently supports: PeriodicInput + single output only.
+     * 
+     * Usage:
+     *   class MyModule : public MyApp::ModuleV2<OutputSpec, InputSpec, ...Commands> {
+     *       // Your process() implementation
+     *   };
+     */
+    template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
+    using ModuleV2 = commrat::ModuleV2<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
     
     /**
      * @brief Mailbox template - create mailboxes for this application

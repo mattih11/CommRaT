@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Phase 6.10 COMPLETE (timestamp metadata accessors)  
-**Next**: Phase 7 (optional inputs, buffering, ROS 2 adapter)
+**Current Status**: Phase 7.1 COMPLETE (new module architecture proof of concept)  
+**Next**: Phase 7.2 (implement remaining 7 specialized bases)
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, type safety computed at compile time
@@ -100,16 +100,22 @@ using MyApp = CommRaT<
 >;
 
 // 2. CREATE MODULES
-// Producer (periodic publishing)
-class SensorModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput> {
+// Two module implementations available:
+// - Module (legacy monolithic - registry_module.hpp, 575 lines, 13+ bases)
+// - ModuleV2 (new specialized - module.hpp, selective inheritance per mode)
+
+// Producer (periodic publishing) - NEW ARCHITECTURE
+class SensorModule : public MyApp::ModuleV2<Output<TemperatureData>, PeriodicInput> {
+public:
+    explicit SensorModule(const ModuleConfig& config) : ModuleV2(config) {}
 protected:
-    TemperatureData process() override {
+    void process(TemperatureData& output) override {
         // Called every config_.period
-        return TemperatureData{...};
+        output = TemperatureData{...};
     }
 };
 
-// Consumer (continuous input processing)
+// Consumer (continuous input processing) - LEGACY (Phase 7.2 will add ModuleV2 version)
 class FilterModule : public MyApp::Module<Output<FilteredData>, Input<TemperatureData>> {
 protected:
     FilteredData process(const TemperatureData& input) override {
@@ -141,12 +147,30 @@ protected:
 ```
 
 **Key Points:**
-- Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`
+- Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>` (legacy) or `MyApp::ModuleV2<...>` (new)
+- **ModuleV2 requires explicit constructor**: `explicit MyModule(const ModuleConfig& config) : ModuleV2(config) {}`
 - Output specs: `Output<T>`, `Outputs<T, U>`
 - Input specs: `Input<T>`, `Inputs<T, U, V>`, `PeriodicInput`, `LoopInput`
 - Multi-input: First type in `Inputs<>` is automatically primary
 - Virtual `process()` **must use `override` keyword**
 - Multi-output: `void process(T1& out1, T2& out2)`
+
+### New Architecture (Phase 7.1+)
+
+**Phase 7.1 Complete**: PeriodicSingleOutputBase validated
+- Two-layer design: `ModuleV2` → `SelectModuleBase` → specialized base
+- Only inherits mixins needed for specific I/O mode
+- 85% reduction in user-facing template errors (proposed)
+- Both Module and ModuleV2 coexist during transition
+
+**Phase 7.2 Planned**: Implement remaining 7 specialized bases
+1. LoopSingleOutputBase
+2. ContinuousSingleOutputBase
+3. PeriodicMultiOutputBase
+4. LoopMultiOutputBase
+5. ContinuousMultiOutputBase
+6. MultiInputSingleOutputBase
+7. MultiInputMultiOutputBase
 
 ### Multi-Input Synchronization
 
@@ -250,7 +274,11 @@ Result: Each subscriber receives ONLY their subscribed message type!
 CommRaT/
 ├── include/commrat/          # Public headers
 │   ├── commrat.hpp          # Main include (CommRaT<> application template)
-│   ├── registry_module.hpp  # Module base class (3-mailbox, multi-output)
+│   ├── registry_module.hpp  # Module base class (legacy - 575 lines, 13+ bases)
+│   ├── module.hpp           # ModuleV2 wrapper (new architecture)
+│   ├── module/base/         # Specialized base implementations (Phase 7.1+)
+│   │   ├── periodic_single_base.hpp  # PeriodicInput + single output
+│   │   └── module_base_selector.hpp  # Compile-time dispatcher
 │   ├── io_spec.hpp          # I/O specification types (Phase 5.1)
 │   ├── mailbox.hpp          # Payload-only mailbox wrapper
 │   ├── message_registry.hpp # Compile-time registry (internal, use CommRaT)
@@ -264,6 +292,7 @@ CommRaT/
 │   ├── command_example.cpp           # Variadic command handling
 │   └── loop_mode_example.cpp         # LoopInput maximum throughput demo
 ├── test/                    # Test executables
+│   └── test_new_module_arch.cpp      # Phase 7.1 proof of concept
 ├── docs/                    # Documentation
 │   ├── README.md           # Documentation overview and quick reference
 │   ├── work/               # Active development documentation

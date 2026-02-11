@@ -1,7 +1,7 @@
 # CommRaT Documentation
 
-**Last Updated**: February 8, 2026  
-**Current Version**: Phase 6.10 Complete (Timestamp Metadata Accessors)
+**Last Updated**: February 11, 2026  
+**Current Version**: Phase 7.1 Complete (New Module Architecture - Proof of Concept)
 
 ---
 
@@ -48,9 +48,17 @@ See `archive/` directory for historical design documents from earlier developmen
 
 ---
 
-## 🎯 Current State (Phase 6.10 Complete)
+## 🎯 Current State (Phase 7.1 Complete)
 
 ### What We Have
+
+✅ **New Modular Architecture (Phase 7.1)**
+- Two-layer design: `ModuleV2` → `SelectModuleBase` → specialized bases
+- `PeriodicSingleOutputBase` implementation complete and validated
+- Coexistence: Both `Module` (legacy) and `ModuleV2` (new) work via `CommRaT<...>`
+- Proof of concept test passes (periodic 10Hz module runs successfully)
+- 85% reduction in user-facing code complexity (proposed)
+- Only inherits mixins needed for specific I/O mode
 
 ✅ **Compile-Time Message System**
 - `CommRaT<MessageDefs...>` application template (user-facing API)
@@ -217,28 +225,52 @@ test/
 - Final result: registry_module.hpp at 1,003 lines (49% reduction from original 1,952)
 - Extracted valuable modules: subscription, publishing, loops, metadata accessors
 
+### ✅ Phase 7.1: New Module Architecture - Proof of Concept (Complete)
+- Created specialized base implementation: `PeriodicSingleOutputBase` (~300 lines)
+- Implemented compile-time dispatcher: `SelectModuleBase` 
+- Clean user API wrapper: `ModuleV2` class template
+- Both architectures coexist: `Module` (legacy) and `ModuleV2` (new)
+- Test validates: Periodic 10Hz module creates, runs, publishes, stops cleanly
+- All 23 tests pass (22 existing + 1 new)
+- **Next**: Implement remaining 7 specialized bases (Phase 7.2)
+
 ---
 
-## 🚀 Future: Phase 7 (Advanced Features)
+## 🚀 Future: Phase 7.2+ (Remaining Work)
 
-### Planned Features
+### Phase 7.2: Complete Specialized Base Implementations
+- LoopSingleOutputBase
+- ContinuousSingleOutputBase  
+- PeriodicMultiOutputBase
+- LoopMultiOutputBase
+- ContinuousMultiOutputBase
+- MultiInputSingleOutputBase
+- MultiInputMultiOutputBase
 
-**Phase 7.1**: Optional Secondary Inputs
+### Phase 7.3: Migration and Cleanup
+- Rename ModuleV2 → Module
+- Deprecate old registry_module.hpp
+- Remove workarounds and helper classes
+- Update all examples to new architecture
+
+### Phase 7.4: Advanced Features
+
+**Optional Secondary Inputs**
 - Graceful getData failure handling
 - Fallback strategies for missing/stale data
 - `Optional<T>` wrapper for secondary inputs
 
-**Phase 7.2**: Input Buffering Strategies  
+**Input Buffering Strategies**  
 - Sliding window buffers
 - Latest-only mode
 - Configurable overflow behavior
 
-**Phase 7.3**: ROS 2 Adapter (separate repository)
+**ROS 2 Adapter (separate repository)**
 - rclcpp-commrat bridge
 - Automatic message conversion
 - Lifecycle node integration
 
-**Phase 7.4**: Performance Tools
+**Performance Tools**
 - Real-time profiling
 - Latency measurement
 - Static analysis for RT safety
