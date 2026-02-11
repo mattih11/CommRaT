@@ -25,6 +25,7 @@
 #include "commrat/module/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
 #include "commrat/module/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
 #include "commrat/module/multi_input_processor.hpp"  // Phase 5: Multi-input processing helpers
+#include "commrat/module/lifecycle_manager.hpp"  // Phase 6: Lifecycle management (start/stop)
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -37,6 +38,7 @@ namespace commrat {
 struct EmptyBase {};
 struct EmptyBase2 {};  // Need separate empty bases to avoid duplicate base class error
 struct EmptyBase3 {};
+struct EmptyBase4 {};
 
 // ============================================================================
 // Phase 6.10: Automatic Timestamp Management
@@ -129,6 +131,7 @@ class Module
         MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
         EmptyBase3  // Single-input modules don't need multi-input processor
       >  // Phase 5: Multi-input processing
+    , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 6: Lifecycle management
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -137,6 +140,7 @@ class Module
     friend class CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>;
     friend class MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     friend class MultiInputProcessor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputData, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::OutputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
+    friend class LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     
 private:
     // ========================================================================
@@ -487,7 +491,7 @@ public:
     }
     
     virtual ~Module() {
-        stop();
+        this->stop();
     }
     
     Module(const Module&) = delete;
@@ -540,171 +544,9 @@ public:
     }
     
     // ========================================================================
-    // Lifecycle Management
+    // Lifecycle Management (Phase 6: Extracted to lifecycle_manager.hpp)
     // ========================================================================
-    
-    void start() {
-        if (running_) {
-            return;
-        }
-        
-        on_init();
-        
-        // Phase 7.4: Start mailboxes (all MailboxSets for multi-output)
-        if constexpr (use_mailbox_sets) {
-            // Multi-output: start all MailboxSets
-            this->start_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
-        } else {
-            // Single-output: start individual mailboxes
-            auto cmd_result = cmd_mailbox().start();
-            if (!cmd_result) {
-                throw std::runtime_error("Failed to start command mailbox");
-            }
-            
-            auto work_result = work_mailbox().start();
-            if (!work_result) {
-                throw std::runtime_error("Failed to start work mailbox");
-            }
-            
-            auto publish_result = publish_mailbox().start();
-            if (!publish_result) {
-                throw std::runtime_error("Failed to start publish mailbox");
-            }
-        }
-        
-        // Only start data mailbox for single ContinuousInput modules
-        if (data_mailbox_) {
-            auto data_result = data_mailbox_->start();
-            if (!data_result) {
-                throw std::runtime_error("Failed to start data mailbox");
-            }
-        }
-        
-        // Phase 6.6: Start multi-input mailboxes
-        if constexpr (has_multi_input) {
-            this->start_input_mailboxes();
-        }
-        
-        running_ = true;
-        on_start();
-        
-        // Start work thread(s) FIRST to handle subscriptions
-        if constexpr (use_mailbox_sets) {
-            // Multi-output: spawn one thread per MailboxSet
-            std::cout << "[" << config_.name << "] Spawning " << num_output_types << " output work threads...\n";
-            this->spawn_all_output_work_threads(std::make_index_sequence<num_output_types>{});
-        } else {
-            // Single-output: one work thread
-            work_thread_ = std::thread(&Module::work_loop, this);
-        }
-        
-        // Start command thread for user commands
-        command_thread_ = std::thread(&Module::command_loop, this);
-        
-        // Give threads time to start
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        
-        // Subscribe to source(s)
-        if constexpr (has_multi_input) {
-            // Phase 6.6: Multi-input subscription
-            subscribe_to_all_sources();
-        } else if constexpr (has_continuous_input) {
-            // Single-input (backward compatible)
-            if (config_.source_system_id && config_.source_instance_id) {
-                subscribe_to_source(*config_.source_system_id, *config_.source_instance_id);
-            }
-        }
-        
-        // Start data thread based on input mode
-        if constexpr (has_periodic_input) {
-            std::cout << "[" << config_.name << "] Starting periodic_loop thread...\n";
-            data_thread_ = std::thread(&Module::periodic_loop, this);
-        } else if constexpr (has_loop_input) {
-            std::cout << "[" << config_.name << "] Starting free_loop thread...\n";
-            data_thread_ = std::thread(&Module::free_loop, this);
-        } else if constexpr (has_multi_input) {
-            // Phase 6.6: Multi-input processing
-            std::cout << "[" << config_.name << "] Starting multi_input_loop thread...\n";
-            data_thread_ = std::thread(&Module::multi_input_loop, this);
-            
-            // Phase 6.9: Start secondary input receive threads
-            // Primary input (index 0) is handled by multi_input_loop's blocking receive
-            // Secondary inputs (indices 1, 2, ...) need background receive loops
-            constexpr size_t primary_idx = get_primary_input_index();
-            this->template start_secondary_input_threads<primary_idx>();
-        } else if constexpr (has_continuous_input) {
-            // Single continuous input (backward compatible)
-            std::cout << "[" << config_.name << "] Starting continuous_loop thread...\n";
-            data_thread_ = std::thread(&Module::continuous_loop, this);
-        }
-    }
-    
-    // Phase 2: Multi-output mailbox lifecycle methods moved to MultiOutputManager mixin
-    
-    void stop() {
-        if (!running_) {
-            return;
-        }
-        
-        on_stop();
-        
-        // Unsubscribe from source(s)
-        if constexpr (has_multi_input) {
-            // Multi-input: Unsubscribe from all configured sources
-            for (const auto& source : config_.input_sources) {
-                unsubscribe_from_multi_input_source(source);
-            }
-        } else if constexpr (has_continuous_input) {
-            // Single continuous input (legacy)
-            if (config_.source_system_id && config_.source_instance_id) {
-                unsubscribe_from_source(*config_.source_system_id, *config_.source_instance_id);
-            }
-        }
-        
-        running_ = false;
-        
-        // Wait for threads to finish
-        if (data_thread_ && data_thread_->joinable()) {
-            data_thread_->join();
-        }
-        
-        // Phase 4: Join secondary input threads (via MultiInputInfrastructure)
-        if constexpr (has_multi_input) {
-            this->join_secondary_input_threads();
-        }
-        
-        // Join work threads (single or multi-output)
-        if constexpr (use_mailbox_sets) {
-            // Multi-output: join all output work threads (via MultiOutputManager)
-            this->join_output_work_threads();
-        } else {
-            // Single-output: join single work thread
-            if (work_thread_ && work_thread_->joinable()) {
-                work_thread_->join();
-            }
-        }
-        
-        if (command_thread_ && command_thread_->joinable()) {
-            command_thread_->join();
-        }
-        
-        // Stop all mailboxes
-        if constexpr (use_mailbox_sets) {
-            // Multi-output: stop all MailboxSets
-            this->stop_all_mailbox_sets(std::make_index_sequence<num_output_types>{});
-        } else {
-            // Single-output
-            cmd_mailbox().stop();
-            work_mailbox().stop();
-        }
-        if (data_mailbox_) {
-            data_mailbox_->stop();
-        }
-        
-        on_cleanup();
-    }
-    
-    bool is_running() const { return running_; }
+    // start(), stop(), is_running() moved to LifecycleManager mixin
 
     // ========================================================================
     // Subscription Protocol (delegated to SubscriptionProtocol member)
