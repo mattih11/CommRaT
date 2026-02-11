@@ -23,6 +23,7 @@
 #include "commrat/module/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
 #include "commrat/module/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
 #include "commrat/module/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
+#include "commrat/module/multi_input_infrastructure.hpp"  // Phase 4: Multi-input mailbox infrastructure
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -31,8 +32,10 @@
 
 namespace commrat {
 
-// Empty base class for conditional inheritance
+// Empty base classes for conditional inheritance
 struct EmptyBase {};
+struct EmptyBase2 {};  // Need separate empty bases to avoid duplicate base class error
+struct EmptyBase3 {};
 
 // ============================================================================
 // Phase 6.10: Automatic Timestamp Management
@@ -115,12 +118,18 @@ class Module
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Loop implementations for periodic and free loops
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Input metadata accessors
     , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>  // Phase 3: Command dispatch
+    , public std::conditional_t<
+        module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::has_multi_input,
+        MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>,
+        EmptyBase2  // Single-input modules don't need multi-input infrastructure
+      >  // Phase 4: Multi-input infrastructure
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>;
     friend class InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>;
+    friend class MultiInputInfrastructure<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputTypesTuple, module_traits::ModuleTypes<UserRegistry, OutputSpec_, InputSpec_>::InputCount>;
     
 private:
     // ========================================================================
@@ -262,26 +271,9 @@ protected:
     // Single-input mode (backward compatible)
     std::optional<DataMailbox> data_mailbox_;  // base + 48: Receives input data (only for single ContinuousInput)
     
-    // Multi-input mode (Phase 6.6) - one HistoricalMailbox per input type
-    // Tuple index corresponds to position in Inputs<T1, T2, ...>
-    // Example: Inputs<IMU, GPS> → tuple<HistoricalMailbox<Registry, HistorySize, IMU>, ...>
-    // Only populated if has_multi_input == true
-    
-    // Helper: Create HistoricalMailbox type for each input type in the tuple
-    template<typename T>
-    using HistoricalMailboxFor = HistoricalMailbox<UserRegistry, 100>; // TODO: Make history size configurable
-    
-    // Generate tuple of HistoricalMailbox types from InputTypesTuple
-    template<typename Tuple>
-    struct MakeHistoricalMailboxTuple;
-    
-    template<typename... Ts>
-    struct MakeHistoricalMailboxTuple<std::tuple<Ts...>> {
-        using type = std::tuple<HistoricalMailboxFor<Ts>...>;
-    };
-    
-    using HistoricalMailboxTuple = typename MakeHistoricalMailboxTuple<InputTypesTuple>::type;
-    std::optional<HistoricalMailboxTuple> input_mailboxes_;
+    // Phase 4: Multi-input mailbox infrastructure moved to MultiInputInfrastructure mixin
+    // - input_mailboxes_: Tuple of HistoricalMailbox instances
+    // - secondary_input_threads_: Background receive threads
     
     // Subscription protocol (Phase 5: extracted to subscription.hpp)
     using SubscriptionProtocolType = commrat::SubscriptionProtocol<
@@ -314,7 +306,7 @@ protected:
     std::optional<std::thread> command_thread_;
     std::optional<std::thread> work_thread_;              // Single-output: one WORK mailbox
     // Phase 2: output_work_threads_ moved to MultiOutputManager mixin
-    std::vector<std::thread> secondary_input_threads_;    // Phase 6.9: Receive loops for secondary inputs
+    // Phase 4: secondary_input_threads_ moved to MultiInputInfrastructure mixin
     
     // Subscriber management - inherited from SubscriberManager base class
     // (subscribers_, subscribers_mutex_ now in SubscriberManager)
@@ -483,7 +475,7 @@ public:
         
         // Phase 6.6: Initialize multi-input mailboxes
         if constexpr (has_multi_input) {
-            initialize_multi_input_mailboxes();
+            this->initialize_multi_input_mailboxes();
         }
     }
     
@@ -583,7 +575,7 @@ public:
         
         // Phase 6.6: Start multi-input mailboxes
         if constexpr (has_multi_input) {
-            start_input_mailboxes();
+            this->start_input_mailboxes();
         }
         
         running_ = true;
@@ -631,7 +623,8 @@ public:
             // Phase 6.9: Start secondary input receive threads
             // Primary input (index 0) is handled by multi_input_loop's blocking receive
             // Secondary inputs (indices 1, 2, ...) need background receive loops
-            start_secondary_input_threads();
+            constexpr size_t primary_idx = get_primary_input_index();
+            this->template start_secondary_input_threads<primary_idx>();
         } else if constexpr (has_continuous_input) {
             // Single continuous input (backward compatible)
             std::cout << "[" << config_.name << "] Starting continuous_loop thread...\n";
@@ -668,11 +661,9 @@ public:
             data_thread_->join();
         }
         
-        // Phase 6.9: Join secondary input threads
-        for (auto& thread : secondary_input_threads_) {
-            if (thread.joinable()) {
-                thread.join();
-            }
+        // Phase 4: Join secondary input threads (via MultiInputInfrastructure)
+        if constexpr (has_multi_input) {
+            this->join_secondary_input_threads();
         }
         
         // Join work threads (single or multi-output)
@@ -799,37 +790,7 @@ protected:
     // ========================================================================
     
 private:
-    
-    // Phase 6.9: Secondary input receive loop
-    // Continuously receives from secondary input mailboxes to populate their buffers
-    template<size_t InputIdx>
-    void secondary_input_receive_loop() {
-        using InputType = std::tuple_element_t<InputIdx, InputTypesTuple>;
-        auto& mailbox = std::get<InputIdx>(*input_mailboxes_);
-        
-        std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx << "] started\n";
-        
-        int receive_count = 0;
-        while (running_) {
-            // Blocking receive - stores in historical buffer automatically
-            auto result = mailbox.template receive<InputType>();
-            if (!result.has_value()) {
-                std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
-                          << "] receive failed after " << receive_count << " messages\n";
-                break;
-            }
-            receive_count++;
-            if (receive_count <= 3) {
-                std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
-                          << "] received message #" << receive_count 
-                          << ", timestamp=" << result.value().header.timestamp << "\n";
-            }
-        }
-        
-        std::cout << "[" << config_.name << "] secondary_input_receive_loop[" << InputIdx 
-                  << "] ended (total: " << receive_count << " messages)\n";
-    }
-    
+    // Phase 4: secondary_input_receive_loop() moved to MultiInputInfrastructure mixin
     // Phase 3: command_loop() moved to CommandDispatcher mixin
     
     void work_loop() {
@@ -885,99 +846,24 @@ private:
         }
     }
     
-    // Create HistoricalMailbox for specific input at compile-time index
-    template<size_t Index>
-    auto create_historical_mailbox_for_input() {
-        using InputType = std::tuple_element_t<Index, InputTypesTuple>;
-        
-        // Create DATA mailbox config for this input
-        // Use input type's message ID to calculate base address
-        constexpr uint32_t input_msg_id = UserRegistry::template get_message_id<InputType>();
-        constexpr uint16_t input_type_id_low = static_cast<uint16_t>(input_msg_id & 0xFFFF);
-        uint32_t base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                             (config_.system_id << 8) | config_.instance_id;
-        uint32_t data_mailbox_id = base_addr + static_cast<uint8_t>(MailboxType::DATA);
-        
-        std::cout << "[" << config_.name << "] Creating input mailbox[" << Index 
-                  << "] at address " << data_mailbox_id << " (base=" << base_addr << ")\n";
-        
-        MailboxConfig mbx_config{
-            .mailbox_id = data_mailbox_id,
-            .message_slots = config_.message_slots,
-            .max_message_size = UserRegistry::max_message_size,
-            .send_priority = static_cast<uint8_t>(config_.priority),
-            .realtime = config_.realtime,
-            .mailbox_name = config_.name + "_data_" + std::to_string(Index)
-        };
-        
-        return HistoricalMailboxFor<InputType>(
-            mbx_config,
-            config_.sync_tolerance
-        );
-    }
-    
-    // Create tuple of HistoricalMailbox instances
-    template<size_t... Is>
-    void create_input_mailboxes_impl(std::index_sequence<Is...>) {
-        if constexpr (has_multi_input) {
-            input_mailboxes_ = std::make_tuple(
-                create_historical_mailbox_for_input<Is>()...
-            );
-        }
-    }
-    
-    void initialize_multi_input_mailboxes() {
-        if constexpr (has_multi_input) {
-            create_input_mailboxes_impl(std::make_index_sequence<InputCount>{});
-        }
-    }
-    
-    // Start all input mailboxes
-    template<size_t... Is>
-    void start_input_mailboxes_impl(std::index_sequence<Is...>) {
-        if (input_mailboxes_) {
-            // Check each mailbox start result
-            ([&]() {
-                auto result = std::get<Is>(*input_mailboxes_).start();
-                if (!result) {
-                    std::cerr << "[" << config_.name << "] ERROR: Failed to start input mailbox " 
-                              << Is << " - error " << static_cast<int>(result.get_error()) << "\n";
-                }
-            }(), ...);
-        }
-    }
-    
-    void start_input_mailboxes() {
-        if constexpr (has_multi_input) {
-            start_input_mailboxes_impl(std::make_index_sequence<InputCount>{});
-        }
-    }
-    
-    // Phase 6.9: Start receive threads for secondary inputs (all except primary)
-    void start_secondary_input_threads() {
-        if constexpr (has_multi_input) {
-            constexpr size_t primary_idx = get_primary_input_index();
-            start_secondary_threads_impl<primary_idx>(std::make_index_sequence<InputCount>{});
-        }
-    }
-    
-    template<size_t PrimaryIdx, size_t... Is>
-    void start_secondary_threads_impl(std::index_sequence<Is...>) {
-        // Start thread for each input except primary
-        ((Is != PrimaryIdx ? 
-          (secondary_input_threads_.emplace_back(&Module::secondary_input_receive_loop<Is>, this), true) : 
-          true), ...);
-    }
+    // Phase 4: Multi-input mailbox creation/initialization moved to MultiInputInfrastructure mixin
+    // - create_historical_mailbox_for_input<Index>()
+    // - create_input_mailboxes_impl()
+    // - initialize_multi_input_mailboxes()
+    // - start_input_mailboxes_impl()
+    // - start_input_mailboxes()
+    // - start_secondary_input_threads()
+    // - start_secondary_threads_impl()
     
     // Helper: Receive from primary input mailbox
     template<size_t PrimaryIdx>
     auto receive_primary_input() -> MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>> {
-        if (!input_mailboxes_) {
+        if (!this->input_mailboxes_) {
             return MailboxResult<TimsMessage<std::tuple_element_t<PrimaryIdx, InputTypesTuple>>>(MailboxError::NotInitialized);
         }
         
         using PrimaryType = std::tuple_element_t<PrimaryIdx, InputTypesTuple>;
-        auto& primary_mailbox = std::get<PrimaryIdx>(*input_mailboxes_);
+        auto& primary_mailbox = std::get<PrimaryIdx>(*this->input_mailboxes_);
         
         // BLOCKING receive - drives execution rate
         return primary_mailbox.template receive<PrimaryType>();
@@ -986,7 +872,7 @@ private:
     // Helper: Gather all inputs synchronized to primary timestamp
     template<size_t PrimaryIdx, typename PrimaryMsgType>
     std::optional<InputTypesTuple> gather_all_inputs(const PrimaryMsgType& primary_msg) {
-        if (!input_mailboxes_) {
+        if (!this->input_mailboxes_) {
             return std::nullopt;
         }
         
@@ -1031,7 +917,7 @@ private:
     template<size_t Index>
     bool sync_input_at_index(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
         using InputType = std::tuple_element_t<Index, InputTypesTuple>;
-        auto& mailbox = std::get<Index>(*input_mailboxes_);
+        auto& mailbox = std::get<Index>(*this->input_mailboxes_);
         
         // Non-blocking getData with tolerance
         auto result = mailbox.template getData<InputType>(
