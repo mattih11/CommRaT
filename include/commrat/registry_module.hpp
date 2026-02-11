@@ -317,11 +317,18 @@ protected:
     // - create_mailbox_infrastructure()
     // - create_mailbox_sets_impl()
     // - create_mailbox_set()
+    
+    // Helper: Initialize mailbox infrastructure in place
+    template<std::size_t... Is>
+    void initialize_mailbox_infrastructure_impl(const ModuleConfig& config, std::index_sequence<Is...>) {
+        // Initialize each MailboxSet in the tuple
+        ((std::get<Is>(mailbox_infrastructure_).initialize(config)), ...);
+    }
 
 public:
     explicit Module(const ModuleConfig& config)
         : config_(config)
-        , mailbox_infrastructure_(this->create_mailbox_infrastructure(config))
+        , mailbox_infrastructure_{}  // Default construct, will initialize in body
         , data_mailbox_(has_continuous_input && !has_multi_input ? 
             std::make_optional<DataMailbox>(MailboxConfig{
                 .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
@@ -335,6 +342,9 @@ public:
             std::nullopt)
         , running_(false)
     {
+        // Initialize mailbox infrastructure in place
+        initialize_mailbox_infrastructure_impl(config, std::make_index_sequence<num_output_types>{});
+        
         // Initialize SubscriberManager
         this->set_max_subscribers(config.max_subscribers);
         
