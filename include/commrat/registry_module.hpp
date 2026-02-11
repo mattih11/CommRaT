@@ -22,6 +22,7 @@
 #include "commrat/module/loops/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
 #include "commrat/module/mailbox_set.hpp"  // Phase 7.4: Per-output-type mailbox sets
 #include "commrat/module/multi_output_manager.hpp"  // Phase 2: Multi-output management mixin
+#include "commrat/module/command_dispatcher.hpp"  // Phase 3: Command dispatch mixin
 #include <sertial/sertial.hpp>
 #include <atomic>
 #include <vector>
@@ -113,11 +114,13 @@ class Module
       >
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Loop implementations for periodic and free loops
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Input metadata accessors
+    , public CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>  // Phase 3: Command dispatch
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>;
     friend class InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
+    friend class CommandDispatcher<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, CommandTypes...>;
     
 private:
     // ========================================================================
@@ -827,27 +830,7 @@ private:
                   << "] ended (total: " << receive_count << " messages)\n";
     }
     
-    void command_loop() {
-        std::cout << "[" << config_.name << "] command_loop started\n";
-        while (running_) {
-            // Use receive_any with visitor pattern on cmd_mailbox
-            // BLOCKING receive - waits indefinitely for user commands
-            auto visitor = [this](auto&& tims_msg) {
-                // tims_msg is TimsMessage<PayloadT>, extract payload
-                auto& msg = tims_msg.payload;
-                using MsgType = std::decay_t<decltype(msg)>;
-                
-                std::cout << "[" << config_.name << "] Received command in command_loop\n";
-                
-                // Handle user command types only
-                handle_user_command(msg);
-            };
-            
-            // BLOCKING receive on command mailbox (no timeout)
-            cmd_mailbox().receive_any(visitor);
-        }
-        std::cout << "[" << config_.name << "] command_loop ended\n";
-    }
+    // Phase 3: command_loop() moved to CommandDispatcher mixin
     
     void work_loop() {
         std::cout << "[" << config_.name << "] work_loop started, listening on WORK mailbox " 
@@ -883,29 +866,7 @@ private:
     }
     
     // Phase 2: output_work_loop moved to MultiOutputManager mixin
-    
-    /**
-     * @brief Dispatch user command to on_command handler
-     */
-    template<typename CmdT>
-    void handle_user_command(const CmdT& cmd) {
-        // Check if this is one of our declared CommandTypes
-        if constexpr ((std::is_same_v<CmdT, CommandTypes> || ...)) {
-            on_command(cmd);
-        }
-        // Otherwise ignore (not in our command list)
-    }
-    
-    /**
-     * @brief Handle a specific command type (override in derived class)
-     * 
-     * @tparam CmdT Command payload type
-     * @param cmd Command payload
-     */
-    template<typename CmdT>
-    void on_command(const CmdT& cmd) {
-        // Default: no-op - override in derived classes for specific CommandTypes
-    }
+    // Phase 3: handle_user_command() and on_command() moved to CommandDispatcher mixin
     
     // ========================================================================
     // Helper Functions
