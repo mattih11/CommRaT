@@ -2,12 +2,61 @@
 
 This document tracks known issues, limitations, and areas requiring investigation in CommRaT.
 
-**Last Updated**: February 8, 2026  
-**Current Phase**: Phase 6.10 Complete (Timestamp Metadata Accessors)
+**Last Updated**: February 11, 2026  
+**Current Phase**: Phase 6.10 Complete (Timestamp Metadata Accessors)  
+**Recent Work**: Phase 2 Multi-Output Manager Extraction (registry_module.hpp refactoring)
 
 ---
 
 ## Active Issues
+
+### 1. test_3input_fusion Subscription Timing Issue (Medium Priority)
+
+**Status**: 🔴 Active (Investigation Needed)  
+**Affected**: test_3input_fusion (test fails with 0 fusion outputs and hangs)  
+**Symptoms**:
+- Fusion module sends SubscribeRequests successfully
+- Sensor modules never receive SubscribeRequests (work_loop doesn't process them)
+- Test hangs indefinitely during execution
+- No "Send failed" errors (mailbox addresses correct)
+- Fusion reports "Waiting for primary input" forever
+
+**Root Cause**:
+Asynchronous thread startup timing issue:
+1. Sensor modules call `start()` which spawns work_loop threads asynchronously
+2. Fusion module calls `start()` shortly after (even with 2s delay)
+3. Fusion's subscription protocol sends SubscribeRequests immediately
+4. But sensor work_loops may not be blocking on `receive()` yet
+5. SubscribeRequests sent to existing mailboxes but no thread receiving → messages lost or queued incorrectly
+
+**Impact**:
+- test_3input_fusion fails (0 fusion outputs, expected ~500-600)
+- Multi-input fusion functionality blocked by subscription timing
+- Test suite at 92% pass rate (12/13)
+
+**Attempted Fixes**:
+- ✗ Increased delays between module starts (up to 2 seconds) - still fails
+- ✗ Changed startup order (sensors first vs fusion first) - both fail
+- ✗ Extended wait times before testing - test still hangs
+
+**Next Steps**:
+- Add synchronization barrier or "ready" signal to Module::start()
+- Implement retry logic in subscription protocol (already retries send, but needs receive confirmation)
+- Add timeout to work_loop receive() calls
+- Consider explicit "module ready" callback mechanism
+
+**Workaround**: None currently - multi-input tests must be skipped
+
+---
+
+### 2. test_timestamped_ring_buffer Tolerance Check ~~FIXED~~ ✅
+
+**Status**: 🟢 Resolved (February 11, 2026)  
+**Resolution**: Fixed test to use nanosecond timestamps instead of arbitrary integers. Test now passes.
+
+---
+
+## Resolved Issues
 
 ### ~~1. Multi-Input getData Synchronization (High Priority)~~ ✅ RESOLVED
 
