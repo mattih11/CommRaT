@@ -107,6 +107,24 @@ public:
         }
         return {};
     }
+    
+    /**
+     * @brief Remove subscriber from all output lists
+     * 
+     * Called during unsubscription - removes subscriber from any output list
+     * that contains it.
+     * 
+     * @param subscriber_base_addr Subscriber's base mailbox address
+     */
+    void remove_subscriber(uint32_t subscriber_base_addr) {
+        Lock lock(output_subscribers_mutex_);
+        for (auto& output_subs : output_subscribers_) {
+            output_subs.erase(
+                std::remove(output_subs.begin(), output_subs.end(), subscriber_base_addr),
+                output_subs.end()
+            );
+        }
+    }
 
 private:
     /**

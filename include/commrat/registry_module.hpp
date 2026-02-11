@@ -105,7 +105,6 @@ class Module
         typename ExtractOutputPayload<typename NormalizeOutput<OutputSpec_>::Type>::type
       >
     , public ResolveMultiInputBase<InputSpec_, OutputSpec_>::type
-    , public commrat::SubscriberManager
     , public MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, typename OutputTypesTuple<typename NormalizeOutput<OutputSpec_>::Type>::type>
     , public LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
     , public InputMetadataAccessors<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>
@@ -344,10 +343,7 @@ public:
         // Initialize mailbox infrastructure in place
         initialize_mailbox_infrastructure_impl(config, std::make_index_sequence<num_output_types>{});
         
-        // Initialize SubscriberManager
-        this->set_max_subscribers(config.max_subscribers);
-        
-        // Initialize per-output subscriber lists
+        // Initialize per-output subscriber lists (MultiOutputManager)
         this->initialize_output_subscribers();
         
         // Initialize subscription protocol
@@ -357,7 +353,7 @@ public:
         
         // Initialize publisher (post-unification: uses module_ptr_ for mailboxes and subscribers)
         // REMOVED: set_subscriber_manager() - subscribers accessed via module_ptr_->get_output_subscribers()
-        publisher_.set_module_ptr(this);  // For mailbox access via get_publish_mailbox<Index>()
+        publisher_.set_module_ptr(this);  // For mailbox/subscriber access via module_ptr_
         publisher_.set_module_name(config.name);
         
         // Initialize multi-input mailboxes
@@ -438,9 +434,11 @@ protected:
     void unsubscribe_from_multi_input_source(const InputSource& source) {
         subscription_protocol_.unsubscribe_from_multi_input_source(source);
     }
-    
+
+public:
+    // Subscription protocol handlers - PUBLIC for SubscriptionProtocol callbacks
     void handle_subscribe_request(const SubscribeRequestPayload& req) {
-        subscription_protocol_.handle_subscribe_request(req, static_cast<commrat::SubscriberManager&>(*this));
+        subscription_protocol_.handle_subscribe_request(req, *this);
     }
     
     void handle_subscribe_reply(const SubscribeReplyPayload& reply) {
@@ -448,17 +446,29 @@ protected:
     }
     
     void handle_unsubscribe_request(const UnsubscribeRequestPayload& req) {
-        subscription_protocol_.handle_unsubscribe_request(req, static_cast<commrat::SubscriberManager&>(*this));
+        subscription_protocol_.handle_unsubscribe_request(req, *this);
     }
     
     /**
      * @brief Add subscriber to correct output-specific list
      * 
      * Delegates to MultiOutputManager mixin.
+     * PUBLIC: Called by SubscriptionProtocol handlers.
      */
     void add_subscriber_to_output(uint32_t subscriber_base_addr) {
         // Delegate to inherited MultiOutputManager::add_subscriber_to_output
         this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr);
+    }
+    
+    /**
+     * @brief Remove subscriber (for unsubscribe)
+     * 
+     * Delegates to MultiOutputManager mixin.
+     * PUBLIC: Called by SubscriptionProtocol handlers.
+     */
+    void remove_subscriber(uint32_t subscriber_base_addr) {
+        // Delegate to inherited MultiOutputManager::remove_subscriber
+        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::remove_subscriber(subscriber_base_addr);
     }
     
 protected:
