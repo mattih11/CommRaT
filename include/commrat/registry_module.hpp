@@ -17,6 +17,7 @@
 #include "commrat/module/helpers/tims_helpers.hpp"
 #include "commrat/module/metadata/input_metadata.hpp"
 #include "commrat/module/metadata/input_metadata_accessors.hpp"  // Phase 5: Metadata accessor mixin
+#include "commrat/module/metadata/input_metadata_manager.hpp"  // Phase 9: Metadata update/mark functions
 #include "commrat/module/subscription.hpp"
 #include "commrat/module/publishing.hpp"
 #include "commrat/module/loops/loop_executor.hpp"  // Phase 5: Loop implementations (must be before Module)
@@ -136,6 +137,7 @@ class Module
     , public LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 6: Lifecycle management
     , public WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 7: Work loop handler
     , public MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>  // Phase 8: Mailbox factory
+    , public InputMetadataManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>  // Phase 9: Metadata management
 {
     // Friend declarations for CRTP mixins
     friend class LoopExecutor<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
@@ -147,6 +149,7 @@ class Module
     friend class LifecycleManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class WorkLoopHandler<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     friend class MailboxInfrastructureBuilder<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry>;
+    friend class InputMetadataManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>>;
     
 private:
     // ========================================================================
@@ -351,36 +354,9 @@ protected:
     // Fixed-size array for input metadata (zero-size when no inputs)
     std::array<InputMetadataStorage, (num_inputs > 0 ? num_inputs : 1)> input_metadata_;
     
-    /**
-     * @brief Update metadata for a specific input index
-     * 
-     * Helper method to populate metadata from received TimsMessage.
-     * Called by loop functions before invoking process() methods.
-     */
-    template<typename T>
-    void update_input_metadata(std::size_t index, const TimsMessage<T>& received, bool is_new) {
-        if (index >= num_inputs) {
-            std::cerr << "[Module] ERROR: Invalid metadata index " << index << "\n";
-            return;
-        }
-        
-        input_metadata_[index].timestamp = received.header.timestamp;
-        input_metadata_[index].sequence_number = received.header.seq_number;
-        input_metadata_[index].message_id = received.header.msg_type;
-        input_metadata_[index].is_new_data = is_new;
-        input_metadata_[index].is_valid = true;
-    }
-    
-    /**
-     * @brief Mark input metadata as invalid (getData failed)
-     */
-    void mark_input_invalid(std::size_t index) {
-        if (index >= num_inputs) {
-            return;
-        }
-        input_metadata_[index].is_valid = false;
-        input_metadata_[index].is_new_data = false;
-    }
+    // Phase 9: Input metadata management moved to InputMetadataManager mixin
+    // - update_input_metadata<T>()
+    // - mark_input_invalid()
     
     // Phase 8: Mailbox infrastructure creation moved to MailboxInfrastructureBuilder mixin
     // - create_mailbox_infrastructure()
