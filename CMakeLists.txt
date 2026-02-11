@@ -69,6 +69,19 @@ add_executable(example_sensor_fusion examples/multi_output_sensor_fusion.cpp)
 target_link_libraries(example_sensor_fusion PRIVATE commrat)
 target_include_directories(example_sensor_fusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 
+# Documentation examples (ensure they always compile and work)
+add_executable(doc_example_hello_commrat docs/examples/01_hello_commrat/hello_commrat.cpp)
+target_link_libraries(doc_example_hello_commrat PRIVATE commrat)
+target_include_directories(doc_example_hello_commrat PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
+add_executable(doc_example_multi_output docs/examples/02_multi_output/multi_output_example.cpp)
+target_link_libraries(doc_example_multi_output PRIVATE commrat)
+target_include_directories(doc_example_multi_output PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
+add_executable(doc_example_multi_input_fusion docs/examples/03_multi_input_fusion/multi_input_fusion.cpp)
+target_link_libraries(doc_example_multi_input_fusion PRIVATE commrat)
+target_include_directories(doc_example_multi_input_fusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
+
 # Enable testing
 enable_testing()
 
@@ -144,6 +157,19 @@ add_executable(test_typed_mailbox test/test_typed_mailbox.cpp)
 target_link_libraries(test_typed_mailbox PRIVATE commrat)
 target_include_directories(test_typed_mailbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tims /usr/local/include/rack)
 add_test(NAME test_typed_mailbox COMMAND test_typed_mailbox)
+
+# Add examples as tests (use wrapper for continuous examples)
+add_test(NAME example_continuous_input COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_continuous_input>)
+add_test(NAME example_clean_interface COMMAND example_clean_interface)
+add_test(NAME example_commands COMMAND example_commands)
+add_test(NAME example_loop_mode COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_loop_mode>)
+add_test(NAME example_multi_output_runtime COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_multi_output_runtime>)
+add_test(NAME example_sensor_fusion COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_sensor_fusion>)
+
+# Add documentation examples as tests (ensure docs stay current)
+add_test(NAME doc_example_hello_commrat COMMAND doc_example_hello_commrat)
+add_test(NAME doc_example_multi_output COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:doc_example_multi_output>)
+add_test(NAME doc_example_multi_input_fusion COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:doc_example_multi_input_fusion>)
 
 
 # Install targets
