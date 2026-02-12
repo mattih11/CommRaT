@@ -1,6 +1,6 @@
 # Documentation TODO
 
-**Date**: February 11, 2026  
+**Date**: February 12, 2026  
 **Status**: In Progress  
 **Related**: See [ROADMAP.md](ROADMAP.md) for feature development
 
@@ -10,29 +10,38 @@ This document tracks documentation tasks that need to be completed. For feature 
 
 **Current Status**:
 - [x] Internal documentation organized (docs/internal/)
-- [x] docs/work/ for active development planning
+- [x] docs/work/ for active development planning (now tracked in git)
 - [x] USER_GUIDE.md created (Sections 1-8 complete)
-- [x] KNOWN_ISSUES.md for runtime issues
-- [x] ROADMAP.md for feature planning
+- [x] KNOWN_ISSUES.md for runtime issues and feature gaps
+- [x] ROADMAP.md for feature planning with open architectural questions
+- [x] Planning documents created for 7 long-term features
 - [ ] Complete remaining documentation (see below)
 
 ## Needed Documentation
 
 ### High Priority
 
-**Runnable Examples** (examples/)
-- hello_commrat: Simplest possible producer-consumer
-- periodic_producer: Timer-based data generation
-- continuous_consumer: Message-driven processing
-- multi_output: Multiple message types from one module
-- multi_input_fusion: Synchronized sensor fusion (IMU+GPS)
-- command_handling: Command dispatch patterns
-- timestamp_metadata: Using metadata accessors
+**Runnable Examples** (examples/ and docs/examples/)
 
-**Examples README** (docs/examples/README.md)
-- Overview of all examples
-- How to build and run
-- What each example demonstrates
+**Existing Examples** (examples/):
+- [x] continuous_input_example.cpp - Producer-consumer pattern (PeriodicInput → Input)
+- [x] clean_interface_example.cpp - Simple API showcase
+- [x] command_example.cpp - Command dispatch patterns
+- [x] loop_mode_example.cpp - Maximum throughput (LoopInput)
+- [x] multi_output_runtime.cpp - Single module, multiple output types
+- [x] multi_output_sensor_fusion.cpp - Complete sensor fusion system
+- [x] examples/README.md - Overview of all examples
+
+**Existing Documentation Examples** (docs/examples/):
+- [x] 01_hello_commrat/ - Simplest possible system with full explanation
+- [x] 02_multi_output/ - Multi-output with detailed comments
+- [x] 03_multi_input_fusion/ - Multi-input time synchronization
+- [x] docs/examples/README.md - Index of documentation examples
+
+**Still Needed**:
+- [ ] Example: timestamp_metadata - Using metadata accessors (get_input_metadata, get_input_timestamp)
+- [ ] Example: parameter_config - Loading and using module parameters
+- [ ] Example: lifecycle_control - Remote start/stop/reset (once lifecycle system implemented)
 
 ### Medium Priority
 
@@ -54,11 +63,6 @@ This document tracks documentation tasks that need to be completed. For feature 
 
 ### Lower Priority
 
-**Migration Guide** (docs/MIGRATION_GUIDE.md)
-- Breaking changes between versions
-- How to update existing code
-- Deprecation notices
-
 **FAQ** (docs/FAQ.md)
 - Common questions and answers
 - Troubleshooting tips
@@ -74,62 +78,50 @@ This document tracks documentation tasks that need to be completed. For feature 
 ## Implementation Checklist
 
 ### Examples (High Priority)
-- [ ] Create examples/hello_commrat/
-- [ ] Create examples/periodic_producer/
-- [ ] Create examples/continuous_consumer/
-- [ ] Create examples/multi_output/
-- [ ] Create examples/multi_input_fusion/
-- [ ] Create examples/command_handling/
-- [ ] Create examples/timestamp_metadata/
-- [ ] Write docs/examples/README.md
-- [ ] Add CMakeLists.txt for all examples
-- [ ] Test all examples build and run
+**Completed**:
+- [x] examples/continuous_input_example.cpp
+- [x] examples/clean_interface_example.cpp
+- [x] examples/command_example.cpp
+- [x] examples/loop_mode_example.cpp
+- [x] examples/multi_output_runtime.cpp
+- [x] examples/multi_output_sensor_fusion.cpp
+- [x] examples/README.md
+- [x] docs/examples/01_hello_commrat/
+- [x] docs/examples/02_multi_output/
+- [x] docs/examples/03_multi_input_fusion/
+- [x] docs/examples/README.md
+- [x] CMakeLists.txt integration for all examples
+- [x] CTest integration (all 9 examples validated)
+
+**Still Needed**:
+- [ ] Create example for timestamp metadata accessors
+- [ ] Create example for parameter configuration (once parameter system exists)
+- [ ] Create example for lifecycle control (once lifecycle system exists)
 
 ### Core Documentation (Medium Priority)
-- [ ] Complete USER_GUIDE.md remaining sections
+- [ ] Complete USER_GUIDE.md sections 9-12 (Command Handling, Configuration, Best Practices, Troubleshooting)
 - [ ] Write API_REFERENCE.md
 - [ ] Write ARCHITECTURE.md
-- [ ] Configure Doxygen
+- [ ] Configure Doxygen (Doxyfile)
 - [ ] Generate API docs (`make docs`)
 - [ ] Add Doxygen build target to CMakeLists.txt
+- [ ] Review and update Doxygen comments in headers
+- [ ] Integrate Doxygen links into API_REFERENCE.md
 
 ### Supporting Documentation (Lower Priority)
-- [ ] Write MIGRATION_GUIDE.md
 - [ ] Write FAQ.md
 - [ ] Write CONTRIBUTING.md
 - [ ] Review all cross-references
 - [ ] Final polish and consistency check
-- [ ] Write USER_GUIDE.md sections 5-8
-- [ ] Create Examples 02-03
-- [ ] Write docs/examples/README.md
-
-### Day 4
-- [ ] Write USER_GUIDE.md sections 9-12
-- [ ] Create Examples 04-05
-- [ ] Write API_REFERENCE.md
-- [ ] **Configure Doxygen (Doxyfile)**
-- [ ] **Generate initial API docs (`make docs`)**
-
-### Day 5
-- [ ] Create Examples 06-07
-- [ ] Write ARCHITECTURE.md
-- [ ] Write EXAMPLES.md index
-- [ ] **Review and update Doxygen comments in headers**
-- [ ] **Integrate Doxygen links into API_REFERENCE.md**
-
-### Day 6
+- [ ] Create docs/api/README.md (how to generate)
+- [ ] Update .gitignore for docs/api/html/
 - [ ] Organize docs/internal/
 - [ ] Write internal README.md
 - [ ] Update internal docs with intros
 - [ ] **Add Doxygen build target to CMakeLists.txt**
-
-### Day 7
-- [ ] Write MIGRATION_GUIDE.md
 - [ ] Write CONTRIBUTING.md
 - [ ] Write FAQ.md
 - [ ] **Create docs/api/README.md (how to generate)**
-
-### Day 8
 - [ ] Review all documentation
 - [ ] Update cross-references
 - [ ] Test examples
@@ -170,10 +162,49 @@ Documentation is complete when:
 - [ ] Doxygen generates clean HTML without warnings
 - [ ] `make docs` command generates complete API documentation
 
+## Success Metrics
+
+Documentation is complete when:
+- [x] Examples demonstrate all major features (6 examples + 3 documentation examples)
+- [x] Examples integrated into test suite (9 example tests passing)
+- [x] examples/README.md provides overview and build instructions
+- [ ] New user can run Hello CommRaT example in < 10 minutes
+- [ ] USER_GUIDE.md provides comprehensive framework understanding (sections 9-12 complete)
+- [ ] API_REFERENCE.md covers all public APIs with Doxygen links
+- [ ] ARCHITECTURE.md explains design decisions clearly
+- [ ] All cross-references are valid
+- [ ] Doxygen generates clean HTML without warnings
+- [ ] `make docs` command generates complete API documentation
+- [x] Planning documents exist for major future features
+- [x] KNOWN_ISSUES.md tracks limitations and feature gaps
+- [x] ROADMAP.md includes open architectural questions
+
 ## Documentation Guidelines
 
 - **Clarity**: Simple, direct language - avoid jargon
 - **Examples**: Every concept needs working code
 - **Accuracy**: Test all examples before documenting
-- **Professionalism**: No emojis in documentation
+- **Professionalism**: No emojis in documentation (except .github/copilot-instructions.md)
 - **Completeness**: Cover common use cases and edge cases
+## Next Priorities
+
+Based on current state, recommended next steps:
+
+1. **Complete USER_GUIDE.md** (High Priority)
+   - Write sections 9-12 (Command Handling, Configuration, Best Practices, Troubleshooting)
+   - Provides comprehensive framework documentation
+   - Examples already exist to reference
+
+2. **API Reference & Architecture** (Medium Priority)
+   - Write API_REFERENCE.md with cross-references
+   - Write ARCHITECTURE.md explaining design decisions
+   - Configure Doxygen and integrate with documentation
+
+3. **Introspection Implementation** (Foundational Feature)
+   - Smallest new feature from ROADMAP.md
+   - Required by logger and composer systems
+   - See docs/work/INTROSPECTION_INTEGRATION_PLAN.md
+
+**Note**: Examples are largely complete - 6 working examples in examples/ plus 3 detailed documentation examples in docs/examples/, all validated in CTest.
+   - Required by logger and composer systems
+   - See docs/work/INTROSPECTION_INTEGRATION_PLAN.md

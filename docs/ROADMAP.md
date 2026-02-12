@@ -79,6 +79,100 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Status: Concept phase
 - Priority: Low
 
+**Real-Time Platform Abstraction Layer**
+- Complete transition to platform wrappers (threading, timing, etc.)
+- Enable compilation against libevl for hard real-time guarantees
+- Swap platform layer without changing application code
+- Already started: Thread, Mutex, Timestamp abstractions
+- Status: Planned
+- Priority: High
+- Details: See `docs/work/PLATFORM_ABSTRACTION_LAYER.md`
+
+**Unified ModuleType Definition**
+- Extend message registry to define complete module interfaces
+- Link commands to output types: `ModuleType<DataT, CommandsT>`
+- Modules can implement multiple types via `Outputs<Type1, Type2>`
+- Enables stronger type contracts and automatic interface validation
+- Status: Design phase
+- Priority: Medium
+- Details: See `docs/work/MODULE_TYPE_SYSTEM.md`
+
+**System Lifecycle Commands**
+- Extend SystemMessages for module lifecycle management
+- All modules automatically respond to: on, off, reset
+- Standardized lifecycle state machine
+- Status: Planned
+- Priority: High
+- Details: See `docs/work/LIFECYCLE_SYSTEM.md`
+
+**Parameter System**
+- Strongly-typed parameter definition and loading
+- Automatic parameter commands: get, set, list, save
+- Load parameters on module start from config files
+- Type-safe API with minimal boilerplate
+- Status: Design phase
+- Priority: High
+- Details: See `docs/work/PARAMETER_SYSTEM.md`
+
+**Sender Metadata Access**
+- Add source/sender/requester info to `get_input_metadata<>()` helpers
+- Enable filtering/validation based on message origin
+- Useful for multi-source inputs and security
+- Status: Planned
+- Priority: Low
+
+**Generic Algorithm Modules**
+- Reusable modules for common operations: `WindowFilter<T>`, `KalmanFilter<T>`, `MovingAverage<T>`
+- Work with any type supporting required arithmetic operations
+- Separate repository: `commrat-algorithms`
+- Status: Concept phase
+- Priority: Low
+- Details: See `docs/work/GENERIC_ALGORITHMS.md`
+
+**Web-Based System Interface**
+- Generic REST API with zero boilerplate
+- WebSocket streaming for real-time data visualization
+- Complete web-based GUI for system monitoring and control
+- Separate repository: `commrat-webgui`
+- Status: Concept phase
+- Priority: Low
+- Details: See `docs/work/WEB_INTERFACE.md`
+
+## Open Architectural Questions
+
+The following design decisions remain open from multi-I/O architecture planning (see `docs/internal/phase_history/ARCHITECTURE_ANALYSIS.md` for full analysis):
+
+### Input Synchronization Policy
+
+**Question**: When module has `Inputs<T1, T2, T3>`, should `process()` be called:
+- **Option A**: When ANY input arrives (asynchronous, low latency, may use stale data)
+- **Option B**: When ALL inputs arrive (wait for complete set, temporal alignment)
+- **Option C**: User-configurable via template parameter or runtime config
+
+**Current Implementation**: Option A (asynchronous)
+**Future Enhancement**: Add `SynchronizedInputs<T1, T2, T3>` for Option B
+
+### Output Publishing Order
+
+**Question**: When module has `Outputs<T1, T2, T3>`, are outputs published:
+- **Option A**: Simultaneously (parallel notification)
+- **Option B**: Sequentially (deterministic order T1→T2→T3)
+- **Option C**: Priority-based (critical outputs first)
+
+**Current Implementation**: Option B (sequential)
+**Future Enhancement**: `PrioritizedOutputs<...>` for Option C
+
+### Command Reply Timeout
+
+**Question**: If command expects reply but source doesn't respond:
+- **Option A**: Block forever (risky)
+- **Option B**: Configurable timeout with error return
+- **Option C**: Async reply via callback
+
+**Current Implementation**: Option A (blocking)
+**Recommended**: Option B with 1-second default timeout
+**Future Enhancement**: Async callback mechanism
+
 **DDS Compatibility Layer**
 - Direct DDS backend instead of TiMS
 - Enables interoperability with DDS-based systems

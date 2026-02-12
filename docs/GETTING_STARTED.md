@@ -7,8 +7,9 @@ This guide will help you create your first CommRaT application in three simple s
 ## Prerequisites
 
 - **C++20 compiler** (GCC 10+, Clang 12+)
-- **CMake 3.20+**
-- **CommRaT installed** (see [main README](../README.md))
+- **CMake 3.16+**
+- **[SeRTial](https://github.com/mattih11/SeRTial)** installed system-wide
+- **[RACK](https://github.com/smolorz/RACK)** installed system-wide (provides TiMS messaging and `tims_router`)
 - **TIMS router running** (`tims_router` from RACK)
 
 ---
@@ -26,18 +27,15 @@ mkdir src include
 ### Create CMakeLists.txt
 
 ```cmake
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.16)
 project(MyCommRaTApp CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find CommRaT (installed via sudo make install)
+# Find installed dependencies
 find_package(CommRaT REQUIRED)
-
-# Find dependencies
 find_package(SeRTial REQUIRED)
-find_package(TiMS REQUIRED)  # If available as package
 
 # Your executable
 add_executable(my_app src/main.cpp)
@@ -46,8 +44,11 @@ target_link_libraries(my_app
     PRIVATE 
         CommRaT::commrat
         SeRTial::sertial
-        tims  # Or TiMS::tims if using package
+        rack  # RACK library (includes TiMS)
 )
+
+# Include RACK headers
+target_include_directories(my_app PRIVATE /usr/local/include/rack)
 ```
 
 ---
@@ -323,7 +324,7 @@ Check out the complete examples in `CommRaT/examples/`:
 
 **Solution**: Start the router in a separate terminal:
 ```bash
-tims_router
+tims_router_tcp
 ```
 
 ### "Message not received"

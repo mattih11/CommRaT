@@ -7,9 +7,9 @@
 
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "CommRaT"
-PROJECT_NUMBER         = "Phase 6.10"
+PROJECT_NUMBER         = "2.0.0"
 PROJECT_BRIEF          = "C++20 Real-Time Messaging Framework"
-PROJECT_LOGO           = 
+PROJECT_LOGO           = docs/CommRaT.svg 
 OUTPUT_DIRECTORY       = docs/api
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO
@@ -56,7 +56,7 @@ NUM_PROC_THREADS       = 1
 # Build related configuration options
 #---------------------------------------------------------------------------
 
-EXTRACT_ALL            = NO
+EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = NO
 EXTRACT_PRIV_VIRTUAL   = NO
 EXTRACT_PACKAGE        = NO
@@ -118,8 +118,9 @@ WARN_LOGFILE           =
 #---------------------------------------------------------------------------
 
 INPUT                  = include/commrat \
+                         README.md \
+                         docs/README.md \
                          docs/USER_GUIDE.md \
-                         docs/ARCHITECTURE.md \
                          docs/API_REFERENCE.md
 INPUT_ENCODING         = UTF-8
 INPUT_FILE_ENCODING    = 
@@ -131,6 +132,8 @@ EXCLUDE                =
 EXCLUDE_SYMLINKS       = NO
 EXCLUDE_PATTERNS       = */build/* \
                          */test/* \
+                         */examples/*/build/* \
+                         */docs/examples/*/build/* \
                          */.git/*
 EXCLUDE_SYMBOLS        = 
 EXAMPLE_PATH           = examples/ \
@@ -142,7 +145,7 @@ INPUT_FILTER           =
 FILTER_PATTERNS        = 
 FILTER_SOURCE_FILES    = NO
 FILTER_SOURCE_PATTERNS = 
-USE_MDFILE_AS_MAINPAGE = docs/USER_GUIDE.md
+USE_MDFILE_AS_MAINPAGE = README.md
 
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing

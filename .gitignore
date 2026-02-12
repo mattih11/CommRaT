@@ -2,16 +2,16 @@
 build/
 cmake-build-*/
 
-# Dependencies (symlinks to external repos)
+# Doxygen output
+docs/api/
+
+# Optional dependencies (if present as symlinks)
 SeRTial
 tims
 rack
 
 # hints for related projects
 rfl
-
-# Work-in-progress documentation
-docs/work/
 
 # IDE files
 .vscode/

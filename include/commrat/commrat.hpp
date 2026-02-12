@@ -47,23 +47,64 @@ namespace commrat {
 /**
  * @brief CommRaT Application Template - Main User-Facing Interface
  * 
- * This combines MessageRegistry with Module/Mailbox for a clean API:
+ * This is the primary entry point for defining a CommRaT application.
+ * Combines MessageRegistry with Module/Mailbox factories for clean, type-safe messaging.
  * 
- * Usage:
- *   using MyApp = CommRaT<
- *       MessageDefinition<SensorData, ...>,
- *       MessageDefinition<FilteredData, ...>
- *   >;
- *   
- *   class SensorModule : public MyApp::Module<Output<SensorData>, PeriodicInput> {
- *       SensorData process() override { ... }
- *   };
+ * @tparam MessageDefs Message definitions using MessageDefinition<PayloadType, ...>
  * 
- * Advantages over raw MessageRegistry:
- * - Module template alias included (Registry::Module wasn't clear)
+ * **Key Features:**
+ * - Compile-time message type registration with automatic ID generation
+ * - Zero-overhead type dispatch (all lookups resolved at compile time)
+ * - Type-safe Module and Mailbox templates bound to this application
+ * - Automatic collision detection for message IDs
+ * 
+ * **Usage Example:**
+ * @code
+ * // 1. Define your message types (plain POD structs)
+ * struct SensorData {
+ *     float temperature;
+ *     uint32_t sensor_id;
+ * };
+ * 
+ * struct FilteredData {
+ *     float filtered_value;
+ *     float confidence;
+ * };
+ * 
+ * // 2. Define your application
+ * using MyApp = CommRaT<
+ *     MessageDefinition<SensorData>,
+ *     MessageDefinition<FilteredData>
+ * >;
+ * 
+ * // 3. Create modules using MyApp::Module
+ * class SensorModule : public MyApp::Module<Output<SensorData>, PeriodicInput> {
+ * protected:
+ *     void process(SensorData& output) override {
+ *         output.temperature = read_sensor();
+ *         output.sensor_id = config_.instance_id;
+ *     }
+ * };
+ * 
+ * class FilterModule : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
+ * protected:
+ *     void process(const SensorData& input, FilteredData& output) override {
+ *         output.filtered_value = apply_filter(input.temperature);
+ *         output.confidence = 0.95f;
+ *     }
+ * };
+ * @endcode
+ * 
+ * **Advantages over raw MessageRegistry:**
+ * - Module template alias included (Registry::Module wasn't clear to users)
  * - Mailbox types available via MyApp::Mailbox<T>
  * - All application components in one namespace
  * - Clearer intent: "This is my CommRaT application definition"
+ * - Automatic system message inclusion (subscription protocol, etc.)
+ * 
+ * @see Module for module creation
+ * @see MessageDefinition for defining message types
+ * @see Output, Input, PeriodicInput for I/O specifications
  */
 template<typename... MessageDefs>
 class CommRaT : public MessageRegistry<MessageDefs...> {
@@ -83,10 +124,33 @@ public:
     /**
      * @brief Module template - create modules for this application
      * 
-     * Preferred user-facing API for defining modules:
-     *   class MyModule : public MyApp::Module<OutputSpec, InputSpec, ...Commands> {
-     *       // Your process() implementation
-     *   };
+     * This is the preferred user-facing API for defining modules.
+     * Automatically binds the module to this application's message registry.
+     * 
+     * @tparam OutputSpec_ Output specification: Output<T>, Outputs<T, U, ...>, or NoOutput
+     * @tparam InputSpec_ Input specification: Input<T>, Inputs<T, U, ...>, PeriodicInput, or LoopInput
+     * @tparam CommandTypes Optional command types this module handles
+     * 
+     * **Usage:**
+     * @code
+     * class MyModule : public MyApp::Module<OutputSpec, InputSpec, ...Commands> {
+     * protected:
+     *     void process(...) override {
+     *         // Your implementation - signature depends on I/O spec
+     *     }
+     * };
+     * @endcode
+     * 
+     * **I/O Specification Examples:**
+     * - `Module<Output<T>, PeriodicInput>` - Periodic generation of single output
+     * - `Module<Output<T>, Input<U>>` - Transform U → T on each input
+     * - `Module<Outputs<T, U>, PeriodicInput>` - Periodic generation of multiple outputs
+     * - `Module<Output<T>, Inputs<U, V>>` - Fuse U and V → T with synchronization
+     * - `Module<Output<T>, LoopInput>` - Maximum throughput computation
+     * 
+     * @see Output, Outputs for output specifications
+     * @see Input, Inputs, PeriodicInput, LoopInput for input specifications
+     * @see ModuleConfig for configuration structure
      */
     template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
     using Module = commrat::Module<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
@@ -94,8 +158,28 @@ public:
     /**
      * @brief Mailbox template - create mailboxes for this application
      * 
-     * For advanced use cases that need direct mailbox access:
-     *   MyApp::Mailbox<SensorData> sensor_mailbox{config};
+     * For advanced use cases that need direct mailbox access outside of Module.
+     * Most users won't need this - Module handles mailboxes automatically.
+     * 
+     * @tparam PayloadT Message payload type (must be registered in this application)
+     * 
+     * **Usage (Advanced):**
+     * @code
+     * MyApp::Mailbox<SensorData> sensor_mailbox{address};
+     * 
+     * // Send
+     * SensorData data{.temperature = 25.5f};
+     * sensor_mailbox.send(data, dest_address);
+     * 
+     * // Receive
+     * auto result = sensor_mailbox.receive<SensorData>();
+     * if (result) {
+     *     process(result->message);
+     * }
+     * @endcode
+     * 
+     * @note Real-time safe if PayloadT serialization is real-time safe
+     * @see HistoricalMailbox for timestamp-synchronized receives
      */
     template<typename PayloadT>
     using Mailbox = RegistryMailbox<Registry>;
@@ -103,11 +187,34 @@ public:
     /**
      * @brief HistoricalMailbox template - mailbox with time-synchronized getData()
      * 
-     * For modules that need to synchronize inputs by timestamp (Phase 6):
-     *   MyApp::HistoricalMailbox<100> history{config, tolerance};
-     *   auto data = history.getData<SensorData>(timestamp);
+     * Provides RACK-style timestamp-based message retrieval for multi-rate sensor fusion.
+     * Buffers recent messages and returns the closest match to a requested timestamp.
      * 
-     * @tparam HistorySize Number of messages to buffer per type
+     * @tparam HistorySize Number of messages to buffer per type (circular buffer)
+     * 
+     * **Use Case:** Synchronizing sensors with different rates
+     * @code
+     * // IMU at 100Hz, GPS at 10Hz - need to fuse
+     * MyApp::HistoricalMailbox<100> gps_history{gps_address, 50'000'000}; // 50ms tolerance
+     * 
+     * // In fusion module (driven by IMU)
+     * void process(const IMUData& imu, FusedData& output) {
+     *     // Get GPS data closest to IMU timestamp
+     *     auto gps = gps_history.getData<GPSData>(imu.header.timestamp);
+     *     if (gps) {
+     *         output = fuse(imu, *gps);
+     *     }
+     * }
+     * @endcode
+     * 
+     * **Algorithm:**
+     * 1. Maintains circular buffer of recent messages with timestamps
+     * 2. `getData(target_timestamp, tolerance)` finds closest message
+     * 3. Returns std::nullopt if no message within tolerance
+     * 
+     * @note Memory: `sizeof(TimsMessage<T>) * HistorySize` per type
+     * @note Thread-safe: Uses internal mutex for concurrent access
+     * @see Inputs for automatic multi-input synchronization
      */
     template<std::size_t HistorySize>
     using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;

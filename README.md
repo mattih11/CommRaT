@@ -1,4 +1,4 @@
-<div align="center">
+<div align="center" style="background: linear-gradient(135deg, #909060 0%, rgba(72, 72, 48, 1) 50%, #404040 20%, #3a3a3a 100%); padding: 0px 0; margin: -8px -8px 20px -8px;">
   <img src="docs/CommRaT.png" alt="CommRaT Logo" width="400"/>
 </div>
 
@@ -36,22 +36,24 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 ## Documentation
 
 - **[Getting Started Guide](docs/GETTING_STARTED.md)** - Build your first CommRaT application
-- **[Architecture & Concepts](docs/README.md)** - Detailed documentation and current status
+- **[User Guide](docs/USER_GUIDE.md)** - Comprehensive framework documentation
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[Architecture & Concepts](docs/README.md)** - Design decisions and current status
+- **[Doxygen API Docs](https://mattih11.github.io/CommRaT/)** - Generated API documentation
 - **[Examples](examples/)** - Working examples demonstrating all features
-- **[API Reference](include/commrat/)** - Header documentation
 
 ## Quick Start
 
 ### Installation
 
+**Prerequisites:**
+- **SeRTial**: Install from [SeRTial repository](https://github.com/mattih11/SeRTial)
+- **RACK**: Install from [RACK repository](https://github.com/smolorz/RACK) (provides TiMS messaging system)
+
 ```bash
 # Clone the repository
 git clone https://github.com/mattih11/CommRaT.git
 cd CommRaT
-
-# Set up dependencies (SeRTial and RACK TiMS)
-ln -s /path/to/SeRTial SeRTial
-ln -s /path/to/rack/tims tims
 
 # Build and install
 mkdir -p build && cd build
@@ -189,6 +191,17 @@ cd build
 
 **See [examples/](examples/) directory for source code.**
 
+## Building Documentation
+
+Generate API documentation locally:
+
+```bash
+cd build
+make docs
+```
+
+Documentation will be generated in `docs/api/html/index.html`. Open in your browser or view online at [mattih11.github.io/CommRaT](https://mattih11.github.io/CommRaT/).
+
 ## Architecture Highlights
 
 - **MailboxSet per Output**: Each output type gets 3 mailboxes (CMD/WORK/PUBLISH) + shared DATA for inputs
@@ -207,5 +220,5 @@ See LICENSE file for details.
 
 ## References
 
-- [RACK Project](https://github.com/smolorz/RACK) - Robotics Application Construction Kit
-- [SeRTial Library](https://github.com/mattih11/SeRTial) - Reflective C++ serialization
+- **[RACK Project](https://github.com/smolorz/RACK)** - Robotics Application Construction Kit (provides TiMS messaging system)
+- **[SeRTial Library](https://github.com/mattih11/SeRTial)** - Reflective C++ serialization

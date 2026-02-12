@@ -28,6 +28,26 @@ Current variadic command handling with overloaded `on_command()` functions works
 
 **Workaround**: Use `on_command(const CmdType&) override` for each command type.
 
+### 3. No Command Reply Mechanism
+
+**Status**: Feature Gap  
+**Priority**: Medium
+
+Commands are currently one-way (fire-and-forget). No built-in support for request/reply patterns like GetStatus or SetParameter commands.
+
+**Proposed Solutions** (see `docs/internal/phase_history/ARCHITECTURE_ANALYSIS.md` Phase 6):
+- **Pattern 1**: One-way commands (current, works as-is)
+- **Pattern 2**: Reply via output parameter: `void on_command(const GetStatusCmd&, StatusReply&)`
+- **Pattern 3**: Reply via return value: `StatusReply on_command(const GetStatusCmd&)`
+
+**Implementation Needs**:
+- Reply routing infrastructure in command handler
+- Blocking wait for reply on sender side
+- Timeout mechanism (recommended: 1-second default)
+- Concept detection: `has_reply<CmdT, ReplyT>`, `returns_reply<CmdT>`
+
+**Workaround**: Use regular output messages for replies (manual correlation via sequence numbers).
+
 ---
 
 ## Resolved Issues
@@ -116,7 +136,7 @@ Examples not yet created:
 
 ### 1. Type-Based Metadata Access Limited to 2 Types
 
-**Status**: 🟡 By Design (Current Implementation)  
+**Status**: By Design (Current Implementation)  
 **Priority**: Low
 
 `get_input_metadata<T>()` type-based access only works for the first 2 input types due to tuple unpacking implementation limits.
@@ -127,7 +147,7 @@ Examples not yet created:
 
 ### 2. Command Dispatch Needs Improvement
 
-**Status**: 🟡 Known Limitation  
+**Status**: Known Limitation  
 **Priority**: Medium
 
 Current variadic command handling with overloaded `on_command()` functions works but is not elegant. Better dispatch mechanism needed.

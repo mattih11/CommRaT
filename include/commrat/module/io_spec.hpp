@@ -34,15 +34,35 @@ struct LoopInput;
  * @brief Single output specification
  * 
  * Specifies that a module produces exactly one output type.
+ * Used with PeriodicInput, LoopInput, or Input<T> to define module behavior.
  * 
  * @tparam T The payload type to be published
  * 
- * Example:
+ * **Process Signature:**
+ * - With PeriodicInput: `void process(T& output)`
+ * - With Input<U>: `void process(const U& input, T& output)`
+ * - With Inputs<U, V>: `void process(const U& in1, const V& in2, T& output)`
+ * 
  * @code
+ * // Periodic sensor reading
  * class SensorModule : public Module<Registry, Output<TempData>, PeriodicInput> {
- *     TempData process() override { return read_sensor(); }
+ * protected:
+ *     void process(TempData& output) override {
+ *         output.temperature = read_sensor();
+ *     }
+ * };
+ * 
+ * // Event-driven filtering
+ * class FilterModule : public Module<Registry, Output<Filtered>, Input<Raw>> {
+ * protected:
+ *     void process(const Raw& input, Filtered& output) override {
+ *         output.value = apply_filter(input.value);
+ *     }
  * };
  * @endcode
+ * 
+ * @see Outputs for multiple output types
+ * @see PeriodicInput, Input, Inputs for input specifications
  */
 template<typename T>
 struct Output {
@@ -129,22 +149,57 @@ struct Input {
  * @brief Multiple continuous inputs specification
  * 
  * Specifies that a module receives multiple input types from different sources.
- * The module subscribes to multiple producers and processes messages as they arrive.
+ * Automatically handles timestamp-based synchronization for sensor fusion.
  * 
- * @tparam Ts... The payload types to receive
+ * **How Multi-Input Works:**
+ * 1. First type in Inputs<T, U, V> is automatically PRIMARY (drives execution)
+ * 2. Module blocks on PRIMARY input receive()
+ * 3. Secondary inputs synchronized via getData(primary_timestamp, tolerance)
+ * 4. All inputs time-aligned before process() is called
  * 
- * Example:
+ * @tparam Ts... The payload types to receive (first is primary)
+ * 
+ * **Process Signature:**
+ * - Single output: `void process(const T& in1, const U& in2, ..., OutputType& output)`
+ * - Multi output: `void process(const T& in1, const U& in2, ..., O1& out1, O2& out2, ...)`
+ * 
+ * **Configuration:**
  * @code
+ * ModuleConfig fusion_config{
+ *     .name = "SensorFusion",
+ *     .system_id = 30,
+ *     .instance_id = 1,
+ *     .period = Milliseconds(10),       // Primary input rate (100Hz)
+ *     .input_sources = {
+ *         {10, 1},  // IMU source (primary)
+ *         {11, 1}   // GPS source (secondary)
+ *     },
+ *     .sync_tolerance_ns = 50'000'000   // 50ms tolerance for getData
+ * };
+ * @endcode
+ * 
+ * @code
+ * // Fuse high-rate IMU with low-rate GPS
  * class FusionModule : public Module<Registry, 
  *                                    Output<FusedData>,
- *                                    Inputs<IMUData, GPSData, LidarData>> {
- *     FusedData process(const IMUData& imu, 
- *                       const GPSData& gps, 
- *                       const LidarData& lidar) override {
- *         return fuse_sensors(imu, gps, lidar);
+ *                                    Inputs<IMUData, GPSData>> {  // IMU first = primary
+ * protected:
+ *     void process(const IMUData& imu,      // Blocking receive (100Hz)
+ *                  const GPSData& gps,      // getData at imu.timestamp (10Hz)
+ *                  FusedData& output) override {
+ *         // Check freshness
+ *         if (!has_new_data<1>()) {
+ *             std::cout << "GPS data is stale\n";
+ *         }
+ *         output = ekf_update(imu, gps);
  *     }
  * };
  * @endcode
+ * 
+ * @note Secondary inputs use HistoricalMailbox with circular buffering
+ * @note Metadata accessors available: get_input_metadata<N>(), has_new_data<N>()
+ * @see HistoricalMailbox for getData implementation details
+ * @see InputMetadata for metadata structure
  */
 template<typename... Ts>
 struct Inputs {

@@ -349,16 +349,8 @@ Keep `docs/api/.gitkeep` or a README explaining how to generate.
 5. Should Doxygen output be committed to git?
    - Recommendation: No, generate on-demand. Provide instructions in docs/api/README.md
 
-## Next Steps
-
-1. Get approval on this strategy
-2. Create directory structure
-3. Begin Week 1 implementation
-4. Review progress after each week
-
 ## References
 
 - Current README.md: Overview and quick start
 - GETTING_STARTED.md: Installation and first program
-- .github/copilot-instructions.md: Comprehensive technical reference (internal)
 - Examples directory: Working code demonstrations

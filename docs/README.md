@@ -455,9 +455,8 @@ Behind the scenes:
 - **Tests**: `/home/muddy/src/CommRaT/test/`
 
 ### External Dependencies
-- **TiMS**: TIMS Interprocess Message System (C library)
-- **SeRTial**: Serialization library (C++20)
-- **RACK**: Original robotic framework (inspiration for module pattern)
+- **[RACK](https://github.com/smolorz/RACK)**: Robotics Application Construction Kit - provides TiMS (TIMS Interprocess Message System)
+- **[SeRTial](https://github.com/mattih11/SeRTial)**: Modern C++20 serialization library with compile-time reflection
 
 ### References
 - C++20 Concepts: https://en.cppreference.com/w/cpp/language/constraints
