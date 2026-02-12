@@ -1,5 +1,5 @@
 <div align="center" style="background: linear-gradient(135deg, #909060 0%, rgba(72, 72, 48, 1) 50%, #404040 20%, #3a3a3a 100%); padding: 0px 0; margin: -8px -8px 20px -8px;">
-  <img src="docs/CommRaT.png" alt="CommRaT Logo" width="400"/>
+  <img src="docs/CommRaT.png" style="background: white" alt="CommRaT Logo" width="400"/>
 </div>
 
 # CommRaT - Modern C++ Real-Time Communication Framework
