@@ -264,36 +264,38 @@ int main() {
         // Producer configs
         ModuleConfig imu_config{
             .name = "IMU_Sensor",
-            .system_id = 10,
-            .instance_id = 1,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
+            .inputs = commrat::NoInputConfig{},
             .period = Milliseconds(10)  // 100Hz
         };
         
         ModuleConfig gps_config{
             .name = "GPS_Sensor",
-            .system_id = 20,
-            .instance_id = 1,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+            .inputs = commrat::NoInputConfig{},
             .period = Milliseconds(100)  // 10Hz
         };
         
         ModuleConfig lidar_config{
             .name = "Lidar_Sensor",
-            .system_id = 30,
-            .instance_id = 1,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+            .inputs = commrat::NoInputConfig{},
             .period = Milliseconds(50)  // 20Hz
         };
         
         // Fusion consumer config with multi-input sources
         ModuleConfig fusion_config{
             .name = "Sensor_Fusion",
-            .system_id = 100,
-            .instance_id = 1,
-            .input_sources = {
-                {.system_id = 10, .instance_id = 1, .is_primary = true, .source_primary_output_type_id = FusionApp::get_message_id<IMUData>()},    // IMU (primary)
-                {.system_id = 20, .instance_id = 1, .is_primary = false, .source_primary_output_type_id = FusionApp::get_message_id<GPSData>()},    // GPS
-                {.system_id = 30, .instance_id = 1, .is_primary = false, .source_primary_output_type_id = FusionApp::get_message_id<LidarData>()}   // Lidar
-            },
-            .sync_tolerance = Milliseconds(200)  // Lenient tolerance for test (GPS is 100ms period)
+            .outputs = commrat::SimpleOutputConfig{.system_id = 100, .instance_id = 1},
+            .inputs = commrat::MultiInputConfig{
+                .sources = {
+                    {.system_id = 10, .instance_id = 1},  // IMU (primary, first in list)
+                    {.system_id = 20, .instance_id = 1},  // GPS
+                    {.system_id = 30, .instance_id = 1}   // Lidar
+                },
+                .history_buffer_size = 100,
+                .sync_tolerance = Milliseconds(200)  // Lenient tolerance for test
+            }
         };
         
         // Create modules

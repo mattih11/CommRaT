@@ -1,0 +1,19 @@
+{
+  "name": "BasicSensor",
+  "outputs": {
+    "output_type": "SimpleOutputConfig",
+    "system_id": 10,
+    "instance_id": 1
+  },
+  "inputs": {
+    "input_type": "NoInputConfig"
+  },
+  "period": {
+    "count": 100,
+    "unit": "milliseconds"
+  },
+  "message_slots": 10,
+  "max_subscribers": 8,
+  "priority": 10,
+  "realtime": false
+}

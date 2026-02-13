@@ -107,8 +107,9 @@ private:
         // Use input type's message ID to calculate base address
         constexpr uint32_t input_msg_id = UserRegistry::template get_message_id<InputType>();
         constexpr uint16_t input_type_id_low = static_cast<uint16_t>(input_msg_id & 0xFFFF);
+        // Multi-input always uses non-indexed system_id/instance_id (subscriber addressing)
         uint32_t base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                             (module.config_.system_id << 8) | module.config_.instance_id;
+                             (module.config_.system_id() << 8) | module.config_.instance_id();
         uint32_t data_mailbox_id = base_addr + static_cast<uint8_t>(MailboxType::DATA);
         
         std::cout << "[" << module.config_.name << "] Creating input mailbox[" << Index 
@@ -125,7 +126,7 @@ private:
         
         return HistoricalMailboxFor<InputType>(
             mbx_config,
-            module.config_.sync_tolerance
+            module.config_.sync_tolerance()
         );
     }
     

@@ -274,8 +274,12 @@ int main() {
         // Create fusion module (3 outputs)
         commrat::ModuleConfig fusion_config{
             .name = "SensorFusion",
-            .system_id = 10,
-            .instance_id = 1,
+            .outputs = commrat::MultiOutputConfig{.addresses = {
+                {.system_id = 10, .instance_id = 1},  // RawSensorData output
+                {.system_id = 10, .instance_id = 1},  // FilteredData output
+                {.system_id = 10, .instance_id = 1}   // DiagnosticsData output
+            }},
+            .inputs = commrat::NoInputConfig{},
             .period = std::chrono::milliseconds(100)  // 10 Hz
         };
         SensorFusionModule fusion(fusion_config);
@@ -284,18 +288,14 @@ int main() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-        // Get the primary output type ID for subscription
-        uint32_t primary_type_id = FusionApp::get_message_id<RawSensorData>();
+        // NEW: Auto-inference handles multi-output - no primary_type_id needed!
 
         // Create raw data logger
         commrat::ModuleConfig raw_logger_config{
             .name = "RawLogger",
-            .system_id = 20,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(100),
-            .source_system_id = 10,
-            .source_instance_id = 1,
-            .source_primary_output_type_id = primary_type_id
+            .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+            .period = std::chrono::milliseconds(100)
         };
         RawDataLogger raw_logger(raw_logger_config);
         std::cout << "[Main] Created RawLogger (subscribes to RawSensorData)\n";
@@ -306,12 +306,9 @@ int main() {
         // Create filter consumer
         commrat::ModuleConfig filter_config{
             .name = "FilterConsumer",
-            .system_id = 30,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(100),
-            .source_system_id = 10,
-            .source_instance_id = 1,
-            .source_primary_output_type_id = primary_type_id
+            .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+            .period = std::chrono::milliseconds(100)
         };
         FilterConsumer filter_consumer(filter_config);
         std::cout << "[Main] Created FilterConsumer (subscribes to FilteredData)\n";
@@ -322,12 +319,9 @@ int main() {
         // Create diagnostics monitor
         commrat::ModuleConfig diag_config{
             .name = "DiagMonitor",
-            .system_id = 40,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(100),
-            .source_system_id = 10,
-            .source_instance_id = 1,
-            .source_primary_output_type_id = primary_type_id
+            .outputs = commrat::SimpleOutputConfig{.system_id = 40, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+            .period = std::chrono::milliseconds(100)
         };
         DiagnosticsMonitor diag_monitor(diag_config);
         std::cout << "[Main] Created DiagnosticsMonitor (subscribes to DiagnosticsData)\n";

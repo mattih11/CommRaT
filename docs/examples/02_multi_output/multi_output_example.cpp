@@ -245,8 +245,11 @@ int main() {
     
     commrat::ModuleConfig station_config{
         .name = "WeatherStation",
-        .system_id = 10,           // Weather station system
-        .instance_id = 1,
+        .outputs = commrat::MultiOutputConfig{.addresses = {
+            {.system_id = 10, .instance_id = 1},  // TemperatureData output
+            {.system_id = 10, .instance_id = 1}   // PressureData output
+        }},
+        .inputs = commrat::NoInputConfig{},
         .period = commrat::Milliseconds(100)  // 10Hz data generation
     };
     
@@ -258,10 +261,8 @@ int main() {
     // Base address encodes TemperatureData type (first output = primary)
     commrat::ModuleConfig temp_monitor_config{
         .name = "TempMonitor",
-        .system_id = 20,
-        .instance_id = 1,
-        .source_system_id = 10,    // Subscribe to WeatherStation
-        .source_instance_id = 1
+        .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1}
         // No source_primary_output_type_id needed - TemperatureData is primary!
     };
     
@@ -269,17 +270,12 @@ int main() {
     // Configure Pressure Consumer
     // ========================================================================
     
-    // Pressure monitor MUST specify source_primary_output_type_id!
-    // Why? Producer's base address uses TemperatureData (first output),
-    // but this consumer expects PressureData. We need to tell it where
-    // to find the producer.
+    // NEW: With auto-inference, source_primary_output_type_id NOT needed!
+    // Subscription automatically uses InputData type (PressureData)
     commrat::ModuleConfig pressure_monitor_config{
         .name = "PressureMonitor",
-        .system_id = 21,
-        .instance_id = 1,
-        .source_system_id = 10,
-        .source_instance_id = 1,
-        .source_primary_output_type_id = WeatherApp::get_message_id<TemperatureData>()  // KEY!
+        .outputs = commrat::SimpleOutputConfig{.system_id = 21, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1}
     };
     
     // ========================================================================

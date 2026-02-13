@@ -1,8 +1,36 @@
 # CommRaT Introspection Integration Plan
 
 **Date**: February 12, 2026  
-**Status**: Planning  
+**Status**: COMPLETE (Phase 6.11)  
 **Priority**: Medium
+
+## Implementation Status
+
+**COMPLETE** - February 12, 2026
+
+**Files Created:**
+- `include/commrat/introspection/message_schema.hpp` (97 lines)
+- `include/commrat/introspection/introspection_helper.hpp` (217 lines)
+- `include/commrat/introspection.hpp` (main header)
+- `examples/introspection_example.cpp` (116 lines)
+
+**Key Changes:**
+- Made `MessageRegistry::PayloadTypes` public for introspection access
+- Added `CommRaT::payload_types` type alias
+- Used simple plain structs with default member initializers (no rfl::Field wrappers)
+- Template-based format selection via Writer types
+- Heterogeneous tuple serialization (rfl handles different MessageSchema types)
+
+**Working Features:**
+- Single message export: `export_as<T, Writer>()`
+- All messages export: `export_all<Writer>()`
+- File output: `write_to_file<Writer>(filename)`
+- Outputs complete schemas: CommRaT metadata + SeRTial layout + JSON schema
+- Default JSON format, extensible to YAML/TOML/XML
+
+**Example Output:** 5.9KB JSON file with message IDs, type information, field layouts, offsets, sizes, and embedded JSON schemas for all 3 message types.
+
+---
 
 ## Overview
 
@@ -63,7 +91,25 @@ rfl::apply(message, [](auto& field) {
 
 ## Proposed CommRaT Integration
 
-### Goal: Minimal CommRaT Wrapper for Registry-Wide Introspection
+### Goal: Export Full TimsMessage Structure (Header + Payload)
+
+**Critical Design Decision**: Export `TimsMessage<PayloadT>` NOT just `PayloadT`!
+
+**Why?**
+- `TimsMessage<T>` includes `TimsHeader` (timestamp, seq_number, msg_type, flags)
+- Exposes the full CommRaT message structure (header + payload)
+- Logger/replay tools need header metadata (timestamps, IDs)
+- Web viewers can display message routing information
+- Matches what actually gets sent over TiMS
+
+**What gets exported:**
+```cpp
+template<typename PayloadT>
+struct TimsMessage {
+    TimsHeader header;    // timestamp, seq_number, msg_type, flags, etc.
+    PayloadT payload;     // User data
+};
+```
 
 Provide simple access to SeRTial introspection for the entire message registry, leveraging rfl's built-in format support:
 
@@ -75,25 +121,71 @@ using MyApp = commrat::CommRaT<
 
 // NEW FUNCTIONALITY (minimal wrapper):
 
-// 1. Export single message to any rfl-supported format
+// 1. Export complete schema (CommRaT metadata + SeRTial layout) to any format
 auto json_schema = MyApp::Introspection::export_as<TempData, rfl::json>();
+// Returns:
+// {
+//   "commrat": {
+//     "message_id": 2847561283,
+//     "payload_type": "TempData",
+//     "full_type": "commrat::TimsMessage<TempData>",
+//     "max_message_size": 4096
+//   },
+//   "layout": {
+//     "num_fields": 2,
+//     "fields": [
+//       {"name": "header", "type": "TimsHeader", "offset": 0, "size": 64},
+//       {"name": "payload", "type": "TempData", "offset": 64, "size": 8}
+//     ]
+//   }
+// }
+
 auto yaml_schema = MyApp::Introspection::export_as<TempData, rfl::yaml>();
 auto toml_schema = MyApp::Introspection::export_as<TempData, rfl::toml>();
 
-// 2. Export ALL registered messages (array format for viewer)
+// 2. Export ALL registered messages with complete metadata
 auto all_json = MyApp::Introspection::export_all<rfl::json>();
 MyApp::Introspection::write_to_file<rfl::json>("schemas.json");
 
-// 3. Direct access to SeRTial's StructLayout (zero abstraction cost)
-using TempLayout = sertial::StructLayout<TempData>;
-constexpr auto size = TempLayout::base_packed_size;
+// 3. Direct access to SeRTial's StructLayout for TimsMessage<T>
+using TempMsgLayout = sertial::StructLayout<TimsMessage<TempData>>;
+constexpr auto size = TempMsgLayout::base_packed_size;  // Includes header!
 
-// 4. Runtime field iteration - use rfl directly (CommRaT doesn't need to wrap)
-auto nt = rfl::to_named_tuple(temp_msg);
+// 4. Access compile-time CommRaT metadata
+constexpr uint32_t msg_id = MyApp::get_message_id<TempData>();  // Already exists
+using Schema = commrat::MessageSchema<TempData, MyApp>;
+constexpr auto id_from_schema = Schema{}.commrat.message_id;  // Same value
+
+// 5. Runtime field iteration - use rfl directly (CommRaT doesn't need to wrap)
+TimsMessage<TempData> msg{...};
+auto nt = rfl::to_named_tuple(msg);  // Both header AND payload fields
 rfl::apply(nt, [](auto& field) { /* ... */ });
 ```
 
-**Key Insight**: CommRaT provides registry-wide operations. For single-message operations, users can use SeRTial/rfl directly.
+**What's exported in MessageSchema:**
+
+**CommRaT Layer:**
+- `message_id` - Unique ID for routing/filtering
+- `payload_type` - Human-readable payload type name
+- `full_type` - Complete TimsMessage<T> type
+- `max_message_size` - Buffer allocation hint
+- `registry_name` - Which application/registry
+
+**SeRTial Layer (via StructLayout<TimsMessage<T>>):**
+- `num_fields` - Total fields (header + payload)
+- `sizeof_bytes` - Runtime struct size
+- `base_packed_size` / `max_packed_size` - Serialized size bounds
+- `has_variable_fields` - Contains dynamic containers?
+- `field_sizes[]` - Size of each field
+- `field_offsets[]` - Memory offset of each field
+- `field_is_variable[]` - Which fields are dynamic
+- Field names, types (via rfl::Reflector)
+
+**Key Insight**: 
+- CommRaT adds messaging-layer metadata (IDs, routing)
+- SeRTial provides structural layout (fields, memory)
+- Combined in MessageSchema for complete introspection
+- Logger/viewer tools get everything they need!
 
 ## Implementation Design
 
@@ -110,27 +202,133 @@ rfl::apply(nt, [](auto& field) { /* ... */ });
 #include <string>
 #include <vector>
 #include <fstream>
+#include <typeinfo>
 
 namespace commrat {
+
+// ============================================================================
+// MessageSchema: Combines CommRaT Metadata + SeRTial Layout
+// ============================================================================
+
+/**
+ * @brief Complete schema for a CommRaT message type
+ * 
+ * Combines compile-time CommRaT metadata (message IDs, registry info)
+ * with SeRTial's structural layout (fields, types, sizes, offsets).
+ * This structure is rfl-reflectable and can be exported to JSON/YAML/etc.
+ * 
+ * @tparam PayloadT The user payload type
+ * @tparam Registry The CommRaT registry containing this message
+ */
+template<typename PayloadT, typename Registry>
+struct MessageSchema {
+    /**
+     * @brief CommRaT-specific metadata (compile-time constants)
+     */
+    struct CommRaTMetadata {
+        uint32_t message_id;              // From Registry::get_message_id<PayloadT>()
+        std::string_view payload_type;    // Human-readable type name
+        std::string_view full_type;       // TimsMessage<PayloadT> type name
+        size_t max_message_size;          // From Registry::max_message_size()
+        std::string_view registry_name;   // For multi-registry systems
+        
+        // Compile-time initialization
+        constexpr CommRaTMetadata() 
+            : message_id(Registry::template get_message_id<PayloadT>())
+            , payload_type(rfl::type_name_t<PayloadT>().str())
+            , full_type(rfl::type_name_t<TimsMessage<PayloadT>>().str())
+            , max_message_size(Registry::max_message_size())
+            , registry_name(rfl::type_name_t<Registry>().str())
+        {}
+    };
+    
+    CommRaTMetadata commrat;              // Message ID, type names, size bounds
+    sertial::StructLayout<TimsMessage<PayloadT>> layout;  // Full structure layout
+    
+    // Compile-time construction
+    constexpr MessageSchema() = default;
+};
+
+// ============================================================================
+// IntrospectionHelper: Registry-Wide Export Operations
+// ============================================================================
 
 // Introspection helper - format-agnostic using rfl's writers
 template<typename UserRegistry>
 struct IntrospectionHelper {
-    // Export single message using any rfl-supported format
+    /**
+     * @brief Export complete schema for a message type
+     * 
+     * Exports MessageSchema<T, Registry> which includes:
+     * - CommRaT metadata (message_id, type_names, max_size)
+     * - TimsMessage<T> structure (header + payload)
+     * - SeRTial layout (fields, offsets, sizes, variable flags)
+     * 
+     * @tparam T Payload type
+     * @tparam Format rfl format (json, yaml, toml, xml, etc.)
+     * @return Formatted string containing complete message schema
+     * 
+     * Example output (JSON):
+     * {
+     *   "commrat": {
+     *     "message_id": 2847561283,
+     *     "payload_type": "TemperatureData",
+     *     "full_type": "commrat::TimsMessage<TemperatureData>",
+     *     "max_message_size": 4096,
+     *     "registry_name": "MyApp"
+     *   },
+     *   "layout": {
+     *     "num_fields": 2,
+     *     "sizeof_bytes": 72,
+     *     "base_packed_size": 68,
+     *     "max_packed_size": 68,
+     *     "has_variable_fields": false,
+     *     "fields": [
+     *       {
+     *         "name": "header",
+     *         "type": "TimsHeader",
+     *         "offset": 0,
+     *         "size": 64,
+     *         "is_variable": false
+     *       },
+     *       {
+     *         "name": "payload",
+     *         "type": "TemperatureData", 
+     *         "offset": 64,
+     *         "size": 8,
+     *         "is_variable": false
+     *       }
+     *     ]
+     *   }
+     * }
+     */
     template<typename T, typename Format = rfl::json>
     static auto export_as() {
-        using Layout = sertial::StructLayout<T>;
-        return Format::write(Layout{});  // Leverage rfl's format abstraction
+        using Schema = MessageSchema<T, UserRegistry>;
+        return Format::write(Schema{});  // Leverage rfl's format abstraction
     }
     
-    // Export all messages in registry to format-specific container
+    /**
+     * @brief Export complete schemas for all registered messages
+     * 
+     * Returns array/collection of MessageSchema instances, one per registered type.
+     * Each contains full CommRaT + SeRTial metadata.
+     * 
+     * @tparam Format rfl format (json, yaml, toml, xml, etc.)
+     * @return Formatted collection of all message schemas
+     */
     template<typename Format = rfl::json>
     static auto export_all() {
         using PayloadTuple = typename UserRegistry::payload_types;
         return export_all_impl<Format>(PayloadTuple{});
     }
     
-    // Convenience: write all to file
+    /**
+     * @brief Convenience: write all schemas to file
+     * 
+     * @tparam Format rfl format (json, yaml, toml, xml, etc.)
+     * @param filename Output file path
+     */
     template<typename Format = rfl::json>
     static void write_to_file(const std::string& filename) {
         auto data = export_all<Format>();
@@ -139,29 +337,44 @@ struct IntrospectionHelper {
     }
     
 private:
-    // Helper to export tuple of types
+    // Helper to export tuple of types as MessageSchema<T, Registry> structures
     template<typename Format, typename... PayloadTypes>
     static auto export_all_impl(std::tuple<PayloadTypes...>) {
-        // Create vector of StructLayout instances
-        std::vector<rfl::Result<rfl::json::Reader::InputVarType>> layouts;
+        // Create vector of MessageSchema instances
+        std::vector<rfl::Result<rfl::json::Reader::InputVarType>> schemas;
         
-        (layouts.push_back(
-            Format::write(sertial::StructLayout<PayloadTypes>{})
+        // Export FULL schema (CommRaT metadata + layout) for each type
+        (schemas.push_back(
+            Format::write(MessageSchema<PayloadTypes, UserRegistry>{})
         ), ...);
         
         // rfl handles the format conversion automatically
-        return Format::write(layouts);
+        return Format::write(schemas);
     }
 };
 
 } // namespace commrat
 ```
 
+**Key Changes from Original Plan:**
+1. **MessageSchema struct** - Wraps both CommRaT and SeRTial metadata
+2. **CommRaTMetadata** - Compile-time message ID, type names, size bounds
+3. **layout field** - Full `StructLayout<TimsMessage<T>>` with all SeRTial info
+4. **Everything is rfl-reflectable** - Can export to any format
+
+**What gets exported:**
+- Message ID (for routing, filtering in logger/viewer)
+- Type names (human-readable debugging)
+- Max message size (buffer allocation)
+- Full TimsMessage structure (header fields + payload fields)
+- Field-level metadata (names, types, offsets, sizes, variable flags)
+
 **Notes**: 
-- Only ~50 lines of code!
+- Only ~100 lines of code!
 - Works with JSON, YAML, TOML, XML, etc. via rfl
 - No custom formatting logic needed
-- SeRTial's Reflector does all the heavy lifting
+- SeRTial's Reflector does layout introspection
+- CommRaT adds messaging-layer metadata on top
 
 ### Phase 2: Add to CommRaT<> Template
 
@@ -672,25 +885,67 @@ composer.start_all();
 - [ ] Runtime field iteration works with visitor pattern
 ## Related Files
 
-**To Create** (minimal):
-- `include/commrat/introspection.hpp` (~50 lines)
-- `examples/introspection_example.cpp`
+**Created** (implementation complete):
+- `include/commrat/introspection/message_schema.hpp` (97 lines)
+- `include/commrat/introspection/introspection_helper.hpp` (217 lines)
+- `include/commrat/introspection.hpp` (main header, ~30 lines)
+- `examples/introspection_example.cpp` (116 lines)
 
-**To Modify**:
-- `include/commrat/commrat.hpp` (add 3 lines: `using Introspection = ...`)
-- `docs/USER_GUIDE.md` (add brief introspection section)
-- `docs/README.md` (update feature list)
-- `docs/ROADMAP.md` (mark as complete)
-- `CMakeLists.txt` (add example)
+**Modified**:
+- `include/commrat/commrat.hpp` - Added `using payload_types = ...` and `using Introspection = ...`
+- `include/commrat/messaging/message_registry.hpp` - Made `PayloadTypes` public
+- `docs/README.md` - Updated feature list with introspection system
+- `docs/work/INTROSPECTION_INTEGRATION_PLAN.md` - Updated status to COMPLETE
+- `CMakeLists.txt` - Added introspection_example target
 
 **Use Directly** (no wrapper needed):
 - SeRTial: `sertial::StructLayout<T>` for compile-time queries
 - rfl: `rfl::to_named_tuple()` + `rfl::apply()` for runtime iteration
-- rfl: Format writers (`rfl::json`, `rfl::yaml`, `rfl::toml`, etc.)
+- rfl: Format writers (`rfl::json::Writer`, `rfl::yaml::Writer`, etc.)
 
 **Tools** (already exist in SeRTial):
 - SeRTial: `tools/sertial-inspect/viewer.html` (web viewer)
 - SeRTial: `tools/sertial-inspect/sertial-inspect` (CLI tool)
+
+---
+
+## Final Implementation Notes
+
+### What We Built (February 12, 2026)
+
+**API Simplifications:**
+- Used `Writer = rfl::json::Writer` template parameter instead of namespace
+- Plain structs with default member initializers (no rfl::Field wrappers needed)
+- rfl automatically serializes heterogeneous tuples as JSON arrays
+- Default JSON format, easily extensible to YAML/TOML/XML
+
+**Key Design Decisions:**
+1. **Exported `TimsMessage<T>` not just `PayloadT`** - Full structure includes header
+2. **Simple aggregation** - Just put data in structs, let rfl handle serialization
+3. **Made `PayloadTypes` public** - Enables registry-wide iteration
+4. **Compile-time construction** - All metadata computed at compile time, no runtime cost
+
+**Output Quality:**
+- Complete schemas: message IDs, type names, field layouts
+- SeRTial provides: field_names, field_types, field_sizes, field_offsets, field_alignments
+- Even includes embedded JSON schemas in `type_schema` field
+- Production-ready for logger/viewer tools
+
+**Usage Pattern:**
+```cpp
+using MyApp = CommRaT<...>;
+
+// Single message
+auto json = MyApp::Introspection::export_as<TempData>();
+
+// All messages  
+auto all = MyApp::Introspection::export_all();
+
+// Write to file
+MyApp::Introspection::write_to_file("schemas.json");
+```
+
+---
 
 ## Next Steps After Introspection
 
@@ -709,15 +964,3 @@ Once introspection is complete, these features become feasible:
    - Runtime dataflow composition
 
 Both features depend on introspection being available first.
-
-**To Modify**:
-- `include/commrat/commrat.hpp` (add introspection methods)
-- `docs/USER_GUIDE.md` (add Section 13)
-- `docs/README.md` (update feature list)
-- `docs/ROADMAP.md` (mark as complete)
-- `CMakeLists.txt` (add new example)
-
-**External Reference**:
-- SeRTial: `tools/sertial-inspect/viewer.html`
-- SeRTial: `include/sertial/core/layout/struct_layout.hpp`
-- SeRTial: `include/sertial/core/layout/struct_layout_reflector.hpp`

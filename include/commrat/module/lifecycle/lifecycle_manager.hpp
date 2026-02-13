@@ -78,8 +78,8 @@ public:
             module.subscribe_to_all_sources();
         } else if constexpr (module.has_continuous_input) {
             // Single-input (backward compatible)
-            if (module.config_.source_system_id && module.config_.source_instance_id) {
-                module.subscribe_to_source(*module.config_.source_system_id, *module.config_.source_instance_id);
+            if (module.config_.has_single_input()) {
+                module.subscribe_to_source(module.config_.source_system_id(), module.config_.source_instance_id());
             }
         }
         
@@ -133,13 +133,13 @@ public:
         // Unsubscribe from source(s)
         if constexpr (module.has_multi_input) {
             // Multi-input: Unsubscribe from all configured sources
-            for (const auto& source : module.config_.input_sources) {
+            for (const auto& source : module.config_.input_sources()) {
                 module.unsubscribe_from_multi_input_source(source);
             }
         } else if constexpr (module.has_continuous_input) {
             // Single continuous input (legacy)
-            if (module.config_.source_system_id && module.config_.source_instance_id) {
-                module.unsubscribe_from_source(*module.config_.source_system_id, *module.config_.source_instance_id);
+            if (module.config_.has_single_input()) {
+                module.unsubscribe_from_source(module.config_.source_system_id(), module.config_.source_instance_id());
             }
         }
         

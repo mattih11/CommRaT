@@ -171,8 +171,8 @@ int main() {
         // Counter module configuration (LoopInput - runs as fast as possible)
         ModuleConfig counter_config{
             .name = "FastCounter",
-            .system_id = 0,
-            .instance_id = 0,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 0},
+            .inputs = commrat::NoInputConfig{},
             .period = std::chrono::milliseconds(0),  // Ignored for LoopInput
             .message_slots = 100,
             .max_subscribers = 8,
@@ -183,15 +183,13 @@ int main() {
         // Monitor module configuration (subscribes to counter)
         ModuleConfig monitor_config{
             .name = "ThroughputMonitor",
-            .system_id = 0,
-            .instance_id = 1,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 0, .source_instance_id = 0},
             .period = std::chrono::milliseconds(0),
             .message_slots = 100,
             .max_subscribers = 8,
             .priority = 5,
-            .realtime = false,
-            .source_system_id = 0,      // Subscribe to counter
-            .source_instance_id = 0
+            .realtime = false
         };
         
         std::cout << "Creating modules...\n";

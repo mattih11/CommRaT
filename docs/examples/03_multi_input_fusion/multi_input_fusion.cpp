@@ -214,7 +214,7 @@ public:
         , gps_stale_warnings_(0)
     {
         std::cout << "[Fusion] Initialized with sync_tolerance=" 
-                  << config.sync_tolerance.count() << "ms\n";
+                  << config.sync_tolerance().count() << "ms\n";
     }
 
 protected:
@@ -379,16 +379,16 @@ int main() {
     // IMU: 100Hz (10ms period)
     commrat::ModuleConfig imu_config{
         .name = "IMU",
-        .system_id = 10,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = commrat::Milliseconds(10)  // 100Hz
     };
     
     // GPS: 10Hz (100ms period)
     commrat::ModuleConfig gps_config{
         .name = "GPS",
-        .system_id = 11,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 11, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = commrat::Milliseconds(100)  // 10Hz
     };
     
@@ -396,15 +396,18 @@ int main() {
     // Configure Fusion Module (Multi-Input)
     // ========================================================================
     
+    // NEW: Multi-input uses index-based type inference - no source_primary_output_type_id needed!
     commrat::ModuleConfig fusion_config{
         .name = "SensorFusion",
-        .system_id = 20,
-        .instance_id = 1,
-        .input_sources = {
-            {.system_id = 10, .instance_id = 1, .is_primary = true, .source_primary_output_type_id = FusionApp::get_message_id<IMUData>()},   // IMU (primary)
-            {.system_id = 11, .instance_id = 1, .is_primary = false, .source_primary_output_type_id = FusionApp::get_message_id<GPSData>()}   // GPS (secondary)
-        },
-        .sync_tolerance = commrat::Milliseconds(100)  // 100ms tolerance for getData (GPS is 10Hz)
+        .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+        .inputs = commrat::MultiInputConfig{
+            .sources = {
+                {.system_id = 10, .instance_id = 1},  // IMU (primary, first in list)
+                {.system_id = 11, .instance_id = 1}   // GPS (secondary)
+            },
+            .history_buffer_size = 100,
+            .sync_tolerance = commrat::Milliseconds(100)  // 100ms tolerance for getData
+        }
     };
     
     // ========================================================================
@@ -413,10 +416,8 @@ int main() {
     
     commrat::ModuleConfig monitor_config{
         .name = "FusionMonitor",
-        .system_id = 30,
-        .instance_id = 1,
-        .source_system_id = 20,
-        .source_instance_id = 1
+        .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 20, .source_instance_id = 1}
     };
     
     // ========================================================================

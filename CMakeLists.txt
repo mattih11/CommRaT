@@ -81,6 +81,24 @@ add_executable(doc_example_multi_input_fusion docs/examples/03_multi_input_fusio
 target_link_libraries(doc_example_multi_input_fusion PRIVATE commrat)
 target_include_directories(doc_example_multi_input_fusion PRIVATE /usr/local/include/rack)
 
+# Introspection example
+add_executable(introspection_example examples/introspection_example.cpp)
+target_link_libraries(introspection_example PRIVATE commrat)
+target_include_directories(introspection_example PRIVATE /usr/local/include/rack)
+
+# Phase 7.0: Standalone module main wrapper examples
+add_executable(module_main_basic examples/module_main_basic.cpp)
+target_link_libraries(module_main_basic PRIVATE commrat)
+target_include_directories(module_main_basic PRIVATE /usr/local/include/rack)
+
+add_executable(module_main_with_config examples/module_main_with_config.cpp)
+target_link_libraries(module_main_with_config PRIVATE commrat)
+target_include_directories(module_main_with_config PRIVATE /usr/local/include/rack)
+
+add_executable(module_main_multiformat examples/module_main_multiformat.cpp)
+target_link_libraries(module_main_multiformat PRIVATE commrat)
+target_include_directories(module_main_multiformat PRIVATE /usr/local/include/rack)
+
 # Enable testing
 enable_testing()
 
@@ -169,6 +187,11 @@ add_test(NAME example_sensor_fusion COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run
 add_test(NAME doc_example_hello_commrat COMMAND doc_example_hello_commrat)
 add_test(NAME doc_example_multi_output COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:doc_example_multi_output>)
 add_test(NAME doc_example_multi_input_fusion COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:doc_example_multi_input_fusion>)
+
+# Add module_main examples as tests (standalone deployment examples)
+add_test(NAME module_main_basic COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_module_main_example.sh $<TARGET_FILE:module_main_basic>)
+add_test(NAME module_main_with_config COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_module_main_example.sh $<TARGET_FILE:module_main_with_config>)
+add_test(NAME module_main_multiformat COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_module_main_example.sh $<TARGET_FILE:module_main_multiformat>)
 
 
 # Install targets

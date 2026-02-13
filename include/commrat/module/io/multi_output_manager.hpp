@@ -250,8 +250,17 @@ protected:
     template<std::size_t Index>
     void output_work_loop() {
         using OutputType = std::tuple_element_t<Index, OutputTypesTuple>;
+        // For multi-output config, use indexed access
+        uint8_t sys_id, inst_id;
+        if (derived().config_.has_multi_output_config()) {
+            sys_id = derived().config_.system_id(Index);
+            inst_id = derived().config_.instance_id(Index);
+        } else {
+            sys_id = derived().config_.system_id();
+            inst_id = derived().config_.instance_id();
+        }
         uint32_t work_mailbox_addr = commrat::get_mailbox_address<OutputType, OutputTypesTuple, UserRegistry>(
-            derived().config_.system_id, derived().config_.instance_id, MailboxType::WORK);
+            sys_id, inst_id, MailboxType::WORK);
         
         std::cout << "[" << derived().config_.name << "] output_work_loop[" << Index << "] started for "
                   << typeid(OutputType).name() << ", listening on WORK mailbox " 

@@ -59,8 +59,11 @@ void test_multi_output_periodic() {
     // Verify signature compiles
     ModuleConfig config{
         .name = "MultiOutputPeriodic",
-        .system_id = 0,
-        .instance_id = 1,
+        .outputs = commrat::MultiOutputConfig{.addresses = {
+            {.system_id = 0, .instance_id = 1},  // DataA output
+            {.system_id = 0, .instance_id = 1}   // DataB output
+        }},
+        .inputs = commrat::NoInputConfig{},
         .period = std::chrono::milliseconds(100)
     };
     
@@ -105,11 +108,12 @@ void test_multi_output_continuous() {
     
     ModuleConfig config{
         .name = "MultiOutputContinuous",
-        .system_id = 0,
-        .instance_id = 2,
-        .period = std::chrono::milliseconds(100),
-        .source_system_id = 0,
-        .source_instance_id = 1
+        .outputs = commrat::MultiOutputConfig{.addresses = {
+            {.system_id = 0, .instance_id = 2},  // DataA output
+            {.system_id = 0, .instance_id = 2}   // DataB output
+        }},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 0, .source_instance_id = 1},
+        .period = std::chrono::milliseconds(100)
     };
     
     MultiOutputContinuousModule module(config);

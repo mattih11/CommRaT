@@ -112,8 +112,8 @@ int main() {
     // Create sensor module with command handling
     ModuleConfig sensor_config{
         .name = "CommandableSensor",
-        .system_id = 0,
-        .instance_id = 0,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 0},
+        .inputs = commrat::NoInputConfig{},
         .period = std::chrono::milliseconds(200),
         .message_slots = 10,
         .max_subscribers = 8,

@@ -205,8 +205,11 @@ int main() {
     //-------------------------------------------------------------------------
     commrat::ModuleConfig counter_config{
         .name = "Counter",                        // Human-readable name (for debugging)
-        .system_id = 10,                          // Unique system ID (must be unique)
-        .instance_id = 1,                         // Instance within system
+        .outputs = commrat::SimpleOutputConfig{
+            .system_id = 10,                      // Unique system ID (must be unique)
+            .instance_id = 1                      // Instance within system
+        },
+        .inputs = commrat::NoInputConfig{},       // No inputs (periodic generator)
         .period = commrat::Milliseconds(100)      // Generate message every 100ms (10Hz)
     };
     
@@ -214,11 +217,15 @@ int main() {
     // Configure the display module (consumer)
     //-------------------------------------------------------------------------
     commrat::ModuleConfig display_config{
-        .name = "Display",           // Human-readable name
-        .system_id = 20,             // Different system ID (must differ from producer)
-        .instance_id = 1,            // Instance within system
-        .source_system_id = 10,      // Subscribe to Counter (system 10)
-        .source_instance_id = 1      // Instance 1 of Counter
+        .name = "Display",                         // Human-readable name
+        .outputs = commrat::SimpleOutputConfig{
+            .system_id = 20,                       // Different system ID (must differ from producer)
+            .instance_id = 1                       // Instance within system
+        },
+        .inputs = commrat::SingleInputConfig{
+            .source_system_id = 10,                // Subscribe to Counter (system 10)
+            .source_instance_id = 1                // Instance 1 of Counter
+        }
     };
     
     //-------------------------------------------------------------------------

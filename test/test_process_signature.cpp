@@ -74,8 +74,8 @@ void test_periodic_single_output() {
     
     ModuleConfig config{
         .name = "PeriodicSensor",
-        .system_id = 0,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = std::chrono::milliseconds{10},
         .message_slots = 10,
         .max_subscribers = 8,
@@ -118,8 +118,8 @@ void test_loop_single_output() {
     
     ModuleConfig config{
         .name = "LoopProcessor",
-        .system_id = 0,
-        .instance_id = 2,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 2},
+        .inputs = commrat::NoInputConfig{},
         .message_slots = 10,
         .max_subscribers = 8,
         .priority = 10,
@@ -160,14 +160,12 @@ void test_continuous_single_output() {
     
     ModuleConfig config{
         .name = "ContinuousFilter",
-        .system_id = 0,
-        .instance_id = 3,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 3},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 0, .source_instance_id = 1},
         .message_slots = 10,
         .max_subscribers = 8,
         .priority = 10,
-        .realtime = false,
-        .source_system_id = 0,
-        .source_instance_id = 1
+        .realtime = false
     };
     
     ContinuousSingleOutputModule module(config);
@@ -206,8 +204,8 @@ void test_backward_compatible() {
     
     ModuleConfig config{
         .name = "LegacySensor",
-        .system_id = 0,
-        .instance_id = 4,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 4},
+        .inputs = commrat::NoInputConfig{},
         .period = std::chrono::milliseconds{10},
         .message_slots = 10,
         .max_subscribers = 8,

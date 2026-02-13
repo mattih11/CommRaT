@@ -339,7 +339,9 @@ public:
         , data_mailbox_(has_continuous_input && !has_multi_input ? 
             std::make_optional<DataMailbox>(MailboxConfig{
                 .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
-                    config.system_id, config.instance_id, MailboxType::DATA),
+                    config.has_multi_output_config() ? config.system_id(0) : config.system_id(),
+                    config.has_multi_output_config() ? config.instance_id(0) : config.instance_id(),
+                    MailboxType::DATA),
                 .message_slots = config.message_slots,
                 .max_message_size = UserRegistry::max_message_size,
                 .send_priority = static_cast<uint8_t>(config.priority),
@@ -443,7 +445,7 @@ protected:
         subscription_protocol_.unsubscribe_from_source(source_system_id, source_instance_id);
     }
     
-    void unsubscribe_from_multi_input_source(const InputSource& source) {
+    void unsubscribe_from_multi_input_source(const MultiInputConfig::InputSource& source) {
         subscription_protocol_.unsubscribe_from_multi_input_source(source);
     }
 

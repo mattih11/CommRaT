@@ -60,9 +60,21 @@ struct MailboxSet {
     
     /**
      * @brief Initialize all mailboxes in this set
+     * 
+     * @tparam OutputIndex Index of this output in multi-output (default 0)
      */
+    template<std::size_t OutputIndex = 0>
     void initialize(const ModuleConfig& config) {
-        base_address = calculate_base(config.system_id, config.instance_id);
+        // For multi-output, use indexed access; for single/no output, use non-indexed
+        uint8_t sys_id, inst_id;
+        if (config.has_multi_output_config()) {
+            sys_id = config.system_id(OutputIndex);
+            inst_id = config.instance_id(OutputIndex);
+        } else {
+            sys_id = config.system_id();
+            inst_id = config.instance_id();
+        }
+        base_address = calculate_base(sys_id, inst_id);
         
         // CMD mailbox
         cmd.emplace(MailboxConfig{

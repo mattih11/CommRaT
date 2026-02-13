@@ -163,7 +163,7 @@ private:
         // Non-blocking getData with tolerance
         auto result = mailbox.template getData<InputType>(
             primary_timestamp,
-            module.config_.sync_tolerance,
+            module.config_.sync_tolerance(),
             InterpolationMode::NEAREST
         );
         

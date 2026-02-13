@@ -39,7 +39,7 @@ protected:
         std::cout << "[Producer] Published temperature: " << temp << "°C\n";
         
         output = {
-            .sensor_id = config_.instance_id,
+            .sensor_id = config_.instance_id(),
             .temperature_c = temp,
             .confidence = 1.0f
         };
@@ -108,8 +108,8 @@ int main() {
         // system_id=0 (first system), instance_id=1 (first sensor instance)
         ModuleConfig producer_config{
             .name = "SensorModule",
-            .system_id = 0,
-            .instance_id = 1,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 1},
+            .inputs = commrat::NoInputConfig{},
             .period = std::chrono::milliseconds{100},
             .message_slots = 10,
             .max_subscribers = 8,
@@ -122,14 +122,12 @@ int main() {
         // system_id=0, instance_id=2 (second instance)
         ModuleConfig consumer_config{
             .name = "FilterModule",
-            .system_id = 0,
-            .instance_id = 2,
+            .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 2},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 0, .source_instance_id = 1},
             .message_slots = 10,
             .max_subscribers = 8,
             .priority = 10,
-            .realtime = false,
-            .source_system_id = 0,    // Subscribe to producer in system 0
-            .source_instance_id = 1   // Producer is instance 1
+            .realtime = false
         };
         FilterModule consumer(consumer_config);
         

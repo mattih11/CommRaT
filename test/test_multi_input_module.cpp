@@ -116,18 +116,14 @@ int main() {
     std::cout << "Current test validates Phase 6.5 config changes only\n\n";
     
     // Test 1: InputSource struct compiles
-    InputSource imu_source{
+    commrat::MultiInputConfig::InputSource imu_source{
         .system_id = 10,
-        .instance_id = 1,
-        .is_primary = true,
-        .source_primary_output_type_id = std::nullopt
+        .instance_id = 1
     };
     
-    InputSource gps_source{
+    commrat::MultiInputConfig::InputSource gps_source{
         .system_id = 20,
-        .instance_id = 1,
-        .is_primary = false,
-        .source_primary_output_type_id = std::nullopt
+        .instance_id = 1
     };
     
     std::cout << "TEST 1: InputSource struct compiles ✓\n";
@@ -135,42 +131,34 @@ int main() {
     // Test 2: ModuleConfig with input_sources compiles
     ModuleConfig fusion_config{
         .name = "SensorFusion",
-        .system_id = 30,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+        .inputs = commrat::MultiInputConfig{
+            .sources = {imu_source, gps_source},
+            .history_buffer_size = 100,
+            .sync_tolerance = 50ms
+        },
         .period = 10ms,
         .message_slots = 10,
         .max_subscribers = 8,
         .priority = 10,
-        .realtime = false,
-        .source_system_id = std::nullopt,
-        .source_instance_id = std::nullopt,
-        .source_primary_output_type_id = std::nullopt,
-        .input_sources = {imu_source, gps_source},
-        .history_buffer_size = 100,
-        .sync_tolerance = 50ms
+        .realtime = false
     };
     
     std::cout << "TEST 2: ModuleConfig with input_sources compiles ✓\n";
-    std::cout << "  - input_sources.size() = " << fusion_config.input_sources.size() << "\n";
-    std::cout << "  - history_buffer_size = " << fusion_config.history_buffer_size << "\n";
-    std::cout << "  - sync_tolerance = " << fusion_config.sync_tolerance.count() << " ms\n";
+    std::cout << "  - input_sources.size() = " << fusion_config.input_sources().size() << "\n";
+    std::cout << "  - history_buffer_size = " << fusion_config.history_buffer_size() << "\n";
+    std::cout << "  - sync_tolerance = " << fusion_config.sync_tolerance().count() << " ms\n";
     
     // Test 3: Single-input modules still work (backward compatibility)
     ModuleConfig imu_config{
         .name = "IMU",
-        .system_id = 10,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = 10ms,
         .message_slots = 10,
         .max_subscribers = 8,
         .priority = 10,
-        .realtime = false,
-        .source_system_id = std::nullopt,
-        .source_instance_id = std::nullopt,
-        .source_primary_output_type_id = std::nullopt,
-        .input_sources = {},
-        .history_buffer_size = 100,
-        .sync_tolerance = 50ms
+        .realtime = false
     };
     
     std::cout << "\nTEST 3: Single-input Module config still compiles ✓\n";

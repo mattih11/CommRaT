@@ -103,8 +103,8 @@ int main() {
     // Create modules - notice clean config!
     ModuleConfig producer_config{
         .name = "SensorModule",
-        .system_id = 0,
-        .instance_id = 0,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 0},
+        .inputs = commrat::NoInputConfig{},
         .period = std::chrono::milliseconds(100),
         .message_slots = 10,
         .max_subscribers = 8,
@@ -116,15 +116,13 @@ int main() {
     
     ModuleConfig consumer_config{
         .name = "FilterModule",
-        .system_id = 0,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 0, .source_instance_id = 0},
         .period = std::chrono::milliseconds(0),
         .message_slots = 10,
         .max_subscribers = 8,
         .priority = 10,
-        .realtime = false,
-        .source_system_id = 0,
-        .source_instance_id = 0  // Subscribe to producer
+        .realtime = false
     };
     
     FilterModule consumer(consumer_config);

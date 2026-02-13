@@ -25,6 +25,7 @@
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/registry_module.hpp"
+#include "commrat/introspection/introspection_helper.hpp"
 
 /**
  * @namespace commrat
@@ -120,6 +121,9 @@ public:
     using Registry::visit;
     using Registry::dispatch;
     using Registry::max_message_size;
+    
+    // Expose payload types tuple for introspection
+    using payload_types = typename Registry::PayloadTypes;
     
     /**
      * @brief Module template - create modules for this application
@@ -218,6 +222,45 @@ public:
      */
     template<std::size_t HistorySize>
     using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;
+    
+    /**
+     * @brief Introspection helper - export message schemas to any format
+     * 
+     * Provides registry-wide schema export combining:
+     * - CommRaT metadata (message IDs, type names, size bounds)
+     * - SeRTial layout (fields, types, offsets, sizes, variable flags)
+     * 
+     * Supports any rfl format: JSON, YAML, TOML, XML, etc.
+     * 
+     * **Usage:**
+     * @code
+     * // Export single message schema to JSON
+     * auto json = MyApp::Introspection::export_as<TempData, rfl::json>();
+     * 
+     * // Export all message schemas to YAML
+     * auto yaml = MyApp::Introspection::export_all<rfl::yaml>();
+     * 
+     * // Write all schemas to file
+     * MyApp::Introspection::write_to_file<rfl::json>("schemas.json");
+     * @endcode
+     * 
+     * **What's exported:**
+     * - `message_id` - Unique ID for routing/filtering
+     * - `payload_type` - Human-readable type name
+     * - `full_type` - Complete TimsMessage<T> type
+     * - `max_message_size` - Buffer allocation hint
+     * - Field-level metadata (names, types, offsets, sizes)
+     * 
+     * **Use cases:**
+     * - Logger tools: Record message structure with data
+     * - Viewer tools: Display message fields dynamically
+     * - Documentation: Auto-generate API docs
+     * - Debugging: Understand message layout at runtime
+     * 
+     * @see IntrospectionHelper for detailed API
+     * @see MessageSchema for schema structure
+     */
+    using Introspection = IntrospectionHelper<CommRaT>;
 };
 
 } // namespace commrat

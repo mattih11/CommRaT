@@ -35,6 +35,78 @@ struct SubscriptionState {
 };
 
 /**
+ * @brief Subscriber management mixin
+ * 
+ * Provides add/remove subscriber functionality with thread-safe access.
+ * Intended to be used as CRTP base or member in Module class.
+ */
+class SubscriberManager {
+protected:
+    std::vector<uint32_t> subscribers_;
+    mutable std::mutex subscribers_mutex_;
+    size_t max_subscribers_{100};  // Default, overridden by config
+    
+public:
+    virtual ~SubscriberManager() = default;
+    
+    void set_max_subscribers(size_t max) { max_subscribers_ = max; }
+    
+    void add_subscriber(uint32_t subscriber_id) {
+        std::lock_guard<std::mutex> lock(subscribers_mutex_);
+        
+        // Check if already subscribed
+        if (std::find(subscribers_.begin(), subscribers_.end(), subscriber_id) != subscribers_.end()) {
+            return;
+        }
+        
+        // Check capacity
+        if (subscribers_.size() >= max_subscribers_) {
+            throw std::runtime_error("Maximum subscribers reached");
+        }
+        
+        subscribers_.push_back(subscriber_id);
+    }
+    
+    /**
+     * @brief Add subscriber (virtual method for overriding in Module)
+     * 
+     * For single-output modules, this calls add_subscriber().
+     * For multi-output modules, Module overrides this to route to correct output list.
+     */
+    virtual void add_subscriber_to_output(uint32_t subscriber_id) {
+        // Default: single-output behavior
+        add_subscriber(subscriber_id);
+    }
+    
+    void remove_subscriber(uint32_t subscriber_id) {
+        std::lock_guard<std::mutex> lock(subscribers_mutex_);
+        subscribers_.erase(
+            std::remove(subscribers_.begin(), subscribers_.end(), subscriber_id),
+            subscribers_.end()
+        );
+    }
+    
+    size_t subscriber_count() const {
+        std::lock_guard<std::mutex> lock(subscribers_mutex_);
+        return subscribers_.size();
+    }
+    
+    std::vector<uint32_t> get_subscribers() const {
+        std::lock_guard<std::mutex> lock(subscribers_mutex_);
+        return subscribers_;
+    }
+    
+    // For Publisher access (non-const, caller must lock)
+    std::vector<uint32_t>& get_subscribers() {
+        return subscribers_;
+    }
+    
+    std::mutex& get_subscribers_mutex() {
+        return subscribers_mutex_;
+    }
+};
+
+/**
  * @brief Subscription protocol handler
  * 
  * Template parameters:
@@ -106,25 +178,25 @@ public:
         
         if constexpr (has_multi_input) {
             // Multi-input: subscribe to each source in input_sources
-            auto& sources = config_->input_sources();
-            if (sources.empty()) {
+            if (config_->input_sources.empty()) {
                 std::cerr << "[" << module_name_ << "] ERROR: Multi-input module but input_sources is empty!\n";
                 return;
             }
             
             std::lock_guard<std::mutex> lock(subscription_mutex_);
-            input_subscriptions_.resize(sources.size());
+            input_subscriptions_.resize(config_->input_sources.size());
             
-            for (size_t i = 0; i < sources.size(); ++i) {
-                auto& source = sources[i];  // Non-const to populate input_index
-                source.input_index = i;  // Save the index for unsubscribe
-                subscribe_to_source_impl(config_->input_system_id(i), config_->input_instance_id(i), i);
+            for (size_t i = 0; i < config_->input_sources.size(); ++i) {
+                const auto& source = config_->input_sources[i];
+                subscribe_to_source_impl(source.system_id, source.instance_id, 
+                                          source.source_primary_output_type_id, i);
             }
         } else if constexpr (has_continuous_input) {
-            // Single-input: use config fields
-            if (config_->has_single_input()) {
+            // Single-input: use legacy config fields
+            if (config_->source_system_id && config_->source_instance_id) {
                 input_subscriptions_.resize(1);
-                subscribe_to_source_impl(config_->source_system_id(), config_->source_instance_id(), 0);
+                subscribe_to_source_impl(*config_->source_system_id, *config_->source_instance_id,
+                                          config_->source_primary_output_type_id, 0);
             }
         }
     }
@@ -135,7 +207,8 @@ public:
     void subscribe_to_source(uint8_t source_system_id, uint8_t source_instance_id) {
         static_assert(has_continuous_input, "subscribe_to_source() only available for continuous input modules");
         input_subscriptions_.resize(1);
-        subscribe_to_source_impl(source_system_id, source_instance_id, 0);
+        subscribe_to_source_impl(source_system_id, source_instance_id, 
+                                  config_->source_primary_output_type_id, 0);
     }
     
     /**
@@ -144,7 +217,7 @@ public:
     void unsubscribe_from_source(uint8_t source_system_id, uint8_t source_instance_id) {
         static_assert(has_continuous_input, "unsubscribe_from_source() only available for continuous input modules");
         
-        uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+        uint32_t our_base_addr = calculate_base_address(config_->system_id, config_->instance_id);
         
         UnsubscribeRequestType request{
             .subscriber_mailbox_id = our_base_addr
@@ -169,24 +242,23 @@ public:
     /**
      * @brief Unsubscribe from multi-input source
      */
-    /**
-     * @brief Unsubscribe from multi-input source
-     * 
-     * Requires InputSource.input_index to be set (auto-populated during subscription)
-     */
     void unsubscribe_from_multi_input_source(const MultiInputConfig::InputSource& source) {
         static_assert(has_multi_input, "unsubscribe_from_multi_input_source() only for multi-input modules");
         
-        uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+        uint32_t our_base_addr = calculate_base_address(config_->system_id, config_->instance_id);
         
         UnsubscribeRequestType request{
             .subscriber_mailbox_id = our_base_addr
         };
         
-        // Use the input_index to get the correct type ID
-        // Multi-input: use the input type at source.input_index
-        uint32_t source_data_type_id = get_input_type_id_at_index(source.input_index);
+        // Use source_primary_output_type_id if provided, otherwise we can't compute address
+        // In practice, multi-input always requires this field
+        if (!source.source_primary_output_type_id.has_value()) {
+            std::cerr << "[" << module_name_ << "] ERROR: Cannot unsubscribe - source_primary_output_type_id not set!\n";
+            return;
+        }
         
+        uint32_t source_data_type_id = *source.source_primary_output_type_id;
         uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
         uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
                                (source.system_id << 8) | source.instance_id;
@@ -270,6 +342,7 @@ protected:
      * @brief Internal implementation: send SubscribeRequest to one source
      */
     void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
+                                   std::optional<uint32_t> source_primary_output_type_id,
                                    size_t source_index) {
         // For multi-input: Calculate base address using the INPUT TYPE we're subscribing to
         // This ensures producers send to the correct input-specific DATA mailbox
@@ -280,21 +353,16 @@ protected:
             uint32_t input_type_id = get_input_type_id_at_index(source_index);
             uint16_t input_type_id_low = static_cast<uint16_t>(input_type_id & 0xFFFF);
             subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                                    (config_->system_id() << 8) | config_->instance_id();
+                                    (config_->system_id << 8) | config_->instance_id;
         } else if constexpr (has_continuous_input) {
-            // Single-input: use INPUT type for base address (what we're receiving)
+            // Single-input: use INPUT type for base address (what we're subscribing to)
             uint32_t input_type_id = Registry::template get_message_id<InputData>();
             uint16_t input_type_id_low = static_cast<uint16_t>(input_type_id & 0xFFFF);
             subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                                    (config_->system_id() << 8) | config_->instance_id();
-            std::cout << "[DEBUG subscription.hpp:290] Single-input: has_continuous_input=true, "
-                      << "InputData type_id=" << input_type_id 
-                      << " (low16=" << input_type_id_low << ")"
-                      << ", InputData name=" << typeid(InputData).name()
-                      << ", subscriber_base_addr=" << subscriber_base_addr << "\n";
+                                    (config_->system_id << 8) | config_->instance_id;
         } else {
-            // Fallback: no input (shouldn't happen for subscription)
-            subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+            // Fallback: use output type for base address (backward compatible)
+            subscriber_base_addr = calculate_base_address(config_->system_id, config_->instance_id);
         }
         
         SubscribeRequestType request{
@@ -314,6 +382,11 @@ protected:
         else if constexpr (has_continuous_input) {
             // Single-input: use InputData type (what WE want to subscribe to)
             source_data_type_id = Registry::template get_message_id<InputData>();
+        } 
+        // PRIORITY 3: Fallback to provided primary output type ID
+        else if (source_primary_output_type_id) {
+            // Multi-output producer: use the provided primary output type ID
+            source_data_type_id = *source_primary_output_type_id;
         } 
         else {
             static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");

@@ -1,0 +1,21 @@
+{
+  "name": "FilterModule",
+  "outputs": {
+    "output_type": "SimpleOutputConfig",
+    "system_id": 20,
+    "instance_id": 1
+  },
+  "inputs": {
+    "input_type": "SingleInputConfig",
+    "source_system_id": 10,
+    "source_instance_id": 1
+  },
+  "period": {
+    "count": 100,
+    "unit": "milliseconds"
+  },
+  "message_slots": 10,
+  "max_subscribers": 8,
+  "priority": 10,
+  "realtime": false
+}

@@ -19,6 +19,8 @@ class Module;
 
 /**
  * @brief Helper to assign auto-incremented IDs to messages marked with needs_auto_id
+ * 
+ * Forward processing: assigns ID to First, then recursively processes Rest with First in context.
  */
 template<typename... MessageDefs>
 struct AutoAssignIDs;
@@ -28,11 +30,22 @@ struct AutoAssignIDs<> {
     using Result = std::tuple<>;
 };
 
-template<typename First, typename... Rest>
-struct AutoAssignIDs<First, Rest...> {
+// Forward declarations
+template<typename ProcessedTuple, typename... Remaining>
+struct AutoAssignIDsProcess;
+
+// Base case: no more messages to process
+template<typename... ProcessedDefs>
+struct AutoAssignIDsProcess<std::tuple<ProcessedDefs...>> {
+    using Result = std::tuple<>;
+};
+
+// Recursive case: process First, then Rest
+template<typename... ProcessedDefs, typename First, typename... Rest>
+struct AutoAssignIDsProcess<std::tuple<ProcessedDefs...>, First, Rest...> {
 private:
-    // Track highest ID seen so far for this prefix/subprefix combination
-    template<typename MessageDef, typename... ProcessedDefs>
+    // Track highest ID for this prefix/subprefix
+    template<typename MessageDef>
     struct HighestID {
         static constexpr uint16_t value = []() constexpr {
             if constexpr (sizeof...(ProcessedDefs) == 0) {
@@ -48,32 +61,30 @@ private:
         }();
     };
     
-    // Process rest of messages first to get their IDs
-    using RestProcessed = typename AutoAssignIDs<Rest...>::Result;
+    // Assign ID to current message
+    using CurrentProcessed = std::conditional_t<
+        First::needs_auto_id,
+        MessageDefinition<
+            typename First::Payload,
+            First::prefix,
+            First::subprefix,
+            HighestID<First>::value + 1
+        >,
+        First
+    >;
     
-    // Assign ID to current message if needed
-    template<typename MessageDef, typename ProcessedTuple>
-    struct AssignID;
-    
-    template<typename MessageDef, typename... ProcessedDefs>
-    struct AssignID<MessageDef, std::tuple<ProcessedDefs...>> {
-        using type = std::conditional_t<
-            MessageDef::needs_auto_id,
-            MessageDefinition<
-                typename MessageDef::Payload,
-                MessageDef::prefix,
-                MessageDef::subprefix,
-                HighestID<MessageDef, ProcessedDefs...>::value + 1
-            >,
-            MessageDef
-        >;
-    };
+    using RestResult = typename AutoAssignIDsProcess<std::tuple<ProcessedDefs..., CurrentProcessed>, Rest...>::Result;
     
 public:
     using Result = decltype(std::tuple_cat(
-        std::declval<std::tuple<typename AssignID<First, RestProcessed>::type>>(),
-        std::declval<RestProcessed>()
+        std::declval<std::tuple<CurrentProcessed>>(),
+        std::declval<RestResult>()
     ));
+};
+
+template<typename... MessageDefs>
+struct AutoAssignIDs {
+    using Result = typename AutoAssignIDsProcess<std::tuple<>, MessageDefs...>::Result;
 };
 
 // ============================================================================
@@ -148,10 +159,12 @@ private:
         using PayloadTypes = std::tuple<typename Defs::Payload...>;
     };
     
-    using PayloadTypes = typename ExtractPayloads<ProcessedDefs>::PayloadTypes;
-    
     // Check for ID collisions at compile-time
     static constexpr bool collisions_checked = CheckCollisions<MessageDefs...>::check();
+
+public:
+    // Payload types tuple - exposed for introspection
+    using PayloadTypes = typename ExtractPayloads<ProcessedDefs>::PayloadTypes;
     
     // Helper to check if a payload type is in the registry
     template<typename T, typename Tuple>
@@ -165,7 +178,6 @@ private:
     template<typename T>
     static constexpr bool is_registered_v = IsInTuple<T, PayloadTypes>::value;
 
-public:
     // Number of registered message types
     static constexpr size_t num_types = sizeof...(MessageDefs);
     

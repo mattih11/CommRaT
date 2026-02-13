@@ -1,0 +1,38 @@
+{
+  "name": "FusionModule",
+  "outputs": {
+    "output_type": "SimpleOutputConfig",
+    "system_id": 30,
+    "instance_id": 1
+  },
+  "inputs": {
+    "input_type": "MultiInputConfig",
+    "sources": [
+      {
+        "system_id": 10,
+        "instance_id": 1,
+        "is_primary": true,
+        "input_index": 0
+      },
+      {
+        "system_id": 11,
+        "instance_id": 1,
+        "is_primary": false,
+        "input_index": 1
+      }
+    ],
+    "history_buffer_size": 100,
+    "sync_tolerance": {
+      "count": 50,
+      "unit": "milliseconds"
+    }
+  },
+  "period": {
+    "count": 10,
+    "unit": "milliseconds"
+  },
+  "message_slots": 10,
+  "max_subscribers": 8,
+  "priority": 10,
+  "realtime": false
+}

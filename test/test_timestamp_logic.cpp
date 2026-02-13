@@ -178,8 +178,8 @@ void test_periodic_timestamps() {
     
     ModuleConfig prod_config{
         .name = "PeriodicProducer",
-        .system_id = 10,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = Milliseconds{100},
         .message_slots = 10,
         .max_subscribers = 4
@@ -187,11 +187,9 @@ void test_periodic_timestamps() {
     
     ModuleConfig checker_config{
         .name = "TimestampChecker",
-        .system_id = 11,
-        .instance_id = 1,
-        .message_slots = 10,
-        .source_system_id = 10,
-        .source_instance_id = 1
+        .outputs = commrat::SimpleOutputConfig{.system_id = 11, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+        .message_slots = 10
     };
     
     PeriodicProducer producer(prod_config);
@@ -216,8 +214,8 @@ void test_continuous_propagation() {
     
     ModuleConfig prod_config{
         .name = "Producer",
-        .system_id = 20,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
         .period = Milliseconds{100},
         .message_slots = 10,
         .max_subscribers = 4
@@ -225,21 +223,17 @@ void test_continuous_propagation() {
     
     ModuleConfig prop_config{
         .name = "Propagator",
-        .system_id = 21,
-        .instance_id = 1,
+        .outputs = commrat::SimpleOutputConfig{.system_id = 21, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 20, .source_instance_id = 1},
         .message_slots = 10,
-        .max_subscribers = 4,
-        .source_system_id = 20,
-        .source_instance_id = 1
+        .max_subscribers = 4
     };
     
     ModuleConfig checker_config{
         .name = "Checker",
-        .system_id = 22,
-        .instance_id = 1,
-        .message_slots = 10,
-        .source_system_id = 21,
-        .source_instance_id = 1
+        .outputs = commrat::SimpleOutputConfig{.system_id = 22, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{.source_system_id = 21, .source_instance_id = 1},
+        .message_slots = 10
     };
     
     PeriodicProducer producer(prod_config);

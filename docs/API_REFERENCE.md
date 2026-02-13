@@ -18,6 +18,7 @@ This document provides a comprehensive reference for the CommRaT API. For detail
 7. [Timestamp Abstractions](#timestamp-abstractions)
 8. [Mailbox Interface](#mailbox-interface)
 9. [Message Definitions](#message-definitions)
+10. [Introspection System](#introspection-system)
 
 ---
 
@@ -43,9 +44,17 @@ using MyApp = commrat::CommRaT<
 
 **Provides:**
 - `MyApp::Module<OutputSpec, InputSpec, ...Commands>` - Module template
+- `MyApp::Mailbox<T>` - Mailbox template for type T
+- `MyApp::HistoricalMailbox<HistorySize>` - Buffered mailbox with getData()
+- `MyApp::Introspection` - Schema export helper
 - `MyApp::get_message_id<T>()` - Compile-time message ID lookup
-- `MyApp::get_type_name(uint32_t id)` - Runtime type name lookup
-- `MyApp::for_each_message_type(func)` - Iterate over all message types
+- `MyApp::is_registered<T>` - Check if type is in registry
+- `MyApp::serialize<T>(message)` - Serialize message to bytes
+- `MyApp::deserialize<T>(buffer)` - Deserialize message from bytes
+- `MyApp::visit(buffer, visitor)` - Type dispatch with visitor pattern
+- `MyApp::dispatch(buffer, overload_set)` - Type dispatch with overload set
+- `MyApp::max_message_size` - Maximum message size constant
+- `MyApp::payload_types` - Type alias to tuple of all payload types
 
 **Header:** `<commrat/commrat.hpp>`
 
@@ -652,10 +661,142 @@ All registry lookups and type dispatch resolved at compile time - no runtime cos
 
 ---
 
+## Introspection System
+
+### MyApp::Introspection
+
+Helper class for exporting message schemas (CommRaT metadata + SeRTial layout).
+
+**Header:** `<commrat/introspection.hpp>`
+
+#### export_as<T, Writer>()
+
+Export complete schema for a single message type.
+
+```cpp
+template<typename T, typename Writer = rfl::json::Writer>
+static std::string export_as();
+```
+
+**Returns:** Formatted string containing:
+- **CommRaT metadata**: message_id, payload_type, full_type, max_message_size, registry_name
+- **SeRTial layout**: Full `TimsMessage<T>` structure (header + payload) with field names, types, sizes, offsets
+- **JSON schema**: Embedded schema in `type_schema` field
+
+**Example:**
+```cpp
+// Export to JSON (default)
+auto json = MyApp::Introspection::export_as<TemperatureData>();
+
+// Export to YAML
+auto yaml = MyApp::Introspection::export_as<TemperatureData, rfl::yaml::Writer>();
+```
+
+**Output structure:**
+```json
+{
+  "commrat": {
+    "message_id": 16777219,
+    "payload_type": "TemperatureData",
+    "full_type": "commrat::TimsMessage<TemperatureData>",
+    "max_message_size": 104,
+    "registry_name": "MyApp"
+  },
+  "layout": {
+    "name": "commrat::TimsMessage<TemperatureData>",
+    "sizeof_bytes": 40,
+    "base_packed_size": 40,
+    "max_packed_size": 40,
+    "has_variable_fields": false,
+    "field_count": 2,
+    "field_names": ["header", "payload"],
+    "field_types": ["commrat::TimsHeader", "TemperatureData"],
+    "field_sizes": [24, 16],
+    "field_offsets": [0, 24],
+    "type_schema": "{...embedded JSON schema...}"
+  }
+}
+```
+
+#### export_all<Writer>()
+
+Export schemas for all registered message types.
+
+```cpp
+template<typename Writer = rfl::json::Writer>
+static std::string export_all();
+```
+
+**Returns:** JSON array of MessageSchema objects (one per registered type)
+
+**Example:**
+```cpp
+auto all_schemas = MyApp::Introspection::export_all();
+std::cout << all_schemas;  // Prints JSON array
+```
+
+#### write_to_file<Writer>(filename)
+
+Convenience method to write all schemas to a file.
+
+```cpp
+template<typename Writer = rfl::json::Writer>
+static void write_to_file(const std::string& filename);
+```
+
+**Example:**
+```cpp
+// Write JSON schemas
+MyApp::Introspection::write_to_file("schemas.json");
+
+// Write YAML schemas
+MyApp::Introspection::write_to_file<rfl::yaml::Writer>("schemas.yaml");
+```
+
+### MessageSchema<PayloadT, Registry>
+
+Complete schema structure combining CommRaT and SeRTial metadata.
+
+```cpp
+template<typename PayloadT, typename Registry>
+struct MessageSchema {
+    struct CommRaTMetadata {
+        uint32_t message_id;
+        std::string payload_type;
+        std::string full_type;
+        size_t max_message_size;
+        std::string registry_name;
+    } commrat;
+    
+    sertial::StructLayout<TimsMessage<PayloadT>> layout;
+};
+```
+
+**Direct usage:**
+```cpp
+using Schema = commrat::MessageSchema<TemperatureData, MyApp>;
+
+// Access metadata at compile time
+constexpr auto msg_id = Schema{}.commrat.message_id;
+
+// Access layout information
+constexpr auto num_fields = Schema{}.layout.field_count;
+```
+
+**Use Cases:**
+- Generic logger/replay tools (type-agnostic logging)
+- Web-based message viewers (display schemas)
+- JSON configuration validation (check field names/types)
+- Documentation generation (auto-generate API docs)
+- ROS 2 adapter (map CommRaT ↔ ROS message types)
+
+---
+
 ## See Also
 
 - [User Guide](USER_GUIDE.md) - Comprehensive framework guide
 - [Getting Started](GETTING_STARTED.md) - First application tutorial
 - [Architecture](ARCHITECTURE.md) - Design decisions and internals
+- [Introspection Example](../examples/introspection_example.cpp) - Complete working example
 - [Examples](../examples/) - Working code examples
 - [Doxygen Docs](api/html/index.html) - Generated API documentation (after `make docs`)

@@ -72,7 +72,7 @@ protected:
         
         // MailboxSet template parameters: Registry, OutputType
         MailboxSet<UserRegistry, OutputType> set;
-        set.initialize(config);
+        set.template initialize<I>(config);
         return set;
     }
 };

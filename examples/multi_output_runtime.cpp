@@ -165,11 +165,12 @@ int main() {
         // Create producer module (multi-output)
         commrat::ModuleConfig producer_config{
             .name = "SensorProducer",
-            .system_id = 10,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(500),  // 2 Hz
-            .source_system_id = 0,
-            .source_instance_id = 0
+            .outputs = commrat::MultiOutputConfig{.addresses = {
+                {.system_id = 10, .instance_id = 1},  // First output address
+                {.system_id = 10, .instance_id = 1}   // Second output address (same here)
+            }},
+            .inputs = commrat::NoInputConfig{},
+            .period = std::chrono::milliseconds(500)  // 2 Hz
         };
         SensorProducerModule producer(producer_config);
         std::cout << "[Main] Created SensorProducer (system_id=10, instance_id=1)\n";
@@ -182,11 +183,9 @@ int main() {
         // Create temperature receiver
         commrat::ModuleConfig temp_receiver_config{
             .name = "TempReceiver",
-            .system_id = 20,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(100),
-            .source_system_id = 10,  // Subscribe to producer
-            .source_instance_id = 1
+            .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+            .period = std::chrono::milliseconds(100)
         };
         TempReceiverModule temp_receiver(temp_receiver_config);
         std::cout << "[Main] Created TempReceiver (system_id=20, instance_id=1)\n";
@@ -197,21 +196,17 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         // Create pressure receiver
-        // For multi-output producers, specify the primary output type ID
-        // (the type used to calculate the producer's base address)
+        // NEW: Auto-inference handles multi-output - uses InputData type (PressureData)
         commrat::ModuleConfig pressure_receiver_config{
             .name = "PressureReceiver",
-            .system_id = 30,
-            .instance_id = 1,
-            .period = std::chrono::milliseconds(100),
-            .source_system_id = 10,  // Subscribe to producer
-            .source_instance_id = 1,
-            .source_primary_output_type_id = SensorApp::get_message_id<TemperatureData>()  // Producer uses TemperatureData for base address
+            .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+            .inputs = commrat::SingleInputConfig{.source_system_id = 10, .source_instance_id = 1},
+            .period = std::chrono::milliseconds(100)
         };
         PressureReceiverModule pressure_receiver(pressure_receiver_config);
         std::cout << "[Main] Created PressureReceiver (system_id=30, instance_id=1)\n";
         pressure_receiver.start();
-        std::cout << "[Main] PressureReceiver subscribing to producer (using TemperatureData type for address)...\n\n";
+        std::cout << "[Main] PressureReceiver subscribing to producer (auto-infers PressureData type)...\n\n";
 
         // Wait for subscriptions to stabilize
         std::this_thread::sleep_for(std::chrono::milliseconds(300));

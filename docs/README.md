@@ -1,6 +1,6 @@
 # CommRaT Documentation
 
-**Last Updated**: February 11, 2026
+**Last Updated**: February 12, 2026
 
 ---
 
@@ -200,6 +200,15 @@ test/
 - Convenience methods: `get_input_timestamp<Index>()`, `has_new_data<Index>()`
 - Automatic metadata population before process() calls
 - Single source of truth: `TimsHeader.timestamp` only
+
+### Introspection System (Complete - Phase 6.11)
+- `MessageSchema<PayloadT, Registry>` combining CommRaT + SeRTial metadata
+- Export full `TimsMessage<T>` structure (header + payload)
+- Format-agnostic via rfl Writer types (JSON, YAML, TOML, XML)
+- `IntrospectionHelper<Registry>` for registry-wide export
+- API: `export_as<T>()`, `export_all()`, `write_to_file()`
+- Outputs: message IDs, type names, field layouts, JSON schemas
+- Simple plain structs with default initializers (no complex wrappers)
 
 ### Module Cleanup (Complete)
 - Extracted helper modules for better organization
