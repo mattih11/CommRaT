@@ -271,33 +271,33 @@ protected:
      */
     void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
                                    size_t source_index) {
-        // Subscriber base address: Our module's own base address (system_id, instance_id)
-        // Uses our OUTPUT type - that's our module's identity for receiving data
-        // Producers will send to our DATA mailbox using this base address
-        uint32_t subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
-        
-        SubscribeRequestType request{
-            .subscriber_mailbox_id = subscriber_base_addr,  // Input-type-specific base for multi-input
-            .requested_period_ms = config_->period.count()
-        };
-        
-        // Calculate source module's WORK mailbox address
+        // Calculate subscriber_base_addr and source_data_type_id based on input type
+        uint32_t subscriber_base_addr;
         uint32_t source_data_type_id;
         
-        // PRIORITY 1: Multi-input uses input type at source_index
         if constexpr (has_multi_input) {
-            // Multi-input: use the input type at source_index (what WE want for THIS input)
+            // Multi-input: Each input has its own mailbox based on INPUT type at source_index
+            // Producers send to input-type-specific DATA mailboxes
             source_data_type_id = get_input_type_id_at_index(source_index);
+            uint16_t input_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
+            subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
+                                    (config_->system_id() << 8) | config_->instance_id();
         } 
-        // PRIORITY 2: Single continuous input uses InputData type
         else if constexpr (has_continuous_input) {
-            // Single-input: use InputData type (what WE want to subscribe to)
+            // Single continuous input: Uses OUTPUT type for mailbox identity
+            // All data goes to single DATA mailbox based on module's OUTPUT type
+            subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
             source_data_type_id = Registry::template get_message_id<InputData>();
         } 
         else {
             static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");
             return;
         }
+        
+        SubscribeRequestType request{
+            .subscriber_mailbox_id = subscriber_base_addr,
+            .requested_period_ms = config_->period.count()
+        };
         
         uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
         uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
