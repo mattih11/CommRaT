@@ -451,8 +451,8 @@ protected:
 
 public:
     // Subscription protocol handlers - PUBLIC for SubscriptionProtocol callbacks
-    void handle_subscribe_request(const SubscribeRequestPayload& req) {
-        subscription_protocol_.handle_subscribe_request(req, *this);
+    void handle_subscribe_request(const SubscribeRequestPayload& req, std::size_t output_idx = 0) {
+        subscription_protocol_.handle_subscribe_request(req, *this, output_idx);
     }
     
     void handle_subscribe_reply(const SubscribeReplyPayload& reply) {
@@ -469,9 +469,9 @@ public:
      * Delegates to MultiOutputManager mixin.
      * PUBLIC: Called by SubscriptionProtocol handlers.
      */
-    void add_subscriber_to_output(uint32_t subscriber_base_addr) {
+    void add_subscriber_to_output(uint32_t subscriber_base_addr, std::size_t output_idx = 0) {
         // Delegate to inherited MultiOutputManager::add_subscriber_to_output
-        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr);
+        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr, output_idx);
     }
     
     /**

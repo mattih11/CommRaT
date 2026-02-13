@@ -200,11 +200,11 @@ public:
      * @brief Handle incoming SubscribeRequest (producer side)
      */
     template<typename SubscriberMgr>
-    void handle_subscribe_request(const SubscribeRequestType& req, SubscriberMgr& sub_mgr) {
+    void handle_subscribe_request(const SubscribeRequestType& req, SubscriberMgr& sub_mgr, std::size_t output_idx = 0) {
         try {
             // req.subscriber_mailbox_id is the subscriber's base address
             // Phase 7: Route to correct output-specific subscriber list
-            sub_mgr.add_subscriber_to_output(req.subscriber_mailbox_id);
+            sub_mgr.add_subscriber_to_output(req.subscriber_mailbox_id, output_idx);
             uint32_t subscriber_data_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::DATA);
             std::cout << "[" << module_name_ << "] Added subscriber to output-specific list, "
                       << "will send to DATA mailbox=" << subscriber_data_mbx << "\n";
@@ -271,31 +271,10 @@ protected:
      */
     void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
                                    size_t source_index) {
-        // For multi-input: Calculate base address using the INPUT TYPE we're subscribing to
-        // This ensures producers send to the correct input-specific DATA mailbox
-        uint32_t subscriber_base_addr;
-        
-        if constexpr (has_multi_input) {
-            // Multi-input: use the input type ID at source_index for subscriber base address
-            uint32_t input_type_id = get_input_type_id_at_index(source_index);
-            uint16_t input_type_id_low = static_cast<uint16_t>(input_type_id & 0xFFFF);
-            subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                                    (config_->system_id() << 8) | config_->instance_id();
-        } else if constexpr (has_continuous_input) {
-            // Single-input: use INPUT type for base address (what we're receiving)
-            uint32_t input_type_id = Registry::template get_message_id<InputData>();
-            uint16_t input_type_id_low = static_cast<uint16_t>(input_type_id & 0xFFFF);
-            subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                                    (config_->system_id() << 8) | config_->instance_id();
-            std::cout << "[DEBUG subscription.hpp:290] Single-input: has_continuous_input=true, "
-                      << "InputData type_id=" << input_type_id 
-                      << " (low16=" << input_type_id_low << ")"
-                      << ", InputData name=" << typeid(InputData).name()
-                      << ", subscriber_base_addr=" << subscriber_base_addr << "\n";
-        } else {
-            // Fallback: no input (shouldn't happen for subscription)
-            subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
-        }
+        // Subscriber base address: Our module's own base address (system_id, instance_id)
+        // Uses our OUTPUT type - that's our module's identity for receiving data
+        // Producers will send to our DATA mailbox using this base address
+        uint32_t subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
         
         SubscribeRequestType request{
             .subscriber_mailbox_id = subscriber_base_addr,  // Input-type-specific base for multi-input

@@ -66,27 +66,23 @@ protected:
      * @param subscriber_base_addr Subscriber's base mailbox address
      *        Format: [type_id_low:16][system:8][instance:8]
      */
-    void add_subscriber_to_output(uint32_t subscriber_base_addr) {
-        // Extract type ID from subscriber's base address
-        uint16_t subscriber_type_id_low = static_cast<uint16_t>((subscriber_base_addr >> 16) & 0xFFFF);
-        
-        // Find matching output index
-        std::size_t output_idx = find_output_index_by_type_id(subscriber_type_id_low);
-        
+    void add_subscriber_to_output(uint32_t subscriber_base_addr, std::size_t output_idx = 0) {
         constexpr std::size_t num_outputs = std::tuple_size_v<OutputTypesTuple>;
-        if (output_idx < num_outputs) {
-            Lock lock(output_subscribers_mutex_);
-            auto& subs = output_subscribers_[output_idx];
-            
-            // Check if already subscribed
-            if (std::find(subs.begin(), subs.end(), subscriber_base_addr) == subs.end()) {
-                subs.push_back(subscriber_base_addr);
-                std::cout << "[" << derived().config_.name << "] Added subscriber " << subscriber_base_addr 
-                          << " to output[" << output_idx << "] (total: " << subs.size() << ")\n";
-            }
-        } else {
-            std::cerr << "[" << derived().config_.name << "] ERROR: No matching output type for subscriber type ID " 
-                      << subscriber_type_id_low << "\n";
+        
+        if (output_idx >= num_outputs) {
+            std::cerr << "[" << derived().config_.name << "] ERROR: Output index " << output_idx 
+                      << " out of range (num_outputs=" << num_outputs << ")\n";
+            return;
+        }
+        
+        Lock lock(output_subscribers_mutex_);
+        auto& subs = output_subscribers_[output_idx];
+        
+        // Check if already subscribed
+        if (std::find(subs.begin(), subs.end(), subscriber_base_addr) == subs.end()) {
+            subs.push_back(subscriber_base_addr);
+            std::cout << "[" << derived().config_.name << "] Added subscriber " << subscriber_base_addr 
+                      << " to output[" << output_idx << "] (total: " << subs.size() << ")\n";
         }
     }
 
@@ -277,7 +273,7 @@ protected:
                 if constexpr (std::is_same_v<MsgType, SubscribeRequestType>) {
                     std::cout << "[" << derived().config_.name << "] output_work_loop[" << Index 
                               << "] Handling SubscribeRequest\n";
-                    derived().handle_subscribe_request(msg);
+                    derived().handle_subscribe_request(msg, Index);
                 } else if constexpr (std::is_same_v<MsgType, SubscribeReplyType>) {
                     std::cout << "[" << derived().config_.name << "] output_work_loop[" << Index 
                               << "] Handling SubscribeReply\n";
