@@ -10,11 +10,14 @@ namespace commrat {
  * 
  * Consumer sends this to producer to request data stream.
  * Producer will add consumer to its subscriber list.
+ * 
+ * RACK-style addressing: subscriber_base_addr contains [type][sys][inst][0]
+ * mailbox_index specifies which mailbox to send data to (DATA mailbox index)
  */
 struct SubscribeRequestPayload {
-    uint32_t subscriber_mailbox_id{0};   ///< Consumer's base mailbox ID (without DATA offset)
+    uint32_t subscriber_base_addr{0};    ///< Consumer's base address ([type][sys][inst][mbx=0])
+    uint8_t mailbox_index{0};            ///< Which mailbox to send data to (DATA mailbox index)
     int64_t requested_period_ms{0};      ///< Desired update period in ms (0 = as fast as possible)
-    uint8_t input_index{0};              ///< For multi-input subscribers: which input index (0 = primary)
 };
 
 /**
