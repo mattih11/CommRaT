@@ -271,23 +271,23 @@ protected:
      */
     void subscribe_to_source_impl(uint8_t source_system_id, uint8_t source_instance_id,
                                    size_t source_index) {
-        // Calculate subscriber_base_addr and source_data_type_id based on input type
-        uint32_t subscriber_base_addr;
+        // Calculate subscriber_base_addr and source_data_type_id
         uint32_t source_data_type_id;
+        uint8_t input_index = 0;  // For multi-input, which input mailbox to use
+        
+        // BOTH single-input and multi-input now use OUTPUT type for base address
+        // This prevents collisions (module identity = OUTPUT type)
+        uint32_t subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
         
         if constexpr (has_multi_input) {
-            // Multi-input: Each input has its own mailbox based on INPUT type at source_index
-            // Producers send to input-type-specific DATA mailboxes
+            // Multi-input: Specify which input index for DATA mailbox offset
             source_data_type_id = get_input_type_id_at_index(source_index);
-            uint16_t input_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-            subscriber_base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                                    (config_->system_id() << 8) | config_->instance_id();
+            input_index = static_cast<uint8_t>(source_index);
         } 
         else if constexpr (has_continuous_input) {
-            // Single continuous input: Uses OUTPUT type for mailbox identity
-            // All data goes to single DATA mailbox based on module's OUTPUT type
-            subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+            // Single continuous input: input_index = 0 (default DATA mailbox)
             source_data_type_id = Registry::template get_message_id<InputData>();
+            input_index = 0;
         } 
         else {
             static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");
@@ -296,7 +296,8 @@ protected:
         
         SubscribeRequestType request{
             .subscriber_mailbox_id = subscriber_base_addr,
-            .requested_period_ms = config_->period.count()
+            .requested_period_ms = config_->period.count(),
+            .input_index = input_index  // Tells producer which DATA mailbox to use
         };
         
         uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);

@@ -104,16 +104,15 @@ private:
         using InputType = std::tuple_element_t<Index, InputTypesTuple>;
         
         // Create DATA mailbox config for this input
-        // Use input type's message ID to calculate base address
-        constexpr uint32_t input_msg_id = UserRegistry::template get_message_id<InputType>();
-        constexpr uint16_t input_type_id_low = static_cast<uint16_t>(input_msg_id & 0xFFFF);
-        // Multi-input always uses non-indexed system_id/instance_id (subscriber addressing)
-        uint32_t base_addr = (static_cast<uint32_t>(input_type_id_low) << 16) | 
-                             (module.config_.system_id() << 8) | module.config_.instance_id();
-        uint32_t data_mailbox_id = base_addr + static_cast<uint8_t>(MailboxType::DATA);
+        // Use OUTPUT type (module identity) for base address to avoid collisions
+        // Each input gets its own DATA mailbox at: base + DATA_offset(input_index)
+        uint32_t base_addr = module.calculate_base_address();
+        uint8_t data_offset = get_data_mailbox_offset(static_cast<uint8_t>(Index));
+        uint32_t data_mailbox_id = base_addr + data_offset;
         
         std::cout << "[" << module.config_.name << "] Creating input mailbox[" << Index 
-                  << "] at address " << data_mailbox_id << " (base=" << base_addr << ")\n";
+                  << "] at address " << data_mailbox_id << " (base=" << base_addr 
+                  << ", offset=" << static_cast<int>(data_offset) << ")\n";
         
         MailboxConfig mbx_config{
             .mailbox_id = data_mailbox_id,

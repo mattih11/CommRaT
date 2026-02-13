@@ -24,13 +24,14 @@ struct LoopInput {};
 // Mailbox Configuration
 // ============================================================================
 
-// Mailbox type identifiers (offsets from base address)
-enum class MailboxType : uint8_t {
-    CMD = 0,      // Command mailbox - receives user commands only
-    WORK = 16,    // Work/System mailbox - subscription protocol + system messages
-    PUBLISH = 32, // Publish mailbox - sends output data to subscribers
-    DATA = 48     // Data mailbox - receives input data streams
-};
+// RACK-style mailbox index allocation
+// CMD mailboxes for outputs start at index 0
+// DATA mailboxes for inputs start after all CMD mailboxes
+// See address_helpers.hpp for address encoding: [type:8][sys:8][inst:8][mbx:8]
+
+// Default mailbox slot counts (configurable per module)
+constexpr uint32_t DEFAULT_CMD_SLOTS = 10;   // Command/subscription buffering
+constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for getData
 
 // ============================================================================
 // Output Configuration (TaggedUnion)
@@ -103,10 +104,14 @@ struct ModuleConfig {
     
     // Common configuration
     std::chrono::milliseconds period{100};
-    size_t message_slots{10};
+    size_t message_slots{10};  // Legacy: kept for compatibility
     size_t max_subscribers{8};
     int priority{10};
     bool realtime{false};
+    
+    // Mailbox-specific slot counts (RACK-style)
+    uint32_t cmd_message_slots = DEFAULT_CMD_SLOTS;   // CMD mailbox buffering
+    uint32_t data_message_slots = DEFAULT_DATA_SLOTS; // DATA mailbox buffering per input
     
     // ========================================================================
     // Output Configuration Accessors

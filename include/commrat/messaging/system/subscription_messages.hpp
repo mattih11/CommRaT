@@ -12,8 +12,9 @@ namespace commrat {
  * Producer will add consumer to its subscriber list.
  */
 struct SubscribeRequestPayload {
-    uint32_t subscriber_mailbox_id{0};   ///< Consumer's mailbox ID
+    uint32_t subscriber_mailbox_id{0};   ///< Consumer's base mailbox ID (without DATA offset)
     int64_t requested_period_ms{0};      ///< Desired update period in ms (0 = as fast as possible)
+    uint8_t input_index{0};              ///< For multi-input subscribers: which input index (0 = primary)
 };
 
 /**

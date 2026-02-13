@@ -12,6 +12,21 @@
 namespace commrat {
 
 /**
+ * @brief Subscriber routing information
+ * 
+ * Stores both the subscriber's base mailbox address and which input index
+ * to route to (for multi-input subscribers).
+ */
+struct SubscriberInfo {
+    uint32_t base_addr{0};    ///< Subscriber's base mailbox address (OUTPUT type)
+    uint8_t input_index{0};   ///< Which input DATA mailbox to send to (0 = default)
+    
+    bool operator==(const SubscriberInfo& other) const {
+        return base_addr == other.base_addr && input_index == other.input_index;
+    }
+};
+
+/**
  * @brief CRTP mixin for multi-output mailbox and subscriber management
  * 
  * Provides infrastructure for modules with multiple output types:
@@ -43,8 +58,10 @@ protected:
      * 
      * Each output type maintains its own subscriber list for type-safe publishing.
      * Subscriptions are routed based on the subscriber's expected message type ID.
+     * 
+     * Now stores SubscriberInfo (base_addr + input_index) for multi-input routing.
      */
-    std::vector<std::vector<uint32_t>> output_subscribers_;
+    std::vector<std::vector<SubscriberInfo>> output_subscribers_;
     mutable Mutex output_subscribers_mutex_;  // Protects output_subscribers_
     
     /**
@@ -65,8 +82,10 @@ protected:
      * 
      * @param subscriber_base_addr Subscriber's base mailbox address
      *        Format: [type_id_low:16][system:8][instance:8]
+     * @param input_index Which input DATA mailbox the subscriber wants (0 = default)
+     * @param output_idx Which output this subscription is for
      */
-    void add_subscriber_to_output(uint32_t subscriber_base_addr, std::size_t output_idx = 0) {
+    void add_subscriber_to_output(uint32_t subscriber_base_addr, uint8_t input_index = 0, std::size_t output_idx = 0) {
         constexpr std::size_t num_outputs = std::tuple_size_v<OutputTypesTuple>;
         
         if (output_idx >= num_outputs) {
@@ -78,11 +97,14 @@ protected:
         Lock lock(output_subscribers_mutex_);
         auto& subs = output_subscribers_[output_idx];
         
+        SubscriberInfo sub_info{subscriber_base_addr, input_index};
+        
         // Check if already subscribed
-        if (std::find(subs.begin(), subs.end(), subscriber_base_addr) == subs.end()) {
-            subs.push_back(subscriber_base_addr);
+        if (std::find(subs.begin(), subs.end(), sub_info) == subs.end()) {
+            subs.push_back(sub_info);
             std::cout << "[" << derived().config_.name << "] Added subscriber " << subscriber_base_addr 
-                      << " to output[" << output_idx << "] (total: " << subs.size() << ")\n";
+                      << " (input_idx=" << static_cast<int>(input_index) << ") to output[" << output_idx 
+                      << "] (total: " << subs.size() << ")\n";
         }
     }
 
