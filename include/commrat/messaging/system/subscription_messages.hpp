@@ -37,7 +37,7 @@ struct SubscribeReplyPayload {
  * Consumer sends this to producer to stop receiving data.
  */
 struct UnsubscribeRequestPayload {
-    uint32_t subscriber_mailbox_id{0};   ///< Consumer's mailbox ID
+    uint32_t subscriber_base_addr{0};    ///< Consumer's base mailbox address (no mailbox_index)
 };
 
 /**

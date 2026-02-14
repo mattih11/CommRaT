@@ -103,21 +103,34 @@ private:
         auto& module = static_cast<ModuleType&>(*this);
         using InputType = std::tuple_element_t<Index, InputTypesTuple>;
         
-        // Create DATA mailbox config for this input
-        // Use OUTPUT type (module identity) for base address to avoid collisions
-        // Each input gets its own DATA mailbox at: base + DATA_offset(input_index)
-        uint32_t base_addr = module.calculate_base_address();
-        uint8_t data_offset = get_data_mailbox_offset(static_cast<uint8_t>(Index));
-        uint32_t data_mailbox_id = base_addr + data_offset;
+        // RACK-style addressing: [type][sys][inst][mbx_idx]
+        // Base address contains module identity (type/system/instance)
+        using OutputData = typename ModuleType::OutputData;
+        using OutputTypesTuple = typename ModuleType::OutputTypesTuple;
+        uint32_t base_addr = commrat::calculate_base_address<OutputData, OutputTypesTuple, UserRegistry>(
+            module.config_.system_id(), module.config_.instance_id());
         
-        std::cout << "[" << module.config_.name << "] Creating input mailbox[" << Index 
-                  << "] at address " << data_mailbox_id << " (base=" << base_addr 
-                  << ", offset=" << static_cast<int>(data_offset) << ")\n";
+        // DATA mailboxes start after all CMD mailboxes
+        // Get num_outputs from ModuleType
+        constexpr uint8_t num_outputs = std::tuple_size_v<OutputTypesTuple>;
+        uint8_t data_mbx_index = get_data_mbx_base(num_outputs) + static_cast<uint8_t>(Index);
+        
+        // Full mailbox address = base | mailbox_index
+        uint32_t data_mailbox_id = base_addr | data_mbx_index;
+        
+        // Compile-time size for THIS specific input type (memory efficient!)
+        constexpr size_t input_message_size = get_data_mailbox_size<InputType>();
+        
+        std::cout << "[" << module.config_.name << "] Creating DATA mailbox[" << Index 
+                  << "] at 0x" << std::hex << data_mailbox_id << std::dec
+                  << " (base=0x" << std::hex << base_addr << std::dec 
+                  << ", index=" << static_cast<int>(data_mbx_index)
+                  << ", size=" << input_message_size << " bytes)\n";
         
         MailboxConfig mbx_config{
             .mailbox_id = data_mailbox_id,
-            .message_slots = module.config_.message_slots,
-            .max_message_size = UserRegistry::max_message_size,
+            .message_slots = module.config_.data_message_slots,  // Use DATA-specific slots
+            .max_message_size = input_message_size,              // Per-input-type size!
             .send_priority = static_cast<uint8_t>(module.config_.priority),
             .realtime = module.config_.realtime,
             .mailbox_name = module.config_.name + "_data_" + std::to_string(Index)

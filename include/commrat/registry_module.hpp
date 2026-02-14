@@ -341,7 +341,7 @@ public:
                 .mailbox_id = commrat::get_mailbox_address<OutputData, OutputTypesTuple, UserRegistry>(
                     config.has_multi_output_config() ? config.system_id(0) : config.system_id(),
                     config.has_multi_output_config() ? config.instance_id(0) : config.instance_id(),
-                    MailboxType::DATA),
+                    static_cast<uint8_t>(MailboxType::DATA)),
                 .message_slots = config.message_slots,
                 .max_message_size = UserRegistry::max_message_size,
                 .send_priority = static_cast<uint8_t>(config.priority),
@@ -424,6 +424,15 @@ public:
         return *std::get<Index>(mailbox_infrastructure_).publish;
     }
     
+    /**
+     * @brief Get cmd mailbox by index (public for Publisher access)
+     * Phase 7: CMD mailbox used for publishing
+     */
+    template<std::size_t Index>
+    auto& get_cmd_mailbox_public() {
+        return *std::get<Index>(mailbox_infrastructure_).cmd;
+    }
+    
     // ========================================================================
     // Lifecycle Management
     // ========================================================================
@@ -469,9 +478,9 @@ public:
      * Delegates to MultiOutputManager mixin.
      * PUBLIC: Called by SubscriptionProtocol handlers.
      */
-    void add_subscriber_to_output(uint32_t subscriber_base_addr, std::size_t output_idx = 0) {
+    void add_subscriber_to_output(uint32_t subscriber_base_addr, uint8_t mailbox_index, std::size_t output_idx = 0) {
         // Delegate to inherited MultiOutputManager::add_subscriber_to_output
-        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr, output_idx);
+        this->MultiOutputManager<Module<UserRegistry, OutputSpec_, InputSpec_, CommandTypes...>, UserRegistry, OutputTypesTuple>::add_subscriber_to_output(subscriber_base_addr, mailbox_index, output_idx);
     }
     
     /**

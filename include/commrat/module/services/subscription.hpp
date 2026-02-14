@@ -147,7 +147,7 @@ public:
         uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
         
         UnsubscribeRequestType request{
-            .subscriber_mailbox_id = our_base_addr
+            .subscriber_base_addr = our_base_addr
         };
         
         // Calculate source WORK mailbox
@@ -180,7 +180,7 @@ public:
         uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
         
         UnsubscribeRequestType request{
-            .subscriber_mailbox_id = our_base_addr
+            .subscriber_base_addr = our_base_addr
         };
         
         // Use the input_index to get the correct type ID
@@ -202,12 +202,13 @@ public:
     template<typename SubscriberMgr>
     void handle_subscribe_request(const SubscribeRequestType& req, SubscriberMgr& sub_mgr, std::size_t output_idx = 0) {
         try {
-            // req.subscriber_mailbox_id is the subscriber's base address
+            // req.subscriber_base_addr is the subscriber's base address
+            // req.mailbox_index tells us which DATA mailbox to send to
             // Phase 7: Route to correct output-specific subscriber list
-            sub_mgr.add_subscriber_to_output(req.subscriber_mailbox_id, output_idx);
-            uint32_t subscriber_data_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::DATA);
+            sub_mgr.add_subscriber_to_output(req.subscriber_base_addr, req.mailbox_index, output_idx);
+            uint32_t subscriber_data_mbx = req.subscriber_base_addr | req.mailbox_index;
             std::cout << "[" << module_name_ << "] Added subscriber to output-specific list, "
-                      << "will send to DATA mailbox=" << subscriber_data_mbx << "\n";
+                      << "will send to DATA mailbox=0x" << std::hex << subscriber_data_mbx << std::dec << "\n";
             
             SubscribeReplyType reply{
                 .actual_period_ms = config_->period.count(),
@@ -216,10 +217,10 @@ public:
             };
             
             // Send reply to subscriber's WORK mailbox (base + 1)
-            uint32_t subscriber_work_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::WORK);
+            uint32_t subscriber_work_mbx = req.subscriber_base_addr + static_cast<uint8_t>(MailboxType::WORK);
             work_mailbox_->send(reply, subscriber_work_mbx);
         } catch (...) {
-            std::cout << "[" << module_name_ << "] Failed to add subscriber: " << req.subscriber_mailbox_id << "\n";
+            std::cout << "[" << module_name_ << "] Failed to add subscriber: 0x" << std::hex << req.subscriber_base_addr << std::dec << "\n";
             
             SubscribeReplyType reply{
                 .actual_period_ms = 0,
@@ -227,7 +228,7 @@ public:
                 .error_code = 1  // Max subscribers exceeded
             };
             
-            uint32_t subscriber_work_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::WORK);
+            uint32_t subscriber_work_mbx = req.subscriber_base_addr + static_cast<uint8_t>(MailboxType::WORK);
             work_mailbox_->send(reply, subscriber_work_mbx);
         }
     }
@@ -258,10 +259,10 @@ public:
      */
     template<typename SubscriberMgr>
     void handle_unsubscribe_request(const UnsubscribeRequestType& req, SubscriberMgr& sub_mgr) {
-        sub_mgr.remove_subscriber(req.subscriber_mailbox_id);
+        sub_mgr.remove_subscriber(req.subscriber_base_addr);
         
         UnsubscribeReplyType reply{.success = true};
-        uint32_t subscriber_work_mbx = req.subscriber_mailbox_id + static_cast<uint8_t>(MailboxType::WORK);
+        uint32_t subscriber_work_mbx = req.subscriber_base_addr + static_cast<uint8_t>(MailboxType::WORK);
         work_mailbox_->send(reply, subscriber_work_mbx);
     }
     
@@ -295,9 +296,9 @@ protected:
         }
         
         SubscribeRequestType request{
-            .subscriber_mailbox_id = subscriber_base_addr,
-            .requested_period_ms = config_->period.count(),
-            .input_index = input_index  // Tells producer which DATA mailbox to use
+            .subscriber_base_addr = subscriber_base_addr,
+            .mailbox_index = input_index,  // Tells producer which DATA mailbox to use
+            .requested_period_ms = config_->period.count()
         };
         
         uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);

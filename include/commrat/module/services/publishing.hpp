@@ -5,6 +5,8 @@
  * Handles publishing data to subscribers with type-specific filtering
  * for multi-output modules. Supports both payload-only and TimsMessage-based
  * publishing with explicit timestamp control (Phase 6.10).
+ * 
+ * Phase 7: Uses new addressing scheme with SubscriberInfo (base_addr + mailbox_index)
  */
 
 #pragma once
@@ -12,8 +14,8 @@
 #include <commrat/messaging/message_registry.hpp>
 #include <commrat/mailbox/registry_mailbox.hpp>
 #include <commrat/messages.hpp>  // TimsMessage definition
-#include <commrat/module/helpers/address_helpers.hpp>  // extract_message_type_from_address
-#include <commrat/module/module_config.hpp>  // MailboxType enum
+#include <commrat/module/helpers/address_helpers.hpp>  // encode_address, extract_*
+#include <commrat/module/io/multi_output_manager.hpp>  // SubscriberInfo
 #include <iostream>
 #include <tuple>
 #include <mutex>
@@ -27,6 +29,9 @@ namespace commrat {
  * Handles publishing to subscribers with type-specific filtering.
  * After unification, ALL modules use MailboxSets and access subscribers
  * via module_ptr_->get_output_subscribers(index).
+ * 
+ * Phase 7: Uses CMD mailbox (index 0) for publishing, calculates dest as
+ * subscriber.base_addr | subscriber.mailbox_index.
  * 
  * Template parameters:
  * - UserRegistry: User message registry
@@ -77,26 +82,26 @@ public:
      * @brief Single-output publishing (only enabled when OutputData is not void)
      * Publishes data to all subscribers' DATA mailboxes
      * 
-     * After unification, ALL modules use MailboxSets and MultiOutputManager,
-     * so we access mailbox via get_publish_mailbox_public<0>() and subscribers
-     * via get_output_subscribers(0).
+     * Phase 7: Uses CMD mailbox (index 0) and new addressing (base | mailbox_index)
      */
     template<typename T = OutputData>
         requires (!std::is_void_v<T>)
     void publish_to_subscribers(T& data) {
         if constexpr (!std::is_void_v<ModuleType>) {
-            // Use MailboxSet approach (unified path for all modules)
-            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<0>();
+            // Use CMD mailbox for publishing (Phase 7)
+            auto& cmd_mbx = module_ptr_->template get_cmd_mailbox_public<0>();
             // Get output-specific subscriber list (index 0 for single-output)
             auto subscribers = module_ptr_->get_output_subscribers(0);
             
-            for (uint32_t subscriber_base_addr : subscribers) {
-                // Send to subscriber's DATA mailbox (base + MailboxType::DATA = base + 48)
-                uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-                auto result = publish_mbx.send(data, subscriber_data_mbx);
+            for (const auto& sub : subscribers) {
+                // Calculate destination: base_addr | mailbox_index
+                uint32_t dest_mailbox = sub.base_addr | sub.input_index;
+                auto result = cmd_mbx.send(data, dest_mailbox);
                 if (!result) {
-                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
-                              << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=0x" << std::hex << sub.base_addr 
+                              << " mbx_idx=" << std::dec << static_cast<int>(sub.input_index)
+                              << " dest=0x" << std::hex << dest_mailbox << std::dec
+                              << " error=" << static_cast<int>(result.get_error()) << "\n";
                 }
             }
         }
@@ -105,26 +110,25 @@ public:
     /**
      * @brief Publish TimsMessage<T> for single output
      * Phase 6.10: Uses explicit timestamp from header
-     * 
-     * After unification, ALL modules use MailboxSets and MultiOutputManager,
-     * so we access mailbox via get_publish_mailbox_public<0>() and subscribers
-     * via get_output_subscribers(0).
+     * Phase 7: Uses CMD mailbox and new addressing
      */
     template<typename T>
     void publish_tims_message(TimsMessage<T>& tims_msg) {
         if constexpr (!std::is_void_v<ModuleType>) {
-            // Use MailboxSet approach (unified path for all modules)
-            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<0>();
+            // Use CMD mailbox for publishing (Phase 7)
+            auto& cmd_mbx = module_ptr_->template get_cmd_mailbox_public<0>();
             // Get output-specific subscriber list (index 0 for single-output)
             auto subscribers = module_ptr_->get_output_subscribers(0);
             
-            for (uint32_t subscriber_base_addr : subscribers) {
-                uint32_t subscriber_data_mbx = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
+            for (const auto& sub : subscribers) {
+                uint32_t dest_mailbox = sub.base_addr | sub.input_index;
                 // Phase 6.10: Send with explicit timestamp from header
-                auto result = publish_mbx.send(tims_msg.payload, subscriber_data_mbx, tims_msg.header.timestamp);
+                auto result = cmd_mbx.send(tims_msg.payload, dest_mailbox, tims_msg.header.timestamp);
                 if (!result) {
-                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=" << subscriber_base_addr 
-                              << " data_mbx=" << subscriber_data_mbx << " error=" << static_cast<int>(result.get_error()) << "\n";
+                    std::cerr << "[" << module_name_ << "] Send failed to subscriber base=0x" << std::hex << sub.base_addr 
+                              << " mbx_idx=" << std::dec << static_cast<int>(sub.input_index)
+                              << " dest=0x" << std::hex << dest_mailbox << std::dec
+                              << " error=" << static_cast<int>(result.get_error()) << "\n";
                 }
             }
         }
@@ -168,6 +172,7 @@ public:
     
     /**
      * @brief Publish specific output to its subscribers (Phase 7)
+     * Uses CMD mailbox (one per output) and new addressing
      */
     template<std::size_t Index, typename OutputType>
     void publish_output_at_index(OutputType& output) {
@@ -175,14 +180,16 @@ public:
             // Get subscribers for this specific output
             auto subscribers = module_ptr_->get_output_subscribers(Index);
             
-            // Send to each subscriber's DATA mailbox
-            auto& publish_mbx = module_ptr_->template get_publish_mailbox_public<Index>();
-            for (uint32_t subscriber_base_addr : subscribers) {
-                uint32_t dest_mailbox = subscriber_base_addr + static_cast<uint8_t>(MailboxType::DATA);
-                auto result = publish_mbx.send(output, dest_mailbox);
+            // Send to each subscriber using CMD mailbox
+            auto& cmd_mbx = module_ptr_->template get_cmd_mailbox_public<Index>();
+            for (const auto& sub : subscribers) {
+                uint32_t dest_mailbox = sub.base_addr | sub.input_index;
+                auto result = cmd_mbx.send(output, dest_mailbox);
                 if (!result) {
                     std::cout << "[" << module_name_ << "] Send failed for output[" << Index 
-                              << "] to subscriber " << subscriber_base_addr << "\n";
+                              << "] to subscriber base=0x" << std::hex << sub.base_addr 
+                              << " mbx_idx=" << std::dec << static_cast<int>(sub.input_index)
+                              << " dest=0x" << std::hex << dest_mailbox << std::dec << "\n";
                 }
             }
         }

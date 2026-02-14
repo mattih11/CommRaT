@@ -138,10 +138,10 @@ static constexpr uint32_t get_mailbox_address(uint8_t system_id, uint8_t instanc
 template<typename... CommandTypes>
 static constexpr size_t calculate_cmd_mailbox_size() {
     return std::max({
-        sizeof(TimsMessage<SystemRegistry::SubscribeRequest>),
-        sizeof(TimsMessage<SystemRegistry::UnsubscribeRequest>),
-        sizeof(TimsMessage<SystemRegistry::SubscribeReply>),
-        sizeof(TimsMessage<SystemRegistry::UnsubscribeReply>),
+        sizeof(TimsMessage<SubscribeRequestPayload>),
+        sizeof(TimsMessage<UnsubscribeRequestPayload>),
+        sizeof(TimsMessage<SubscribeReplyPayload>),
+        sizeof(TimsMessage<UnsubscribeReplyPayload>),
         sizeof(TimsMessage<CommandTypes>)...
     });
 }

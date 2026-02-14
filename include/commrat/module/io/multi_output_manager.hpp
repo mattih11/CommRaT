@@ -118,7 +118,7 @@ public:
      * @param output_idx Output index (0-based)
      * @return Copy of subscriber list for that output
      */
-    std::vector<uint32_t> get_output_subscribers(std::size_t output_idx) const {
+    std::vector<SubscriberInfo> get_output_subscribers(std::size_t output_idx) const {
         Lock lock(output_subscribers_mutex_);
         if (output_idx < output_subscribers_.size()) {
             return output_subscribers_[output_idx];
@@ -137,10 +137,11 @@ public:
     void remove_subscriber(uint32_t subscriber_base_addr) {
         Lock lock(output_subscribers_mutex_);
         for (auto& output_subs : output_subscribers_) {
-            output_subs.erase(
-                std::remove(output_subs.begin(), output_subs.end(), subscriber_base_addr),
-                output_subs.end()
-            );
+            auto it = std::remove_if(output_subs.begin(), output_subs.end(),
+                [subscriber_base_addr](const SubscriberInfo& sub) {
+                    return sub.base_addr == subscriber_base_addr;
+                });
+            output_subs.erase(it, output_subs.end());
         }
     }
 
@@ -278,7 +279,7 @@ protected:
             inst_id = derived().config_.instance_id();
         }
         uint32_t work_mailbox_addr = commrat::get_mailbox_address<OutputType, OutputTypesTuple, UserRegistry>(
-            sys_id, inst_id, MailboxType::WORK);
+            sys_id, inst_id, static_cast<uint8_t>(MailboxType::WORK));
         
         std::cout << "[" << derived().config_.name << "] output_work_loop[" << Index << "] started for "
                   << typeid(OutputType).name() << ", listening on WORK mailbox " 

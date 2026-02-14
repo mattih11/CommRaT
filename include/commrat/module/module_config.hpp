@@ -33,6 +33,15 @@ struct LoopInput {};
 constexpr uint32_t DEFAULT_CMD_SLOTS = 10;   // Command/subscription buffering
 constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for getData
 
+// TODO Phase 7.5: Remove MailboxType enum once we migrate to pure mailbox_index addressing
+// Temporary compatibility: Old offset-based addressing
+enum class MailboxType : uint8_t {
+    CMD = 0,         // Command/subscription mailbox (Phase 7: Should use mailbox_index 0)
+    WORK = 16,       // Subscription protocol (Phase 7: Should be removed, use CMD)
+    PUBLISH = 32,    // Publishing to subscribers (Phase 7: Should be removed, use CMD)
+    DATA = 48        // Input data reception (Phase 7: Should use mailbox_index N+)
+};
+
 // ============================================================================
 // Output Configuration (TaggedUnion)
 // ============================================================================
