@@ -176,6 +176,7 @@ private:
     
     // Counts and flags
     static constexpr size_t num_output_types = ModuleTypes::num_output_types;
+    static constexpr size_t num_command_types = ModuleTypes::num_command_types;
     static constexpr size_t InputCount = ModuleTypes::InputCount;
     static constexpr bool has_multi_input = ModuleTypes::has_multi_input;
     static constexpr bool use_mailbox_sets = ModuleTypes::use_mailbox_sets;

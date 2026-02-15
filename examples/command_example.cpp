@@ -136,7 +136,14 @@ int main() {
         .mailbox_name = "ControlMailbox"
     };
     
-    ExtendedApp::Mailbox<ResetCmd> control(control_config);
+    // Use RegistryMailbox to send any message type
+    using AppRegistry = commrat::MessageRegistry<
+        commrat::MessageDefinition<TemperatureData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data, 65535>,
+        commrat::MessageDefinition<ResetCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>,
+        commrat::MessageDefinition<CalibrateCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>,
+        commrat::MessageDefinition<SetModeCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>
+    >;
+    commrat::RegistryMailbox<AppRegistry> control(control_config);
     control.start();
     
     std::cout << "\n=== Sending Commands ===\n\n";

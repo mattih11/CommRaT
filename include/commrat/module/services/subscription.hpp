@@ -74,21 +74,6 @@ protected:
     
     // Helper removed - work_mailbox_ is now properly typed
     
-    /**
-     * @brief Calculate base mailbox address for this module
-     * Uses output type info to determine address, same as Module class
-     */
-    static constexpr uint32_t calculate_base_address(uint8_t system_id, uint8_t instance_id) {
-        using BaseType = std::conditional_t<
-            std::is_void_v<OutputData>,
-            std::tuple_element_t<0, OutputTypesTuple>,
-            OutputData
-        >;
-        constexpr uint32_t data_type_id = Registry::template get_message_id<BaseType>();
-        constexpr uint16_t data_type_id_low = static_cast<uint16_t>(data_type_id & 0xFFFF);
-        return (static_cast<uint32_t>(data_type_id_low) << 16) | (system_id << 8) | instance_id;
-    }
-    
 public:
     void set_config(const ModuleConfig* cfg) { config_ = cfg; }
     void set_work_mailbox(RegistryMailbox<SystemRegistry>* mbx) { work_mailbox_ = mbx; }
@@ -144,7 +129,8 @@ public:
     void unsubscribe_from_source(uint8_t source_system_id, uint8_t source_instance_id) {
         static_assert(has_continuous_input, "unsubscribe_from_source() only available for continuous input modules");
         
-        uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+        uint32_t our_base_addr = commrat::calculate_base_address<OutputData, OutputTypesTuple, Registry>(
+            config_->system_id(), config_->instance_id());
         
         UnsubscribeRequestType request{
             .subscriber_base_addr = our_base_addr
@@ -177,7 +163,8 @@ public:
     void unsubscribe_from_multi_input_source(const MultiInputConfig::InputSource& source) {
         static_assert(has_multi_input, "unsubscribe_from_multi_input_source() only for multi-input modules");
         
-        uint32_t our_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+        uint32_t our_base_addr = commrat::calculate_base_address<OutputData, OutputTypesTuple, Registry>(
+            config_->system_id(), config_->instance_id());
         
         UnsubscribeRequestType request{
             .subscriber_base_addr = our_base_addr
@@ -274,21 +261,26 @@ protected:
                                    size_t source_index) {
         // Calculate subscriber_base_addr and source_data_type_id
         uint32_t source_data_type_id;
-        uint8_t input_index = 0;  // For multi-input, which input mailbox to use
         
         // BOTH single-input and multi-input now use OUTPUT type for base address
         // This prevents collisions (module identity = OUTPUT type)
-        uint32_t subscriber_base_addr = calculate_base_address(config_->system_id(), config_->instance_id());
+        uint32_t subscriber_base_addr = commrat::calculate_base_address<OutputData, OutputTypesTuple, Registry>(
+            config_->system_id(), config_->instance_id());
+        
+        // Calculate actual DATA mailbox index (after CMD mailboxes)
+        constexpr uint8_t num_outputs = std::tuple_size_v<OutputTypesTuple>;
+        uint8_t data_mailbox_index;
         
         if constexpr (has_multi_input) {
             // Multi-input: Specify which input index for DATA mailbox offset
             source_data_type_id = get_input_type_id_at_index(source_index);
-            input_index = static_cast<uint8_t>(source_index);
+            // DATA mailboxes start after CMD mailboxes: base + num_outputs + input_index
+            data_mailbox_index = get_data_mbx_base(num_outputs) + static_cast<uint8_t>(source_index);
         } 
         else if constexpr (has_continuous_input) {
             // Single continuous input: input_index = 0 (default DATA mailbox)
             source_data_type_id = Registry::template get_message_id<InputData>();
-            input_index = 0;
+            data_mailbox_index = get_data_mbx_base(num_outputs) + 0;
         } 
         else {
             static_assert(has_continuous_input || has_multi_input, "Invalid input configuration");
@@ -297,7 +289,7 @@ protected:
         
         SubscribeRequestType request{
             .subscriber_base_addr = subscriber_base_addr,
-            .mailbox_index = input_index,  // Tells producer which DATA mailbox to use
+            .mailbox_index = data_mailbox_index,  // Actual DATA mailbox index
             .requested_period_ms = config_->period.count()
         };
         

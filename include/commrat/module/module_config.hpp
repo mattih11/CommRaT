@@ -119,8 +119,9 @@ struct ModuleConfig {
     bool realtime{false};
     
     // Mailbox-specific slot counts (RACK-style)
-    uint32_t cmd_message_slots = DEFAULT_CMD_SLOTS;   // CMD mailbox buffering
-    uint32_t data_message_slots = DEFAULT_DATA_SLOTS; // DATA mailbox buffering per input
+    // Optional fields with defaults for backward compatibility
+    rfl::DefaultVal<uint32_t> cmd_message_slots = DEFAULT_CMD_SLOTS;
+    rfl::DefaultVal<uint32_t> data_message_slots = DEFAULT_DATA_SLOTS;
     
     // ========================================================================
     // Output Configuration Accessors

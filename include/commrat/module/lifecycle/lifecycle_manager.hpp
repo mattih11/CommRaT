@@ -66,8 +66,10 @@ public:
         std::cout << "[" << module.config_.name << "] Spawning " << module.num_output_types << " output work threads...\n";
         module.template spawn_all_output_work_threads(std::make_index_sequence<module.num_output_types>{});
         
-        // Start command thread for user commands
-        module.command_thread_ = std::thread(&ModuleType::command_loop, &module);
+        // Start command thread for user commands (only if module has commands)
+        if constexpr (module.num_command_types > 0) {
+            module.command_thread_ = std::thread(&ModuleType::command_loop, &module);
+        }
         
         // Give threads time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

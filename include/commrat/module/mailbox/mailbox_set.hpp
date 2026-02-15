@@ -33,10 +33,13 @@ template<
     typename... CommandTypes
 >
 struct MailboxSet {
+    // CMD mailbox receives user commands and sends outputs
     using CmdMailbox = std::conditional_t<
         sizeof...(CommandTypes) == 0,
-        RegistryMailbox<UserRegistry>,
-        TypedMailbox<UserRegistry, CommandTypes...>
+        // No user commands: send-only mailbox for outputs
+        TypedMailbox<UserRegistry, SendOnlyTypes<OutputType>>,
+        // User commands: receive commands, send outputs
+        TypedMailbox<UserRegistry, ReceiveTypes<CommandTypes...>, SendOnlyTypes<OutputType>>
     >;
     
     using WorkMailbox = RegistryMailbox<SystemRegistry>;

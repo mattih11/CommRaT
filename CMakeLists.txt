@@ -175,6 +175,12 @@ target_link_libraries(test_typed_mailbox PRIVATE commrat)
 target_include_directories(test_typed_mailbox PRIVATE /usr/local/include/rack)
 add_test(NAME test_typed_mailbox COMMAND test_typed_mailbox)
 
+# Phase 7: Address collision detection test
+add_executable(test_address_collisions test/test_address_collisions.cpp)
+target_link_libraries(test_address_collisions PRIVATE commrat)
+target_include_directories(test_address_collisions PRIVATE /usr/local/include/rack)
+add_test(NAME test_address_collisions COMMAND test_address_collisions)
+
 # Add examples as tests (use wrapper for continuous examples)
 add_test(NAME example_continuous_input COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_continuous_input>)
 add_test(NAME example_clean_interface COMMAND example_clean_interface)

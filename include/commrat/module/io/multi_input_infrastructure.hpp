@@ -129,7 +129,7 @@ private:
         
         MailboxConfig mbx_config{
             .mailbox_id = data_mailbox_id,
-            .message_slots = module.config_.data_message_slots,  // Use DATA-specific slots
+            .message_slots = module.config_.data_message_slots.value(),  // Extract from DefaultVal
             .max_message_size = input_message_size,              // Per-input-type size!
             .send_priority = static_cast<uint8_t>(module.config_.priority),
             .realtime = module.config_.realtime,

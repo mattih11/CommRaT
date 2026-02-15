@@ -73,6 +73,32 @@ struct MakeTypedCmdMailbox<UserRegistry, std::tuple<Ts...>> {
 };
 
 /**
+ * @brief Create CMD mailbox with receive/send separation
+ * 
+ * CMD mailbox receives commands (small buffer) but sends outputs (large).
+ * Uses ReceiveTypes/SendOnlyTypes to separate buffer sizing from send capability.
+ */
+template<typename UserRegistry, typename CommandTuple, typename OutputTuple>
+struct MakeTypedCmdMailboxWithSend;
+
+template<typename UserRegistry, typename... Commands, typename... Outputs>
+struct MakeTypedCmdMailboxWithSend<UserRegistry, std::tuple<Commands...>, std::tuple<Outputs...>> {
+    using type = std::conditional_t<
+        sizeof...(Commands) == 0 && sizeof...(Outputs) == 0,
+        TypedMailbox<UserRegistry>,  // No types → empty TypedMailbox (shouldn't happen)
+        std::conditional_t<
+            sizeof...(Commands) == 0,
+            TypedMailbox<UserRegistry, SendOnlyTypes<Outputs...>>,  // No commands, only send outputs
+            std::conditional_t<
+                sizeof...(Outputs) == 0,
+                TypedMailbox<UserRegistry, Commands...>,  // Commands only, no send-only types needed
+                TypedMailbox<UserRegistry, ReceiveTypes<Commands...>, SendOnlyTypes<Outputs...>>  // Commands receive, Outputs send-only
+            >
+        >
+    >;
+};
+
+/**
  * @brief Extract data types from InputSpec for DATA mailbox
  */
 template<typename T>
@@ -143,6 +169,10 @@ struct ModuleTypes {
     static constexpr size_t num_output_types = std::tuple_size_v<OutputTypesTuple>;
     static constexpr bool has_multi_output = OutputCount_v<OutputSpec> > 1;
     
+    // Command type analysis
+    using CommandTuple = std::tuple<CommandTypes...>;
+    static constexpr size_t num_command_types = sizeof...(CommandTypes);
+    
     // Mailbox structure selection
     static constexpr bool use_mailbox_sets = (num_output_types > 1);
     
@@ -150,13 +180,14 @@ struct ModuleTypes {
     using MailboxSetTuple = typename MakeMailboxSetTuple<UserRegistry, OutputTypesTuple, CommandTypes...>::type;
     
     // Mailbox types
-    using CommandTuple = std::tuple<CommandTypes...>;
     using CombinedCmdTypes = decltype(std::tuple_cat(
         std::declval<CommandTuple>(),
         std::declval<OutputTypesTuple>()
     ));
     
-    using CmdMailbox = typename MakeTypedCmdMailbox<UserRegistry, CommandTuple>::type;
+    // CMD mailbox: Buffer sized for commands, can send commands + outputs
+    // Uses SendOnly<...> to mark output types as send-only (no buffer impact)
+    using CmdMailbox = typename MakeTypedCmdMailboxWithSend<UserRegistry, CommandTuple, OutputTypesTuple>::type;
     using WorkMailbox = RegistryMailbox<SystemRegistry>;
     using PublishMailbox = typename MakeTypedCmdMailbox<UserRegistry, OutputTypesTuple>::type;
     
