@@ -388,31 +388,60 @@ class SensorModule : public Module<Registry,
 
 ## Implementation Status
 
-### Phase 1: Mailbox Buffer Sizing - COMPLETE
+### Phase 1: Mailbox Buffer Sizing - COMPLETE ✅
 
 **Goal:** Reduce memory waste by sizing mailboxes based on actual message types
 
-**Status**: IMPLEMENTED AND WORKING
+**Status**: FULLY IMPLEMENTED (February 15, 2026)
 
 **What was completed:**
-- Added `max_size_for_types<Ts...>()` to MessageRegistry
-- Created `TypedMailbox<Registry, AllowedTypes...>` template with compile-time type validation
-- Added static_assert in send/receive to validate message types
-- Updated Module to create typed mailboxes (CMD, WORK, PUBLISH, DATA)
-- Added type extraction helpers for OutputSpec/InputSpec/CommandSpec
-- Verified 70-95% memory reduction in mailbox allocations
 
-**Result**: Mailboxes now use minimal memory based on their specific message types. Type safety enforced at compile time.
+#### Phase 1A-1C: Basic TypedMailbox (February 10, 2026)
+- ✅ Added `max_size_for_types<Ts...>()` to MessageRegistry
+- ✅ Created `TypedMailbox<Registry, AllowedTypes...>` template with compile-time type validation
+- ✅ Added static_assert in send/receive to validate message types
+- ✅ Updated Module to create typed mailboxes (CMD, WORK, PUBLISH, DATA)
+- ✅ Added type extraction helpers for OutputSpec/InputSpec/CommandSpec
+- ✅ Verified 70-95% memory reduction in mailbox allocations
+
+#### Phase 1D: ReceiveTypes/SendOnlyTypes Separation (February 15, 2026)
+- ✅ Added `ReceiveTypes<Ts...>` and `SendOnlyTypes<Ts...>` tag types to TypedMailbox
+- ✅ Specialization: `TypedMailbox<Registry, ReceiveTypes<Cmds...>, SendOnlyTypes<Outputs...>>`
+- ✅ Buffer sized for ReceiveTypes only (SendOnly types don't affect buffer)
+- ✅ CMD mailbox optimization: receive commands (small), send outputs (large)
+  ```cpp
+  // Buffer = max(Commands), but can send Commands + Outputs
+  TypedMailbox<Registry, ReceiveTypes<Cmd1, Cmd2>, SendOnlyTypes<HugeOutput>>
+  ```
+- ✅ Send-only mailbox: `TypedMailbox<Registry, SendOnlyTypes<Outputs...>>` (minimal buffer)
+- ✅ Updated MailboxSet to use ReceiveTypes/SendOnlyTypes pattern
+- ✅ Updated module_types.hpp with `MakeTypedCmdMailboxWithSend` helper
+- ✅ Conditional command thread spawning (`num_command_types > 0`)
+
+**Result**: 
+- Mailboxes use minimal memory based on their specific RECEIVE message types
+- Send-only types don't inflate buffer size
+- Type safety enforced at compile time (both send and receive)
+- Modules without commands use send-only CMD mailboxes (no command buffer waste)
+- **Typical memory savings: 70-95% per mailbox**
 
 ---
 
-### Phase 2: Command Specification Types - IN PROGRESS
+### Phase 2: Command Specification Types - DEFERRED
 
 **Goal:** Unify command handling with Input/Output pattern
 
-**Priority**: HIGH
+**Priority**: MEDIUM (deferred in favor of Phase 7.5 addressing work)
 
-**Tasks:**
+**Status**: Not started - current variadic `CommandTypes...` syntax works adequately
+
+**Rationale for deferral:**
+- Current command system works correctly with variadic template parameters
+- More urgent: Fix per-output CMD mailbox addressing (Phase 7.5)
+- TypedMailbox already provides compile-time type safety for commands
+- Command<>/Commands<> wrapper would be nice-to-have, not critical
+
+**Tasks (when resumed):**
 1. Add `Command<T>`, `Commands<Ts...>`, `NoCommands` to io_spec.hpp
 2. Add `NormalizeCommandSpec` trait
 3. Add `ExtractCommandPayloads` trait
@@ -429,7 +458,7 @@ class SensorModule : public Module<Registry,
 - `examples/*.cpp` (migrate to Commands<> syntax)
 - `docs/USER_GUIDE.md` (Section 9: Command Handling)
 
-**Estimated Effort:** 6-8 hours
+**Estimated Effort:** 6-8 hours (when prioritized)
 
 ---
 

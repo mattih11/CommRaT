@@ -1,11 +1,11 @@
 # CommRaT Addressing Implementation Plan
 
-## STATUS: ✅ IMPLEMENTED (Phase 6.10 Complete)
+## STATUS: Phase 7 IN PROGRESS
 
-**Last Updated:** February 14, 2026  
-**Implementation Status:** All core features implemented and tested (25/25 tests passing)
+**Last Updated:** February 15, 2026  
+**Implementation Status:** TypedMailbox complete, per-output CMD mailboxes next (25/26 tests passing)
 
-### What's Been Done
+### Phase 6 Complete ✅
 
 1. ✅ **RACK-style address encoding** - Fully implemented in `address_helpers.hpp`
 2. ✅ **Unified addressing system** - All modules use `[type:8][sys:8][inst:8][mbx:8]` format
@@ -13,24 +13,86 @@
 4. ✅ **Multi-input infrastructure** - Per-input-type mailbox sizing
 5. ✅ **Subscription protocol** - Updated with `subscriber_base_addr` + `mailbox_index`
 6. ✅ **Multi-input synchronization** - getData with RACK-style addressing
-7. ✅ **All tests passing** - Including 3-input fusion test
+7. ✅ **All core tests passing** - 3-input fusion, multi-input, timestamp logic working
 
-### Outstanding Work (Phase 7+)
+### Phase 7 Progress (Mailbox Optimization)
 
-1. ⏳ **CMD mailbox sizing optimization** - Still uses `UserRegistry::max_message_size`
-   - Should use: `max(SystemRegistry messages, module's Commands<...>)`
-   - Currently wasteful for modules with small commands but large data messages
-   - See Step 5 below for implementation details
+#### ✅ Phase 7.1-7.4: TypedMailbox Implementation - COMPLETE
 
-2. ⏳ **Remove legacy MailboxType enum** - Compatibility layer still exists
-   - `MailboxType::CMD`, `WORK`, `PUBLISH`, `DATA` still used in some places
-   - Should migrate to pure `mailbox_index` addressing
-   - Marked with TODO comments in code
+1. ✅ **TypedMailbox with ReceiveTypes/SendOnlyTypes** - Implemented Feb 15, 2026
+   - Buffer sized for receive types only (not send-only types)
+   - CMD mailbox: receives commands (small), sends outputs (large) - buffer optimized!
+   - Example: `TypedMailbox<Registry, ReceiveTypes<Cmd1, Cmd2>, SendOnlyTypes<HugeOutput>>`
+   - Mailbox buffer = max(Cmd1, Cmd2) not max(HugeOutput)
+   - **Memory savings: 70-95% reduction per mailbox**
 
-3. ⏳ **Multi-output CMD mailbox allocation** - Not yet per-output
-   - Currently single CMD/WORK/PUBLISH per module
-   - Should have CMD mailbox per output (indices 0, 1, 2...)
-   - See Step 6 for full multi-output implementation
+2. ✅ **MailboxSet updated** - Uses TypedMailbox with send/receive separation
+   - CMD mailbox for modules without commands: `SendOnlyTypes<OutputType>`
+   - CMD mailbox for modules with commands: `ReceiveTypes<Commands...>, SendOnlyTypes<Output>`
+   - Compile-time type safety enforced
+
+3. ✅ **Module integration** - All modules use optimized TypedMailbox
+   - `num_command_types` constant added to Module
+   - Command thread only spawned if `num_command_types > 0`
+   - Lifecycle manager updated for conditional command handling
+
+#### ⏳ Phase 7.5: Per-Output-Type CMD Mailboxes - NEXT STEP
+
+**Status:** Multi-output modules need one CMD mailbox per output type - MISSING!
+
+**Test Results (3/8 passing):**
+- ✅ Tests 1, 4, 6: Collision detection working correctly (TiMS prevents duplicate mailboxes)
+- ❌ Tests 2, 3, 5, 7, 8: Consumers don't receive data - subscriptions to wrong mailbox!
+
+**Root Cause:**
+Multi-output modules currently create ONE MailboxSet (one CMD mailbox) but have MULTIPLE output types with DIFFERENT type_ids in addresses.
+
+**The Problem:**
+```cpp
+// Multi-output module: Outputs<SensorA, SensorB>
+// Currently: ONE CMD mailbox created at some address (which type_id?)
+// Should be: TWO CMD mailboxes, one per output type
+
+SensorA address: [typeA:8][sys:8][inst:8][0]  // Need CMD here
+SensorB address: [typeB:8][sys:8][inst:8][0]  // Need CMD here too!
+
+Consumer subscribing to SensorA sends SubscribeRequest to [typeA:8][sys:8][inst:8][0]
+But if module only created CMD at [typeB:8][sys:8][inst:8][0], request goes nowhere!
+```
+
+**Current Architecture (BROKEN for multi-output):**
+```cpp
+// Module creates ONE MailboxSet
+std::optional<MailboxSet> mailbox_set_;  // Only ONE!
+
+// Multi-output needs MULTIPLE MailboxSets
+std::tuple<MailboxSet<OutputA>, MailboxSet<OutputB>, ...> mailbox_sets_;
+```
+
+**Solution:**
+1. **One MailboxSet per output type** (already partially implemented in code)
+   - Module has `mailbox_sets_` tuple
+   - Each MailboxSet has its own CMD/WORK/PUBLISH mailboxes
+   - Each MailboxSet initialized with correct type_id for that output
+
+2. **Subscription handling per output**
+   - work_loop must handle SubscribeRequests for each output type
+   - Each output maintains its own subscriber list
+   - Publishing uses correct CMD mailbox for that output type
+
+3. **Required Changes:**
+   - ✅ MailboxSet tuple structure (already exists in code)
+   - ⏳ Ensure each MailboxSet creates mailboxes with correct type_id
+   - ⏳ Work loops for each output (not just output[0])
+   - ⏳ Subscriber lists per output (already exists)
+   - ⏳ Publishing from correct CMD mailbox per output type
+
+#### ⏳ Phase 7.6: Remove Legacy MailboxType Enum
+
+**Status:** Low priority cleanup
+- `MailboxType::CMD`, `WORK`, `PUBLISH`, `DATA` marked with TODOs
+- Should migrate to pure `mailbox_index` constants
+- Currently harmless - kept for backward compatibility
 
 ## Overview
 
@@ -64,45 +126,61 @@ constexpr uint8_t CMD_MBX_BASE = 0;
 
 ## Mailbox Architecture (RACK-Style)
 
-### Per Output
-Each output gets a **CMD mailbox** for all communication:
-- Receives: commands, subscription requests
-- Sends: subscription replies, data to subscribers
+### Addressing Principle
 
-### Per Input  
-Each input gets a **DATA mailbox** for receiving data:
-- Receives: input data from producer
-- Sequential allocation after all CMD mailboxes
+**Key insight:** Type ID is part of the address - different types naturally get different addresses!
+
+```
+Full address: [type_id:8][system_id:8][instance_id:8][mailbox_index:8]
+             = 0xTTSSIIMM (easy hex debugging)
+```
+
+### Mailbox Index Allocation
+
+**CMD mailbox:** Always at mailbox_index = 0
+- Receives: commands, subscription requests (SubscribeRequest/UnsubscribeRequest)
+- Sends: subscription replies, output data to subscribers
+- **One CMD per output type** - type_id in address prevents collisions
+
+**DATA mailboxes:** Sequential indices starting at 1
+- Each input gets its own DATA mailbox
+- Mailbox index = 1, 2, 3, ... for input[0], input[1], input[2], ...
+- Producer sends to subscriber's DATA mailbox at calculated index
 
 ### Example Allocations
 
 **Single-output, single-input (Filter):**
 ```
-mailbox_index = 0: CMD  (commands, subscriptions, publishing)
-mailbox_index = 1: DATA (receives input)
+[type:8][sys:8][inst:8][0]: CMD  (commands, subscriptions, publishing)
+[type:8][sys:8][inst:8][1]: DATA (receives input)
 ```
 
-**Multi-output (2), no inputs:**
+**Multi-output (2 types), no inputs:**
 ```
-mailbox_index = 0: CMD for output[0]
-mailbox_index = 1: CMD for output[1]
+[typeA:8][sys:8][inst:8][0]: CMD for output A
+[typeB:8][sys:8][inst:8][0]: CMD for output B (different type_id!)
 ```
 
 **Single-output, multi-input (3-input Fusion):**
 ```
-mailbox_index = 0: CMD  (commands, subscriptions, publishing fusion data)
-mailbox_index = 1: DATA (IMU input)
-mailbox_index = 2: DATA (GPS input)
-mailbox_index = 3: DATA (Lidar input)
+[type:8][sys:8][inst:8][0]: CMD  (commands, subscriptions, publishing fusion data)
+[type:8][sys:8][inst:8][1]: DATA (IMU input)
+[type:8][sys:8][inst:8][2]: DATA (GPS input)
+[type:8][sys:8][inst:8][3]: DATA (Lidar input)
 ```
 
-**Multi-output (2), multi-input (2):**
+**Multi-output (2 types), multi-input (2):**
 ```
-mailbox_index = 0: CMD for output[0]
-mailbox_index = 1: CMD for output[1]
-mailbox_index = 2: DATA for input[0]
-mailbox_index = 3: DATA for input[1]
+[typeA:8][sys:8][inst:8][0]: CMD for output A
+[typeA:8][sys:8][inst:8][1]: DATA for input[0] (subscribes to typeA)
+[typeA:8][sys:8][inst:8][2]: DATA for input[1] (subscribes to typeA)
+
+[typeB:8][sys:8][inst:8][0]: CMD for output B
+[typeB:8][sys:8][inst:8][1]: DATA for input[0] (subscribes to typeB)
+[typeB:8][sys:8][inst:8][2]: DATA for input[1] (subscribes to typeB)
 ```
+
+**Note:** type_id in address prevents collisions - different types can share [sys][inst]
 
 ## Mailbox Sizing Strategy (Compile-Time)
 
