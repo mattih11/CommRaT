@@ -87,11 +87,65 @@ std::tuple<MailboxSet<OutputA>, MailboxSet<OutputB>, ...> mailbox_sets_;
    - ⏳ Subscriber lists per output (already exists)
    - ⏳ Publishing from correct CMD mailbox per output type
 
-#### ⏳ Phase 7.6: Remove Legacy MailboxType Enum
+#### ⏳ Phase 7.6: Human-Readable Mailbox Names (reflect-cpp)
+
+**Status:** Enhancement - improve debugging experience
+
+**Goal:** Use reflect-cpp to generate compile-time human-readable mailbox names
+
+**Current:** Mailbox names use type IDs (numeric)
+```cpp
+.mailbox_name = "ProducerA_cmd_7SensorA"  // type mangling, not clear
+```
+
+**Proposed:** Reflect-cpp compile-time type name extraction
+```cpp
+// Using reflect-cpp's type name generation
+template<typename T>
+constexpr auto get_type_name() {
+    return rfl::type_name_t<T>::value;  // "SensorA" at compile time
+}
+
+// In MailboxSet::initialize():
+.mailbox_name = format("{}:{}:{}:CMD", 
+    get_type_name<OutputType>(),  // "SensorA"
+    config.system_id,              // 10
+    config.instance_id)            // 1
+// Result: "SensorA:10:1:CMD"
+
+// For DATA mailboxes:
+.mailbox_name = format("{}:{}:{}:DATA{}",
+    get_type_name<OutputType>(),  // "SensorA"  
+    config.system_id,              // 10
+    config.instance_id,            // 1
+    input_index)                   // 0, 1, 2...
+// Result: "SensorA:10:1:DATA0", "SensorA:10:1:DATA1"
+```
+
+**Benefits:**
+- Instantly readable in logs: `SensorA:10:1:CMD` vs `7SensorA_cmd_18088192`
+- Debug-friendly address format matches documentation
+- Type name visible in TiMS router listings
+- Easy to grep for specific message types in logs
+
+**Implementation:**
+1. Add `get_type_name<T>()` helper using reflect-cpp
+2. Update `MailboxConfig` creation in `MailboxSet::initialize()`
+3. Update DATA mailbox names in `MultiInputInfrastructure`
+4. Add compile-time format helper (constexpr or fixed_string)
+
+**Files to modify:**
+- `include/commrat/module/helpers/type_name.hpp` (NEW)
+- `include/commrat/module/mailbox/mailbox_set.hpp`
+- `include/commrat/module/io/multi_input_infrastructure.hpp`
+
+**Priority:** Medium - great for debugging, not critical for functionality
+
+#### ⏳ Phase 7.7: Remove Legacy MailboxType Enum
 
 **Status:** Low priority cleanup
 - `MailboxType::CMD`, `WORK`, `PUBLISH`, `DATA` marked with TODOs
-- Should migrate to pure `mailbox_index` constants
+- Should migrate to pure `mailbox_index` constants  
 - Currently harmless - kept for backward compatibility
 
 ## Overview
