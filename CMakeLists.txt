@@ -175,6 +175,12 @@ target_link_libraries(test_typed_mailbox PRIVATE commrat)
 target_include_directories(test_typed_mailbox PRIVATE /usr/local/include/rack)
 add_test(NAME test_typed_mailbox COMMAND test_typed_mailbox)
 
+# TypeName utility test (compile-time type name retrieval)
+add_executable(test_type_name test/test_type_name.cpp)
+target_link_libraries(test_type_name PRIVATE commrat)
+target_include_directories(test_type_name PRIVATE /usr/local/include/rack)
+add_test(NAME test_type_name COMMAND test_type_name)
+
 # Phase 7: Address collision detection test
 add_executable(test_address_collisions test/test_address_collisions.cpp)
 target_link_libraries(test_address_collisions PRIVATE commrat)
