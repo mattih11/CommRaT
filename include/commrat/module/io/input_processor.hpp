@@ -1,10 +1,10 @@
 /**
- * @file multi_input_processor.hpp
- * @brief Multi-input processing helpers for Module
+ * @file input_processor.hpp
+ * @brief Input processing helpers for Module
  * 
- * Extracted from registry_module.hpp Phase 5.
  * Handles synchronized input gathering, getData synchronization,
- * and calling multi-input process functions.
+ * and calling input process functions.
+ * Unified for single and multiple inputs.
  */
 
 #pragma once
@@ -17,21 +17,23 @@
 namespace commrat {
 
 /**
- * @brief Multi-input processing mixin
+ * @brief Input processing mixin
  * 
  * Provides helpers for:
  * - Receiving from primary input mailbox
  * - Gathering all inputs synchronized to primary timestamp
- * - Calling multi-input process() methods with proper unpacking
+ * - Calling input process() methods with proper unpacking
+ * 
+ * Unified mechanism: single input = tuple size 1, multiple inputs = tuple size N
  * 
  * @tparam ModuleType The derived Module class (CRTP)
  * @tparam InputTypesTuple Tuple of input payload types
  * @tparam OutputData Single output type (or void)
- * @tparam OutputTypesTuple Tuple of output types (for multi-output)
+ * @tparam OutputTypesTuple Tuple of output types
  * @tparam InputCount Number of inputs
  */
 template<typename ModuleType, typename InputTypesTuple, typename OutputData, typename OutputTypesTuple, std::size_t InputCount>
-class MultiInputProcessor {
+class InputProcessor {
 protected:
     /**
      * @brief Receive from primary input mailbox

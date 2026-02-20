@@ -29,6 +29,7 @@ class SyncedInput : public CmdInput<CommratApp, T>
 {
 public:
     using Type = T;
+    using ConfigType = SyncedInputConfig;
     using WorkMailbox = TypedMailbox<typename CommratApp::SystemRegistry::SubscriptionAck>;
     
     /**
@@ -41,43 +42,39 @@ public:
      */
     SyncedInput(SystemId producer_system_id, 
                 InstanceId producer_instance_id,
-                std::optional<std::reference_wrapper<WorkMailbox>> work_mbx = std::nullopt,
                 Duration tolerance = Milliseconds(50),
                 InterpolationMode interpolation = InterpolationMode::Nearest)
         : CmdInput<CommratApp, T>(producer_system_id, producer_instance_id)
-        , work_mbx_(work_mbx)
         , tolerance_(tolerance)
         , interpolation_(interpolation)
     {}
     
     /**
-     * @brief Subscribe to producer (optional for getData)
-     * May be needed for producer to start buffering data
-     * @return Success or error
-     */
-    auto subscribe() -> MailboxResult<void> {
-        if (!work_mbx_) {
-            return MailboxResult<void>::error("No work mailbox configured");
-        }
-        // TODO: Send SubscribeRequest via work_mbx_ to this->producer_cmd_address_
-        return MailboxResult<void>::success();
-    }
-    
-    /**
      * @brief Get data synchronized to timestamp
      * 
-     * Sends RPC to producer's buffer requesting data at specified timestamp.
-     * Producer searches its RingBuffer for closest match within tolerance.
+     * Sends GetDataRequest RPC to producer's BufferedOutput command mailbox.
+     * Producer searches its TimestampedRingBuffer and responds with GetDataResponse.
+     * 
+     * Response mailbox:
+     * - If work_mbx_ provided: Uses module's shared work mailbox (memory efficient)
+     * - Otherwise: Uses dedicated_mbx_ (independent, may be faster)
+     * 
+     * Flow:
+     * 1. Send GetDataRequest(timestamp, tolerance) to producer's cmd_mbx
+     * 2. Producer's BufferedOutput.getData() searches buffer
+     * 3. Producer sends GetDataResponse(data) to our response mailbox
+     * 4. Receive response and return data or nullopt
      * 
      * @param timestamp Target timestamp to synchronize to
      * @return Data at timestamp or nullopt if no match within tolerance
      */
     auto get_data(const Timestamp& timestamp) -> std::optional<T> {
         // TODO: Implement RPC to producer's buffer
-        // 1. Send GetDataRequest(timestamp, tolerance_) to producer
-        // 2. Producer searches RingBuffer for match
-        // 3. Producer returns GetDataResponse(data) or error
-        // 4. Return data or nullopt
+        // 1. Send GetDataRequest(timestamp, tolerance_) to producer's cmd_mbx
+        // 2. Producer's BufferedOutput.getData() searches TimestampedRingBuffer
+        // 3. Producer sends GetDataResponse(data) to work_mbx_ or dedicated_mbx_
+        // 4. Receive response with timeout
+        // 5. Return data or nullopt
         return std::nullopt;
     }
     
@@ -93,9 +90,11 @@ public:
     bool is_fresh() const { return last_get_was_fresh_; }
     
 private:
-    std::optional<std::reference_wrapper<WorkMailbox>> work_mbx_;  // Optional work mailbox
-    Duration tolerance_;                // Maximum time difference for matching
-    InterpolationMode interpolation_;   // How to handle mismatches
-    bool last_get_succeeded_ = false;   // Did last getData find data?
-    bool last_get_was_fresh_ = false;   // Was last getData fresh or cached?
+    Duration tolerance_;                                            // Maximum time difference for matching
+    InterpolationMode interpolation_;                               // How to handle mismatches
+    std::optional<std::reference_wrapper<WorkMailbox>> work_mbx_;  // Shared work mailbox (for getData responses)
+    std::optional<TypedMailbox<GetDataResponse<T>>> dedicated_mbx_; // Dedicated mailbox if not using work_mbx
+    bool last_get_succeeded_ = false;                               // Did last getData find data?
+    bool last_get_was_fresh_ = false;                               // Was last getData fresh or cached?
+};
 };
