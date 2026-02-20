@@ -2,7 +2,7 @@
 
 **Branch**: `feature/mailbox-cleanup`  
 **Date**: February 20, 2026  
-**Status**: Design Phase
+**Status**: Implementation Phase - I/O Classes Complete
 
 ## Inspiration
 
@@ -53,81 +53,177 @@ auto CreateDataMailbox() -> TypedMailbox<InputType>;
 
 ### Per-Output Components
 
-Each output gets TWO components:
+**IMPLEMENTED**: `BufferedOutput<CommratApp, T, SLOTS>` (single class, no hierarchy)
 
-**1. Data Buffer (Storage)**
 ```cpp
-template<typename T, size_t SLOTS>
-class ModuleOutput {
-    sertial::RingBuffer<T, SLOTS> buffer_;      // Stores recent outputs
-    TypedMailbox<Commands...> cmd_mailbox_;     // Communication channel
+template<typename CommratApp, typename T, std::size_t SLOTS = 100>
+class BufferedOutput {
+    TimestampedRingBuffer<TimsMessage<T>, SLOTS> buffer_;  // Timestamped storage
+    TypedMailbox<Commands...> cmd_mbx_;                     // Communication channel
+    
+    auto publish(const T& data, Timestamp ts) -> MailboxResult<void>;
+    auto getData(uint64_t timestamp, Milliseconds tolerance, InterpolationMode mode) 
+        -> std::optional<TimsMessage<T>>;
 };
 ```
-- Ring buffer stores recent outputs for publishing to subscribers
-- Only outputs have buffers (inputs receive directly into process())
 
-**2. Command Mailbox (Communication)**
+**Combined functionality:**
+- **TimestampedRingBuffer**: Stores recent outputs with timestamp indexing (from HistoricalMailbox)
+- **Command Mailbox**: Receives Subscribe/Unsubscribe + user commands
+- **Dual purpose**: Supports both publish() for ContinuousInput AND getData() for SyncedInput
+- **No tuple complexity**: Strongly typed for single type T (no per-type tuple like HistoricalMailbox)
+
+**Command Mailbox Details:**
 - **Receives** system requests: `SubscribeRequest`, `UnsubscribeRequest`, etc.
 - **Receives** user-defined commands specific to this output type
 - **Sends** subscription acknowledgments to subscriber's WorkMailbox
-- Publishes outputs to subscribers using the buffer
-- Type: `TypedMailbox<SystemCommands..., UserCommands<OutputType>...>`
+- **Type**: `TypedMailbox<SystemCommands..., UserCommands<OutputType>...>`
+- **Address**: Per-output (depends on type_id) - REQUIRED by TiMS addressing
 
 **Subscription Flow:**
 1. Consumer's WorkMailbox → `SubscribeRequest` → Producer's CommandMailbox
 2. Producer's CommandMailbox → `SubscriptionAck` → Consumer's WorkMailbox
 3. Producer's CommandMailbox → Data → Consumer's DataMailbox (ongoing)
 
+**File**: `include/commrat/module/io/output/buffered_output.hpp`
+
 ### Per-Input Components
 
-Each input gets ONE mailbox + reference to module's work mailbox:
+**IMPLEMENTED**: Three input classes with inheritance hierarchy
 
-**1. Data Mailbox (Receive Channel)**
+**1. CmdInput<CommratApp, T>** - Base class (command-only)
 ```cpp
-template<typename T>
-class ModuleInput {
-    TypedMailbox<T> data_mbx_;                      // Receive data from producer
-    TypedMailbox<SubscriptionAck>& work_mbx_;       // Reference to module's work mailbox
+class CmdInput {
+    SystemId producer_system_id_;
+    InstanceId producer_instance_id_;
+    uint32_t producer_cmd_address_;  // Producer's command mailbox address
+    
+    template<typename CmdType>
+    auto send_command(const CmdType& command) -> MailboxResult<void>;
 };
 ```
+- Send commands to remote module without receiving data
+- Does NOT participate in process()
+- Calculates producer's command mailbox address
 
-**2. Work Mailbox Reference (Subscription Protocol)**
-- References the **module's shared work mailbox**
-- Input uses it to **send** `SubscribeRequest` to producer's CommandMailbox
-- Module **receives** `SubscriptionAck` from producers
-- Shared across all inputs in the module
-- Type: `TypedMailbox<SubscriptionAck, UnsubscribeAck, ...>`
+**2. ContinuousInput<CommratApp, T> : public CmdInput** - Push model streaming
+```cpp
+class ContinuousInput : public CmdInput<CommratApp, T> {
+    TypedMailbox<T> data_mbx_;           // Receive data stream
+    WorkMailbox& work_mbx_;              // Reference to module's shared work mailbox
+    Duration poll_timeout_;
+    
+    auto subscribe() -> MailboxResult<void>;
+    auto poll_data() -> MailboxResult<TimsMessage<T>>;
+};
+```
+- Receives continuous data stream via data_mbx_
+- subscribe/unsubscribe via module's shared work_mbx_
+- poll_data() blocks waiting for data → feeds process()
+- NO local buffer (producer has BufferedOutput)
+
+**3. SyncedInput<CommratApp, T> : public CmdInput** - Pull model timestamp sync
+```cpp
+class SyncedInput : public CmdInput<CommratApp, T> {
+    std::optional<std::reference_wrapper<WorkMailbox>> work_mbx_;  // Optional
+    Duration tolerance_;
+    InterpolationMode interpolation_;
+    
+    auto get_data(const Timestamp& timestamp) -> std::optional<T>;
+    bool is_valid() const;
+    bool is_fresh() const;
+};
+```
+- get_data(timestamp) queries producer's BufferedOutput (RPC)
+- NO data_mbx_ (no continuous stream, only RPC)
+- Optional work_mbx_ (may not need subscription for getData)
+- Tolerance and interpolation configuration
+- Tracks validity/freshness metadata
+
+**Files**: 
+- `include/commrat/module/io/input/cmd_input.hpp`
+- `include/commrat/module/io/input/continuous_input.hpp`
+- `include/commrat/module/io/input/synced_input.hpp`
 
 ## Migration Strategy
 
-### Phase 1: TypedMailbox Unification
+### Phase 1: TypedMailbox Unification (PENDING)
 1. Audit all RegistryMailbox usage
 2. Replace with TypedMailbox
 3. Remove RegistryMailbox class
 4. Update tests
 
-### Phase 2: Remove HistoricalMailbox
-1. Move ring buffer logic into ModuleInput/ModuleOutput
-2. Mailboxes are ONLY for communication
-3. Storage is separate concern
+### Phase 2: Remove HistoricalMailbox (IN PROGRESS)
+1. ✅ Move timestamped buffer logic into BufferedOutput
+2. ✅ Create input/output class hierarchy
+3. ⏳ Remove HistoricalMailbox class
+4. ⏳ Update existing modules to use new I/O classes
+5. ⏳ Update tests to use new I/O classes
 
-### Phase 3: Implement ModuleInput/ModuleOutput
-1. Complete prototype implementations
-2. Clear separation: storage vs communication
+### Phase 3: Update Module Framework (PENDING)
+1. Update Module base class to use BufferedOutput/Input classes
+2. Integrate subscription protocol with new command mailboxes
+3. Implement publish() and getData() RPC in framework
+4. Wire up continuous vs synced input handling in process() dispatcher
 3. Type-safe, single responsibility
 
-### Phase 4: Update Module Framework
-1. Registry module uses new input/output classes
-2. Remove mailbox_set complexity
-3. Simpler, clearer architecture
+### Phase 4: Cleanup (PENDING)
+1. Remove RegistryMailbox (merge into TypedMailbox)
+2. Remove BlankMailbox if unused
+3. Update documentation
+4. Clean up old test files
 
-## Benefits
+## Benefits (Achieved)
 
-1. **Single mailbox concept** - TypedMailbox for all communication
-2. **Clear separation** - Storage (RingBuffer) vs Communication (Mailbox)
-3. **Type safety** - Compile-time guarantees throughout
-4. **Simpler mental model** - Fewer abstractions to learn
-5. **Future optimization** - Easy to share work mailboxes, optimize storage
+1. **Clear separation** - Storage (BufferedOutput) vs Communication (TypedMailbox)
+2. **Type safety** - Compile-time guarantees, no tuple dispatch complexity
+3. **RACK principles** - Buffers only on producer side, clean proxy pattern for inputs
+4. **Three input patterns** - CmdInput (commands only), ContinuousInput (push), SyncedInput (pull)
+5. **Single output type** - BufferedOutput supports both continuous and synced consumers
+6. **No inheritance complexity** - Outputs are single class, inputs have clear hierarchy
+7. **Timestamped access** - BufferedOutput uses TimestampedRingBuffer for efficient getData
+
+## Implementation Summary
+
+### Completed (Phase 2 - I/O Classes)
+
+**Input Class Hierarchy** (✅ DONE):
+```
+CmdInput<CommratApp, T>              // Base: command-only interface
+├── ContinuousInput<CommratApp, T>    // Push model: data_mbx + subscribe()
+└── SyncedInput<CommratApp, T>        // Pull model: getData(timestamp)
+```
+
+**Output Class** (✅ DONE):
+```
+BufferedOutput<CommratApp, T, SLOTS>  // Single class: TimestampedRingBuffer + cmd_mbx
+```
+
+**Key Achievements**:
+- ✅ Moved TimestampedRingBuffer from HistoricalMailbox to BufferedOutput
+- ✅ Clean separation: storage (output) vs communication (mailboxes)
+- ✅ No tuple complexity - each output strongly typed for single T
+- ✅ Three input patterns for different communication needs
+- ✅ Work mailbox shared at module level (inputs hold reference)
+- ✅ Command mailbox per-output (required by TiMS addressing)
+
+### Remaining Work
+
+**Phase 2 Completion**:
+- ⏳ Remove HistoricalMailbox class (functionality now in BufferedOutput)
+- ⏳ Update existing modules to use new I/O classes
+- ⏳ Update tests
+
+**Phase 3 - Module Framework Integration**:
+- ⏳ Wire BufferedOutput into Module base class
+- ⏳ Implement subscription protocol (Subscribe/Ack flow)
+- ⏳ Implement getData RPC for SyncedInput
+- ⏳ Update process() dispatcher for input type handling
+
+**Phase 4 - Cleanup**:
+- ⏳ Merge RegistryMailbox into TypedMailbox
+- ⏳ Remove unused mailbox types
+- ⏳ Documentation updates
 
 ## Open Questions
 
@@ -157,8 +253,19 @@ class ModuleInput {
 
 ## Related Files
 
+**Implemented**:
+- `include/commrat/module/io/input/cmd_input.hpp`
+- `include/commrat/module/io/input/continuous_input.hpp`
+- `include/commrat/module/io/input/synced_input.hpp`
+- `include/commrat/module/io/output/buffered_output.hpp`
+- `include/commrat/module/io/module_input.hpp` (exports all input types)
+- `include/commrat/module/io/module_output.hpp` (exports BufferedOutput)
+
+**To Be Updated**:
 - `include/commrat/mailbox/typed_mailbox.hpp` - Primary mailbox type
-- `include/commrat/mailbox/registry_mailbox.hpp` - TO BE REMOVED
+- `include/commrat/mailbox/registry_mailbox.hpp` - TO BE REMOVED (merge into TypedMailbox)
+- `include/commrat/mailbox/historical_mailbox.hpp` - TO BE REMOVED (functionality in BufferedOutput)
+- `include/commrat/registry_module.hpp` - Update to use new I/O classes
 - `include/commrat/mailbox/historical_mailbox.hpp` - TO BE REMOVED
 - `include/commrat/module/io/module_input.hpp` - New input abstraction
 - `include/commrat/module/io/module_output.hpp` - New output abstraction
