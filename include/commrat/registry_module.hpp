@@ -346,8 +346,7 @@ public:
                 .message_slots = config.message_slots,
                 .max_message_size = UserRegistry::max_message_size,
                 .send_priority = static_cast<uint8_t>(config.priority),
-                .realtime = config.realtime,
-                .mailbox_name = config.name + "_data"
+                .realtime = config.realtime
             }) : 
             std::nullopt)
         , running_(false)

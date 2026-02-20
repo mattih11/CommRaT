@@ -40,8 +40,7 @@ int main() {
     {
         MailboxConfig config{
             .mailbox_id = 100,
-            .max_message_size = 1024,
-            .mailbox_name = "test_mailbox"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 50> mailbox(config, Milliseconds(50));
@@ -54,14 +53,12 @@ int main() {
     {
         MailboxConfig config1{
             .mailbox_id = 101,
-            .max_message_size = 1024,
-            .mailbox_name = "sender"
+            .max_message_size = 1024
         };
         
         MailboxConfig config2{
             .mailbox_id = 102,
-            .max_message_size = 1024,
-            .mailbox_name = "receiver"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 50> sender_mbx(config1);
@@ -120,14 +117,12 @@ int main() {
     {
         MailboxConfig config1{
             .mailbox_id = 201,
-            .max_message_size = 1024,
-            .mailbox_name = "producer"
+            .max_message_size = 1024
         };
         
         MailboxConfig config2{
             .mailbox_id = 202,
-            .max_message_size = 1024,
-            .mailbox_name = "consumer"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 100> producer(config1);
@@ -203,14 +198,12 @@ int main() {
     {
         MailboxConfig config1{
             .mailbox_id = 301,
-            .max_message_size = 1024,
-            .mailbox_name = "source"
+            .max_message_size = 1024
         };
         
         MailboxConfig config2{
             .mailbox_id = 302,
-            .max_message_size = 1024,
-            .mailbox_name = "sink"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 100> source(config1, Milliseconds(20));  // 20ms tolerance
@@ -262,14 +255,12 @@ int main() {
     {
         MailboxConfig config1{
             .mailbox_id = 401,
-            .max_message_size = 1024,
-            .mailbox_name = "multi_sender"
+            .max_message_size = 1024
         };
         
         MailboxConfig config2{
             .mailbox_id = 402,
-            .max_message_size = 1024,
-            .mailbox_name = "multi_receiver"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 100> sender(config1);
@@ -327,14 +318,12 @@ int main() {
     {
         MailboxConfig config1{
             .mailbox_id = 501,
-            .max_message_size = 1024,
-            .mailbox_name = "range_sender"
+            .max_message_size = 1024
         };
         
         MailboxConfig config2{
             .mailbox_id = 502,
-            .max_message_size = 1024,
-            .mailbox_name = "range_receiver"
+            .max_message_size = 1024
         };
         
         HistoricalMailbox<TestRegistry, 100> sender(config1);

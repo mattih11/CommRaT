@@ -4,6 +4,8 @@
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/module/module_config.hpp"
+#include "commrat/module/helpers/type_name.hpp"
+#include "commrat/module/helpers/address_helpers.hpp"
 #include <optional>
 
 namespace commrat {
@@ -54,11 +56,14 @@ struct MailboxSet {
     
     /**
      * @brief Calculate base address for this output type
+     * RACK format: [type_id:8][system_id:8][instance_id:8][mailbox_index:8]
+     * Uses address_helpers.hpp as single source of truth
      */
     static constexpr uint32_t calculate_base(uint8_t system_id, uint8_t instance_id) {
         constexpr uint32_t type_id = UserRegistry::template get_message_id<OutputType>();
-        constexpr uint16_t type_id_low = static_cast<uint16_t>(type_id & 0xFFFF);
-        return (static_cast<uint32_t>(type_id_low) << 16) | (system_id << 8) | instance_id;
+        constexpr uint8_t type_id_byte = static_cast<uint8_t>(type_id & 0xFF);
+        // Delegate to address_helpers.hpp for consistent encoding
+        return commrat::get_base_address(type_id_byte, system_id, instance_id);
     }
     
     /**
@@ -85,8 +90,7 @@ struct MailboxSet {
             .message_slots = config.message_slots,
             .max_message_size = UserRegistry::max_message_size,
             .send_priority = static_cast<uint8_t>(config.priority),
-            .realtime = config.realtime,
-            .mailbox_name = config.name + "_cmd_" + typeid(OutputType).name()
+            .realtime = config.realtime
         });
         
         // WORK mailbox
@@ -95,8 +99,7 @@ struct MailboxSet {
             .message_slots = config.message_slots,
             .max_message_size = SystemRegistry::max_message_size,
             .send_priority = static_cast<uint8_t>(config.priority),
-            .realtime = config.realtime,
-            .mailbox_name = config.name + "_work_" + typeid(OutputType).name()
+            .realtime = config.realtime
         });
         
         // PUBLISH mailbox
@@ -105,8 +108,7 @@ struct MailboxSet {
             .message_slots = config.message_slots,
             .max_message_size = UserRegistry::max_message_size,
             .send_priority = static_cast<uint8_t>(config.priority),
-            .realtime = config.realtime,
-            .mailbox_name = config.name + "_publish_" + typeid(OutputType).name()
+            .realtime = config.realtime
         });
     }
 };

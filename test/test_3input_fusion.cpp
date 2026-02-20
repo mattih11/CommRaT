@@ -124,7 +124,7 @@ protected:
             .gyro_z = std::sin(t * 0.5f) * 0.05f
         };
         
-        if (count % 50 == 0) {  // Every 0.5s
+        if (count % 10 == 0) {  // Every 0.5s
             std::cout << "[IMU] Published #" << count 
                       << " | accel=(" << std::fixed << std::setprecision(2)
                       << data.accel_x << "," << data.accel_y << "," << data.accel_z << ")\n";
@@ -152,12 +152,13 @@ protected:
             .altitude = 400.0f + std::sin(t * 0.5f) * 5.0f,
             .accuracy = 2.5f + std::sin(t) * 0.5f
         };
-        
-        std::cout << "[GPS] Published #" << count 
-                  << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
-                  << ", lon=" << data.longitude << "\n";
-        
-        output = data;
+        if(count % 10 == 0) {
+            std::cout << "[GPS] Published #" << count 
+                    << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
+                    << ", lon=" << data.longitude << "\n";
+            
+            output = data;
+        }
     }
 };
 
@@ -223,7 +224,7 @@ protected:
             .inputs_used = 0x7  // All 3 inputs used (0x1 | 0x2 | 0x4)
         };
         
-        if (count % 50 == 0) {  // Every 0.5s
+        if (count % 10 == 0) {  // Every 0.5s
             std::cout << "[FUSION] Output #" << count << " | quality=" << std::fixed << std::setprecision(2)
                       << fused.fusion_quality << " | pos=(" << fused.position_x << "," << fused.position_y 
                       << "," << fused.position_z << ") | vel=(" << fused.velocity_x << "," << fused.velocity_y 

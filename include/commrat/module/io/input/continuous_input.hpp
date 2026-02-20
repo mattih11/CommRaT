@@ -27,6 +27,7 @@ class ContinuousInput : public CmdInput<CommratApp, T>
 {
 public:
     using Type = T;
+    using ConfigType = ContinuousInputConfig;
     using WorkMailbox = TypedMailbox<typename CommratApp::SystemRegistry::SubscriptionAck>;
     
     /**

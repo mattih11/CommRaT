@@ -136,16 +136,15 @@ public:
             .subscriber_base_addr = our_base_addr
         };
         
-        // Calculate source WORK mailbox
-        uint32_t source_base;
+        // Calculate source WORK mailbox using proper RACK encoding
         uint32_t source_work_mbx;
         
         if constexpr (has_continuous_input && !has_multi_input) {
             // Single continuous input
             constexpr uint32_t source_data_type_id = Registry::template get_message_id<InputData>();
-            constexpr uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-            source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | (source_system_id << 8) | source_instance_id;
-            source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+            constexpr uint8_t source_type_id = static_cast<uint8_t>(source_data_type_id & 0xFF);
+            source_work_mbx = encode_address(source_type_id, source_system_id, 
+                                            source_instance_id, static_cast<uint8_t>(MailboxType::WORK));
         }
         
         // Send unsubscribe request from work mailbox (SystemRegistry messages)
@@ -174,10 +173,10 @@ public:
         // Multi-input: use the input type at source.input_index
         uint32_t source_data_type_id = get_input_type_id_at_index(source.input_index);
         
-        uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
-                               (source.system_id << 8) | source.instance_id;
-        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        // Calculate source WORK mailbox using proper RACK encoding
+        uint8_t source_type_id = static_cast<uint8_t>(source_data_type_id & 0xFF);
+        uint32_t source_work_mbx = encode_address(source_type_id, source.system_id, 
+                                                  source.instance_id, static_cast<uint8_t>(MailboxType::WORK));
         
         // Send unsubscribe request from work mailbox (SystemRegistry messages)
         work_mailbox_->send(request, source_work_mbx);
@@ -193,6 +192,8 @@ public:
             // req.mailbox_index tells us which DATA mailbox to send to
             // Phase 7: Route to correct output-specific subscriber list
             sub_mgr.add_subscriber_to_output(req.subscriber_base_addr, req.mailbox_index, output_idx);
+            // Base address from calculate_base_address() has mailbox_index=0, so OR adds the index
+            // This relies on address_helpers.hpp encoding: [type][sys][inst][0x00] | [mailbox_index]
             uint32_t subscriber_data_mbx = req.subscriber_base_addr | req.mailbox_index;
             std::cout << "[" << module_name_ << "] Added subscriber to output-specific list, "
                       << "will send to DATA mailbox=0x" << std::hex << subscriber_data_mbx << std::dec << "\n";
@@ -293,10 +294,11 @@ protected:
             .requested_period_ms = config_->period.count()
         };
         
-        uint16_t source_data_type_id_low = static_cast<uint16_t>(source_data_type_id & 0xFFFF);
-        uint32_t source_base = (static_cast<uint32_t>(source_data_type_id_low) << 16) | 
-                                (source_system_id << 8) | source_instance_id;
-        uint32_t source_work_mbx = source_base + static_cast<uint8_t>(MailboxType::WORK);
+        // Calculate source WORK mailbox address using proper RACK encoding
+        // Format: [type_id:8][system_id:8][instance_id:8][mailbox_index:8]
+        uint8_t source_type_id = static_cast<uint8_t>(source_data_type_id & 0xFF);
+        uint32_t source_work_mbx = encode_address(source_type_id, source_system_id, 
+                                                   source_instance_id, static_cast<uint8_t>(MailboxType::WORK));
         
         std::cout << "[" << module_name_ << "] Sending SubscribeRequest[" << source_index 
                   << "] to source WORK mailbox " << source_work_mbx << "\n";

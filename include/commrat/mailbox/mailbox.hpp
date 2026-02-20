@@ -140,7 +140,6 @@ struct MailboxConfig {
     size_t max_message_size = 4096;
     uint8_t send_priority = 10;
     bool realtime = false;
-    std::string mailbox_name = "";
 };
 
 // ============================================================================
@@ -592,9 +591,7 @@ private:
     static TimsConfig create_tims_config(const MailboxConfig& config) {
         TimsConfig tims_config;
         tims_config.mailbox_id = config.mailbox_id;
-        tims_config.mailbox_name = config.mailbox_name.empty() 
-            ? ("mailbox_" + std::to_string(config.mailbox_id))
-            : config.mailbox_name;
+        tims_config.mailbox_name = "mailbox_" + std::to_string(config.mailbox_id);
         tims_config.max_msg_size = config.max_message_size;
         tims_config.priority = config.send_priority;
         tims_config.realtime = config.realtime;

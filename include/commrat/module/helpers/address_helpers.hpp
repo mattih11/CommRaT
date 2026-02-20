@@ -59,6 +59,19 @@ constexpr uint8_t extract_mailbox_index(uint32_t addr) {
 }
 
 /**
+ * @brief Extract mailbox type enum from address
+ * Converts mailbox_index back to MailboxType enum for name extraction
+ */
+constexpr MailboxType extract_mailbox_type(uint32_t addr) {
+    uint8_t index = extract_mailbox_index(addr);
+    // Map index back to enum (CMD=0, WORK=16, PUBLISH=32, DATA=48+)
+    if (index == 0) return MailboxType::CMD;
+    if (index == 16) return MailboxType::WORK;
+    if (index == 32) return MailboxType::PUBLISH;
+    return MailboxType::DATA;  // Any other index is DATA
+}
+
+/**
  * @brief Extract type ID from address
  */
 constexpr uint8_t extract_type_id(uint32_t addr) {
@@ -168,8 +181,7 @@ static inline MailboxConfig createWorkMailboxConfig(const ModuleConfig& config) 
         .message_slots = config.message_slots,
         .max_message_size = SystemRegistry::max_message_size,
         .send_priority = static_cast<uint8_t>(config.priority),
-        .realtime = config.realtime,
-        .mailbox_name = config.name + "_work"
+        .realtime = config.realtime
     };
 }
 

@@ -41,6 +41,8 @@ protected:
             auto visitor = [&module](auto&& tims_msg) {
                 // tims_msg is TimsMessage<PayloadT>, extract payload
                 auto& msg = tims_msg.payload;
+                // TODO: do we need that using MsgType = std::decay_t<decltype(msg)>; here for SFINAE in handle_user_command?
+                // Maybe not since we have static_assert there already?
                 using MsgType = std::decay_t<decltype(msg)>;
                 
                 std::cout << "[" << module.config_.name << "] Received command in command_loop\n";

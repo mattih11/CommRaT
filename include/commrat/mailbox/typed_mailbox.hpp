@@ -449,8 +449,7 @@ public:
             .message_slots = config.message_slots,
             .max_message_size = max_message_size,
             .send_priority = config.send_priority,
-            .realtime = config.realtime,
-            .mailbox_name = config.mailbox_name
+            .realtime = config.realtime
         }) {}
     
     // Send operations (allow send-only types)
@@ -560,8 +559,7 @@ public:
             .message_slots = config.message_slots,
             .max_message_size = max_message_size,  // Optimized!
             .send_priority = config.send_priority,
-            .realtime = config.realtime,
-            .mailbox_name = config.mailbox_name
+            .realtime = config.realtime
         }) {}
     
     // Send operations (allow receive + send-only types)
