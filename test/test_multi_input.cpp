@@ -29,7 +29,7 @@ struct FusedData {
     float velocity_x, velocity_y, velocity_z;
 };
 
-using TestRegistry = commrat::MessageRegistry<
+using TestRegistry = commrat::CommRaT<
     commrat::Message::Data<IMUData>,
     commrat::Message::Data<GPSData>,
     commrat::Message::Data<FusedData>
@@ -46,27 +46,23 @@ int main() {
         // IMU producer and consumer (fast stream - primary)
         MailboxConfig imu_prod_config{
             .mailbox_id = 601,
-            .max_message_size = 1024,
-            .mailbox_name = "imu_producer"
+            .max_message_size = 1024
         };
         
         MailboxConfig imu_cons_config{
             .mailbox_id = 602,
-            .max_message_size = 1024,
-            .mailbox_name = "imu_consumer"
+            .max_message_size = 1024
         };
         
         // GPS producer and consumer (slow stream - secondary)
         MailboxConfig gps_prod_config{
             .mailbox_id = 701,
-            .max_message_size = 1024,
-            .mailbox_name = "gps_producer"
+            .max_message_size = 1024
         };
         
         MailboxConfig gps_cons_config{
             .mailbox_id = 702,
-            .max_message_size = 1024,
-            .mailbox_name = "gps_consumer"
+            .max_message_size = 1024
         };
         
         // Create separate mailboxes for each input type

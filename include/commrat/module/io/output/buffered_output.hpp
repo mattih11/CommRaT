@@ -33,6 +33,7 @@ class BufferedOutput
 {
 public:
     using Type = T;
+    using ConfigType = BufferedOutputConfig;
     using CommandMailbox = TypedMailbox<typename CommratApp::SystemRegistry::SystemCommands, 
                                         typename CommratApp::UserRegistry::template UserCommands<T>>;
     

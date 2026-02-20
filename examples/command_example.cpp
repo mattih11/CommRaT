@@ -132,8 +132,7 @@ int main() {
         .message_slots = 10,
         .max_message_size = 4096,
         .send_priority = 10,
-        .realtime = false,
-        .mailbox_name = "ControlMailbox"
+        .realtime = false
     };
     
     // Use RegistryMailbox to send any message type

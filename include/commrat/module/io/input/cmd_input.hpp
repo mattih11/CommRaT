@@ -22,6 +22,7 @@ class CmdInput
 {
 public:
     using Type = T;
+    using ConfigType = CmdInputConfig;
     using CommandMailbox = TypedMailbox<typename CommratApp::SystemRegistry::SystemCommands, 
                                         typename CommratApp::UserRegistry::template UserCommands<T>>;
     
