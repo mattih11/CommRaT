@@ -1,34 +1,28 @@
-#include <sertial/containers/ring_buffer.hpp>
-#include "commrat/commrat.hpp"
+#pragma once
 
 /**
- * @brief Input interface for a module
+ * @brief Input interface exports
  * 
- * Each input consists of:
- * - DataMailbox: Receives data from producer's output
- * - WorkMailbox reference: Shared module-level mailbox for subscription protocol
+ * Three input types supporting different communication patterns:
  * 
- * NO local buffer - inputs receive directly into process()
- * Buffers exist only on output side (producer stores data)
+ * 1. CmdInput - Command-only interface (no data in process)
+ *    - Send commands to remote module
+ *    - No subscription, no data reception
+ *    - Base class for ContinuousInput and SyncedInput
+ * 
+ * 2. ContinuousInput - Push model data stream (inherits CmdInput)
+ *    - Subscribe to producer
+ *    - Receive continuous data stream via data_mbx
+ *    - poll_data() → process()
+ * 
+ * 3. SyncedInput - Pull model timestamp sync (inherits CmdInput)
+ *    - get_data(timestamp) queries producer's buffer
+ *    - RACK-style getData for multi-rate sensor fusion
+ *    - No data_mbx, only RPC to producer
  * 
  * Architecture inspired by RACK framework (github.com/smolorz/RACK)
  */
-template<typename CommratApp, typename T>
-class ModuleInput requires (is_commrat_message_v<T>),
-                         (UserRegistry::template is_registered<T>),
-                         is_message_registry_v<UserRegistry> {
-public:
-    using Type = T;
-    using WorkMessages = std::tuple<CommratApp::SystemRegistry::SubscriptionCommands...>;
-    
-    // Subscription protocol
-    ErrorType subscribe(...);      // Sends SubscribeRequest via work_mbx_
-    ErrorType unsubscribe(...);    // Sends UnsubscribeRequest via work_mbx_
-    
-private:
-    TypedMailbox<Type> data_mbx_;                  // Receives data from producer
-    TypedMailbox<WorkMessages>& work_mbx_;         // Reference to module's shared work mailbox
-    // work_mbx_ sends: SubscribeRequest to producer's cmd_mailbox
-    // work_mbx_ receives: SubscriptionAck from producer's cmd_mailbox
-    // Note: work_mbx_ is shared across ALL inputs in the module
-};
+
+#include "input/cmd_input.hpp"
+#include "input/continuous_input.hpp"
+#include "input/synced_input.hpp"
