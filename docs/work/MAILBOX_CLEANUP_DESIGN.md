@@ -141,10 +141,12 @@ class ModuleInput {
    - **getData()**: Needs producer's buffer (output-side storage)
    - Inputs never need local buffers - only outputs store data
 
-3. Command mailbox per-output vs shared?
-   - Current design: Per-output (simple, clear)
-   - Alternative: One command mailbox, route by type
-   - Trade-off: Simplicity vs memory
+3. ~~Command mailbox per-output vs shared?~~
+   - **RESOLVED**: Per-output (required by TiMS addressing and type-specific commands)
+   - TiMS addresses are type-dependent: calculate_address(sys_id, inst_id, **type_id**)
+   - Each output type MUST have unique mailbox address for subscription protocol
+   - Output-specific commands (SetSensorRate, SetFilter, etc.) are type-dependent
+   - Cannot share command mailbox across different output types
 
 ## Implementation Notes
 
