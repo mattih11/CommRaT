@@ -52,6 +52,7 @@ public:
      * @return Success or error
      */
     auto subscribe() -> MailboxResult<void> {
+        send_command(SubscribeRequest{});
         // TODO: Send SubscribeRequest via work_mbx_ to this->producer_cmd_address_
         return MailboxResult<void>::success();
     }

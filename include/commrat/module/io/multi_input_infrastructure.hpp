@@ -12,6 +12,7 @@
 #include "commrat/mailbox/historical_mailbox.hpp"
 #include "commrat/module/module_config.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/helpers/type_name.hpp"
 #include <iostream>
 #include <tuple>
 #include <optional>
@@ -125,15 +126,14 @@ private:
                   << "] at 0x" << std::hex << data_mailbox_id << std::dec
                   << " (base=0x" << std::hex << base_addr << std::dec 
                   << ", index=" << static_cast<int>(data_mbx_index)
-                  << ", size=" << input_message_size << " bytes)\n";
+                  << ", size=" << input_message_size << " bytes" << ")\n";
         
         MailboxConfig mbx_config{
             .mailbox_id = data_mailbox_id,
-            .message_slots = module.config_.data_message_slots.value(),  // Extract from DefaultVal
-            .max_message_size = input_message_size,              // Per-input-type size!
+            .message_slots = module.config_.data_message_slots.value(),
+            .max_message_size = input_message_size,
             .send_priority = static_cast<uint8_t>(module.config_.priority),
-            .realtime = module.config_.realtime,
-            .mailbox_name = module.config_.name + "_data_" + std::to_string(Index)
+            .realtime = module.config_.realtime
         };
         
         return HistoricalMailboxFor<InputType>(
