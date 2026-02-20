@@ -5,20 +5,9 @@
 #include <optional>
 #include <vector>
 #include <rfl.hpp>
+#include "commrat/mailbox/mailbox_type.hpp"
 
 namespace commrat {
-
-// ============================================================================
-// Input Mode Tags
-// ============================================================================
-
-/// Periodic execution - module runs on a timer, no input data
-struct PeriodicInput {
-    std::chrono::milliseconds period{100};
-};
-
-/// Free-running loop - module runs as fast as possible, no input data
-struct LoopInput {};
 
 // ============================================================================
 // Mailbox Configuration
@@ -32,15 +21,6 @@ struct LoopInput {};
 // Default mailbox slot counts (configurable per module)
 constexpr uint32_t DEFAULT_CMD_SLOTS = 10;   // Command/subscription buffering
 constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for getData
-
-// TODO Phase 7.5: Remove MailboxType enum once we migrate to pure mailbox_index addressing
-// Temporary compatibility: Old offset-based addressing
-enum class MailboxType : uint8_t {
-    CMD = 0,         // Command/subscription mailbox (Phase 7: Should use mailbox_index 0)
-    WORK = 16,       // Subscription protocol (Phase 7: Should be removed, use CMD)
-    PUBLISH = 32,    // Publishing to subscribers (Phase 7: Should be removed, use CMD)
-    DATA = 48        // Input data reception (Phase 7: Should use mailbox_index N+)
-};
 
 // ============================================================================
 // Output Configuration (TaggedUnion)
@@ -76,7 +56,7 @@ using OutputConfig = rfl::TaggedUnion<"output_type", NoOutputConfig, SimpleOutpu
 // Input Configuration (TaggedUnion)
 // ============================================================================
 
-/// No input - Periodic or LoopInput modules only
+/// No input - Periodic or free-running execution (based on config.period)
 struct NoInputConfig {};
 
 /// Single input - One source module
@@ -112,7 +92,11 @@ struct ModuleConfig {
     InputConfig inputs = NoInputConfig{};
     
     // Common configuration
-    std::chrono::milliseconds period{100};
+    // Period is optional:
+    // - With ContinuousInput: ignored (input-driven execution)
+    // - Without ContinuousInput + period: periodic execution
+    // - Without ContinuousInput + no period: free-running loop (max throughput)
+    std::optional<std::chrono::milliseconds> period{std::chrono::milliseconds{100}};
     size_t message_slots{10};  // Legacy: kept for compatibility
     size_t max_subscribers{8};
     int priority{10};
