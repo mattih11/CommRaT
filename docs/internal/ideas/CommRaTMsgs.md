@@ -18,7 +18,7 @@ data float[]
 ```
 are compatible except from max compile time sizes. but thats easy, sertial compatibility:
 ```
-name string
+name string[kMaxLen]
 value int
 data float[kMaxVals]
 ```
@@ -28,6 +28,7 @@ and with inspect we could ask, when setting up projects
 
 ```bash
 rtify example_msg
+name max len?: 40
 data max size?: 4096
 project fully rtified
 ```
