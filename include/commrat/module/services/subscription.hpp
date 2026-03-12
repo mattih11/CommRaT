@@ -22,8 +22,8 @@
 namespace commrat {
 
 // Forward declarations for mailbox types
-template<typename Registry>
-class RegistryMailbox;
+template<typename... MessageDefs>
+class Mailbox;
 
 /**
  * @brief Subscription state tracker for multi-input modules
@@ -69,14 +69,14 @@ protected:
     
     // Reference to module's config and mailboxes (set by derived class)
     const ModuleConfig* config_{nullptr};
-    RegistryMailbox<SystemRegistry>* work_mailbox_{nullptr};
+    Mailbox<SubscribeRequest, UnsubscribeRequest>* work_mailbox_{nullptr};
     std::string module_name_;
     
     // Helper removed - work_mailbox_ is now properly typed
     
 public:
     void set_config(const ModuleConfig* cfg) { config_ = cfg; }
-    void set_work_mailbox(RegistryMailbox<SystemRegistry>* mbx) { work_mailbox_ = mbx; }
+    void set_work_mailbox(Mailbox<SubscribeRequest, UnsubscribeRequest>* mbx) { work_mailbox_ = mbx; }
     void set_module_name(const std::string& name) { module_name_ = name; }
     
     /**

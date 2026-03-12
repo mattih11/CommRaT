@@ -12,7 +12,7 @@
 3. ✅ **DATA mailbox indexing** - `get_data_mbx_base(num_outputs) + input_index`
 4. ✅ **Multi-input infrastructure** - Per-input-type mailbox sizing
 5. ✅ **Subscription protocol** - Updated with `subscriber_base_addr` + `mailbox_index`
-6. ✅ **Multi-input synchronization** - getData with RACK-style addressing
+6. ✅ **Multi-input synchronization** - get_data with RACK-style addressing
 7. ✅ **All core tests passing** - 3-input fusion, multi-input, timestamp logic working
 
 ### Phase 7 Progress (Mailbox Optimization)
@@ -273,7 +273,7 @@ constexpr size_t data_mailbox_size = sizeof(TimsMessage<InputType>);
 
 Each DATA mailbox sized exactly for its input type - **no waste!**
 
-**Slots:** Configurable per module (default: 50-100 for historical buffering / getData synchronization)
+**Slots:** Configurable per module (default: 50-100 for historical buffering / get_data synchronization)
 
 **Memory Efficiency Example:**
 ```cpp
@@ -480,7 +480,7 @@ constexpr uint8_t CMD_MBX_BASE = 0;  // CMD mailboxes for outputs start at 0
 
 // Default mailbox slot counts (configurable per module)
 constexpr uint32_t DEFAULT_CMD_SLOTS = 10;   // Command buffering
-constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for getData
+constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for get_data
 
 // In ModuleConfig struct, add:
 struct ModuleConfig {
@@ -688,7 +688,7 @@ void publish_to_subscribers(T& data, size_t output_index = 0) {
 
 **Multi-Input Infrastructure:**
 - Per-input-type mailbox sizing (memory efficient!)
-- HistoricalMailbox with getData synchronization
+- HistoricalMailbox with get_data synchronization
 - 3-input fusion test passing (533 fusion outputs at 100Hz)
 - Correct address calculation: producers send to right mailboxes
 
@@ -741,7 +741,7 @@ void publish_to_subscribers(T& data, size_t output_index = 0) {
 4. ✅ Multi-output (2 outputs) - passing
 5. ✅ Combined multi-output + multi-input - passing
 6. ✅ Address collision prevention - verified (no collisions)
-7. ✅ getData synchronization - working (RACK-style)
+7. ✅ get_data synchronization - working (RACK-style)
 
 ⏳ **Future Tests (Phase 7):**
 1. ⏳ CMD mailbox sizing optimization validation
