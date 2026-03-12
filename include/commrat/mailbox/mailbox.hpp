@@ -3,6 +3,7 @@
 #include "../platform/tims_wrapper.hpp"
 #include "../messages.hpp"
 #include "../messaging/message_registry.hpp"
+#include "../messaging/registry_utils.hpp"
 #include "../messaging/message_id.hpp"
 #include "../platform/threading.hpp"
 #include <expected>
@@ -112,25 +113,6 @@ public:
 };
 
 // ============================================================================
-// Raw Message Receipt (for unknown message types)
-// ============================================================================
-
-/// Raw received message with type info
-struct RawReceivedMessage {
-    std::vector<std::byte> buffer;  // Message data including header
-    int32_t type;                    // Message type ID
-    uint32_t sender_id;              // Sender mailbox ID
-    size_t size;                     // Total message size
-    uint64_t timestamp;              // Message timestamp
-    
-    // Header accessor for compatibility
-    struct {
-        uint32_t msg_type;
-    } header;
-    
-    RawReceivedMessage() : type(0), sender_id(0), size(0), timestamp(0), header{0} {}
-};
-// ============================================================================
 // Mailbox Configuration
 // ============================================================================
 
@@ -178,12 +160,12 @@ private:
     // Internal registry for this mailbox's supported types
     using Registry = MessageRegistry<MessageDefs...>;
     
-    // Helper to check if type is a MessageDefinition
-    template<typename T>
+    // Helper to check if type is a MessageDefinition (checks for marker tag)
+    template<typename T, typename = void>
     struct is_message_definition : std::false_type {};
     
-    template<typename PayloadT, MessagePrefix Prefix, auto SubPrefix, uint16_t ID>
-    struct is_message_definition<MessageDefinition<PayloadT, Prefix, SubPrefix, ID>> : std::true_type {};
+    template<typename T>
+    struct is_message_definition<T, std::void_t<typename T::is_message_definition_tag>> : std::true_type {};
     
     // Validate that all types are MessageDefinition
     static_assert((is_message_definition<MessageDefs>::value && ...),
@@ -336,150 +318,94 @@ public:
         return MailboxResult<void>();
     }
     
+    /**
+     * @brief Send a reply to a request message (like RACK's sendMsgReply)
+     * 
+     * Uses MessageDefinition's built-in request-reply mechanism.
+     * Automatically extracts destination from request.header.src.
+     * 
+     * @tparam RequestPayload Request payload type (must be a request with reply)
+     * @tparam ReplyPayload Reply payload type (validated against MessageDef::ReplyMessageDef)
+     * @param request The received request message
+     * @param reply The reply payload to send
+     * @return Success or error
+     * 
+     * Example:
+     * @code
+     * auto reply = handle_subscribe_request(received_msg.payload);
+     * mailbox.send_reply(received_msg, reply);  // Dest = received_msg.header.src
+     * @endcode
+     */
+    template<typename RequestPayload, typename ReplyPayload>
+        requires registry::is_request_payload_v<RequestPayload, Registry> && is_registered<ReplyPayload>
+    auto send_reply(const TimsMessage<RequestPayload>& request, 
+                    ReplyPayload& reply)
+        -> MailboxResult<void> {
+        
+        // Use MessageDefinition's ReplyMessageDef to validate reply type
+        using RequestDef = registry::find_message_def_t<RequestPayload, Registry>;
+        using ExpectedReply = typename RequestDef::ReplyMessageDef::Payload;
+        
+        static_assert(std::is_same_v<ReplyPayload, ExpectedReply>,
+                      "ReplyPayload must match RequestDef::ReplyMessageDef::Payload");
+        
+        // Wrap payload in TimsMessage (send expects TimsMessage, not raw payload)
+        TimsMessage<ReplyPayload> reply_message;
+        reply_message.payload = reply;
+        reply_message.header.timestamp = Time::now();  // Returns Timestamp (uint64_t)
+        reply_message.header.src = config_.mailbox_id;
+        reply_message.header.dest = request.header.src;
+        
+        // Extract destination from request source (like RACK's getSrc())
+        return send(reply_message, request.header.src);
+    }
+    
     // ========================================================================
     // Receive Operations
     // ========================================================================
     
     /**
-     * @brief Receive a message of specific type (blocking)
+     * @brief Receive a message directly into provided storage (ZERO-COPY)
      * 
-     * @tparam T Message type to receive
-     * @return Received message or error
+     * Receives raw bytes into mailbox buffer, then deserializes directly
+     * into the provided message reference. No intermediate copies or moves!
+     * 
+     * @tparam T Payload type (TimsMessage will be constructed for this type)
+     * @param message Output parameter - receives deserialized message
+     * @param timeout Maximum time to wait (default: 1 second)
+     * @return True if message received, false on timeout/error
+     * 
+     * @example
+     * TimsMessage<SensorData> msg;
+     * if (mailbox.receive(msg, Milliseconds(100))) {
+     *     process(msg.payload);
+     * }
      */
     template<typename T>
         requires is_registered<T>
-    auto receive() -> MailboxResult<TimsMessage<T>> {
+    bool receive(TimsMessage<T>& message, std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
         if (!running_) {
-            return MailboxError::NotRunning;
+            return false;
         }
         
-        // Receive raw bytes from TiMS
-        // Use SeRTial's buffer_type for TimsMessage<T> (includes header + payload)
-        typename sertial::Message<TimsMessage<T>>::buffer_type buffer;
-        auto bytes = tims_.receive_raw_bytes(buffer, std::chrono::seconds(1));
-        
-        if (bytes <= 0) {
-            return MailboxError::NetworkError;
-        }
-        
-        // Deserialize full TimsMessage<T> (header + payload)
-        auto result = sertial::Message<TimsMessage<T>>::deserialize(
-            std::span<const std::byte>(buffer.data(), bytes)
-        );
-        if (!result) {
-            return MailboxError::SerializationError;
-        }
-        
-        // Return TimsMessage directly - no need for wrapper
-        return std::move(*result);
-    }
-    
-    /**
-     * @brief Try to receive a message without blocking
-     * 
-     * @tparam T Message type to receive
-     * @return Message if available, empty optional otherwise
-     */
-    template<typename T>
-        requires is_registered<T>
-    auto try_receive() -> std::optional<TimsMessage<T>> {
-        // Use -1 to indicate non-blocking mode (TIMS_NONBLOCK)
-        // This gets converted to -1ns which TiMS recognizes
-        auto result = receive_for<T>(std::chrono::milliseconds(-1));
-        if (result) {
-            return *result;
-        }
-        return std::nullopt;
-    }
-    
-    /**
-     * @brief Receive a message with timeout
-     * 
-     * @tparam T Message type to receive
-     * @param timeout Maximum time to wait
-     * @return Received message or error (including timeout)
-     */
-    template<typename T>
-        requires is_registered<T>
-    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<TimsMessage<T>> {
-        if (!running_) {
-            return MailboxError::NotRunning;
-        }
-        
-        // Receive with timeout from TiMS
-        // Use SeRTial's buffer_type for TimsMessage<T> (includes header + payload)
+        // Receive raw bytes into mailbox buffer
         typename sertial::Message<TimsMessage<T>>::buffer_type buffer;
         auto bytes = tims_.receive_raw_bytes(buffer, timeout);
         
-        if (bytes == 0) {
-            return MailboxError::Timeout;
+        if (bytes <= 0) {
+            return false;
         }
         
-        if (bytes < 0) {
-            return MailboxError::NetworkError;
-        }
-        
-        // Deserialize full TimsMessage<T> (header + payload)
+        // Deserialize DIRECTLY into provided message reference (zero-copy)
         auto result = sertial::Message<TimsMessage<T>>::deserialize(
             std::span<const std::byte>(buffer.data(), bytes)
         );
         if (!result) {
-            return MailboxError::SerializationError;
+            return false;
         }
         
-        // Return TimsMessage directly - no need for wrapper
-        return std::move(*result);
-    }
-    
-    /**
-     * @brief Receive any message without knowing its type
-     * 
-     * Returns raw message data with type information. Useful for command
-     * loops that need to inspect the message type before deserializing.
-     * 
-     * @param timeout Maximum time to wait for a message
-     * @return Raw message with type info, or error
-     */
-    auto receive_any_raw(std::chrono::milliseconds timeout = std::chrono::milliseconds{-1}) 
-        -> MailboxResult<RawReceivedMessage> {
-        if (!running_) {
-            return MailboxError::NotRunning;
-        }
-        
-        // Receive raw bytes
-        constexpr size_t buffer_size = Registry::max_message_size;
-        std::array<std::byte, buffer_size> buffer;
-        ssize_t bytes = tims_.receive_raw_bytes(buffer, timeout);
-        
-        if (bytes < 0) {
-            if (timeout.count() == -1 || timeout == std::chrono::milliseconds{0}) {
-                // Non-blocking receive with no message
-                return MailboxError::Timeout;
-            }
-            return MailboxError::NetworkError;
-        }
-        
-        // Parse header
-        if (static_cast<size_t>(bytes) < sizeof(TimsHeader)) {
-            return MailboxError::InvalidMessage;
-        }
-        
-        TimsHeader header;
-        std::memcpy(&header, buffer.data(), sizeof(TimsHeader));
-        
-        // TODO: Extract sender ID from TIMS (not currently exposed in API)
-        uint32_t sender_id = 0;  // Placeholder
-        
-        // Copy to vector for easy handling
-        RawReceivedMessage raw;
-        raw.buffer = std::vector<std::byte>(buffer.begin(), buffer.begin() + bytes);
-        raw.type = static_cast<int32_t>(header.msg_type);
-        raw.sender_id = sender_id;
-        raw.size = bytes;
-        raw.timestamp = header.timestamp;
-        raw.header.msg_type = header.msg_type;
-        
-        return raw;
+        message = std::move(*result);  // Move into user's storage (final destination)
+        return true;
     }
     
     /**
@@ -488,30 +414,36 @@ public:
      * The visitor will be called with the received message, allowing
      * runtime dispatch based on the actual message type received.
      * 
+     * @tparam BufferSize Maximum message size to allocate (default: Registry::max_message_size)
+     *                    Use Registry::max_size_for_types<T...>() for optimal sizing
      * @param visitor Callable that accepts any registered message type
      * @return Success or error
      * 
      * Example:
      * @code
+     * // Default buffer (handles all registered types)
      * mailbox.receive_any([](auto&& msg) {
      *     using T = std::decay_t<decltype(msg)>;
      *     if constexpr (std::is_same_v<T, TimsMessage<StatusMessage>>) {
-     *         std::cout << "Status: " << msg->payload.status_code << "\n";
+     *         std::cout << "Status: " << msg.payload.status_code << "\n";
      *     }
      * });
+     * 
+     * // Optimized buffer for specific message subset (saves stack space)
+     * constexpr size_t cmd_buffer = Registry::max_size_for_types<ResetCmd, CalibrateCmd>();
+     * mailbox.receive_any<cmd_buffer>([](auto&& msg) { ... });
      * @endcode
      */
-    template<typename Visitor>
+    template<size_t BufferSize = Registry::max_message_size, typename Visitor>
     auto receive_any(Visitor&& visitor) -> MailboxResult<void> {
         if (!running_) {
             return MailboxError::NotRunning;
         }
         
-        // Receive raw bytes
-        // Use largest message size from registry since we don't know type in advance
-        constexpr size_t buffer_size = Registry::max_message_size;
-        std::array<std::byte, buffer_size> buffer;
-        auto bytes = tims_.receive_raw_bytes(buffer, std::chrono::seconds(1));
+        // Receive raw bytes with TIMS metadata
+        std::array<std::byte, BufferSize> buffer;
+        TimsWrapper::TimsMetadata tims_metadata;
+        auto bytes = tims_.receive_raw_bytes(buffer, std::chrono::seconds(1), &tims_metadata);
         
         if (bytes <= 0) {
             return MailboxError::NetworkError;
@@ -529,8 +461,76 @@ public:
         // Use registry to dispatch based on runtime type
         bool success = Registry::visit(msg_type, 
             std::span<const std::byte>(buffer.data(), bytes),
-            [&visitor](auto&& tims_msg) {
-                // Visitor receives TimsMessage<PayloadType> directly
+            [&visitor, &tims_metadata](auto&& tims_msg) {
+                // Populate src/dest from TIMS metadata before calling visitor
+                tims_msg.header.src = tims_metadata.src;
+                tims_msg.header.dest = tims_metadata.dest;
+                
+                // Visitor receives TimsMessage<PayloadType> with populated src/dest
+                std::forward<Visitor>(visitor)(std::forward<decltype(tims_msg)>(tims_msg));
+            });
+        
+        if (!success) {
+            return MailboxError::InvalidMessage;
+        }
+        
+        return MailboxResult<void>();
+    }
+    
+    /**
+     * @brief Receive any registered message type with timeout using a visitor
+     * 
+     * Similar to receive_any() but with configurable timeout.
+     * 
+     * @tparam BufferSize Maximum message size to allocate (default: Registry::max_message_size)
+     *                    Use Registry::max_size_for_types<T...>() for optimal sizing
+     * @param timeout Maximum time to wait for a message
+     * @param visitor Callable that accepts any registered message type
+     * @return Success or error (Timeout if no message within timeout)
+     * 
+     * Example:
+     * @code
+     * // Optimized buffer for command messages (16 + 24 = 40 bytes vs 2048 default)
+     * constexpr size_t cmd_size = Registry::max_size_for_types<ResetCmd, CalibrateCmd>();
+     * mailbox.receive_any_for<cmd_size>(Milliseconds(100), [](auto&& msg) { ... });
+     * @endcode
+     */
+    template<size_t BufferSize = Registry::max_message_size, typename Visitor>
+    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
+        if (!running_) {
+            return MailboxError::NotRunning;
+        }
+        
+        // Receive raw bytes with TIMS metadata and timeout
+        std::array<std::byte, BufferSize> buffer;
+        TimsWrapper::TimsMetadata tims_metadata;
+        auto bytes = tims_.receive_raw_bytes(buffer, timeout, &tims_metadata);
+        
+        if (bytes <= 0) {
+            if (timeout.count() <= 0 || bytes == -1) {
+                return MailboxError::Timeout;
+            }
+            return MailboxError::NetworkError;
+        }
+        
+        // Parse header to get message type
+        if (static_cast<size_t>(bytes) < sizeof(TimsHeader)) {
+            return MailboxError::InvalidMessage;
+        }
+        
+        TimsHeader header;
+        std::memcpy(&header, buffer.data(), sizeof(TimsHeader));
+        MessageType msg_type = static_cast<MessageType>(header.msg_type);
+        
+        // Use registry to dispatch based on runtime type
+        bool success = Registry::visit(msg_type, 
+            std::span<const std::byte>(buffer.data(), bytes),
+            [&visitor, &tims_metadata](auto&& tims_msg) {
+                // Populate src/dest from TIMS metadata before calling visitor
+                tims_msg.header.src = tims_metadata.src;
+                tims_msg.header.dest = tims_metadata.dest;
+                
+                // Visitor receives TimsMessage<PayloadType> with populated src/dest
                 std::forward<Visitor>(visitor)(std::forward<decltype(tims_msg)>(tims_msg));
             });
         
