@@ -2,7 +2,7 @@
  * @file timestamped_ring_buffer.hpp
  * @brief Thread-safe timestamped ring buffer for multi-input synchronization (Phase 6)
  * 
- * Extends SeRTial's RingBuffer with timestamp-based lookup for synchronized getData.
+ * Extends SeRTial's RingBuffer with timestamp-based lookup for synchronized get_data.
  * Used by HistoricalMailbox to store message history for secondary inputs.
  * 
  * @author CommRaT Development Team
@@ -57,11 +57,11 @@ enum class InterpolationMode {
 };
 
 /**
- * @brief Thread-safe timestamped ring buffer with getData lookup
+ * @brief Thread-safe timestamped ring buffer with get_data lookup
  * 
  * Wraps SeRTial::RingBuffer with:
  * - Thread-safe push/get operations
- * - Timestamp-based lookup (getData)
+ * - Timestamp-based lookup (get_data)
  * - Multiple interpolation modes
  * - Maintains temporal ordering (must push in timestamp order)
  * 
@@ -85,13 +85,13 @@ enum class InterpolationMode {
  *     float ax, ay, az;
  * };
  * 
- * TimestampedRingBuffer<IMUData, 100> history;
+ * OutputBuffer<IMUData, 100> history;
  * 
  * // Producer thread
  * history.push(IMUData{.timestamp = 1000, .ax = 1.0f, ...});
  * 
  * // Consumer thread (secondary input)
- * auto data = history.getData(1050, std::chrono::milliseconds(50), 
+ * auto data = history.get_data(1050, std::chrono::milliseconds(50), 
  *                             InterpolationMode::NEAREST);
  * if (data) {
  *     // Use data synchronized to timestamp 1050
@@ -99,7 +99,7 @@ enum class InterpolationMode {
  * @endcode
  */
 template<typename T, std::size_t MaxSize = 100>
-class TimestampedRingBuffer {
+class OutputBuffer {
     // Compile-time validation
     static_assert(MaxSize > 0, "MaxSize must be greater than 0");
     
@@ -115,7 +115,7 @@ public:
      * @brief Constructor with optional sync tolerance
      * @param default_tolerance Default tolerance for timestamp matching (ms)
      */
-    explicit TimestampedRingBuffer(
+    explicit OutputBuffer(
         std::chrono::milliseconds default_tolerance = std::chrono::milliseconds(50)
     ) : default_tolerance_(default_tolerance) {}
     
@@ -168,71 +168,79 @@ public:
     void clear() {
         UniqueLockShared lock(mutex_);
         buffer_.clear();
-        oldest_timestamp_ = 0;
-        newest_timestamp_ = 0;
     }
     
     // ========================================================================
-    // Modifiers
+    // Modifiers (Zero-Copy Workspace Pattern - RACK-inspired)
     // ========================================================================
     
     /**
-     * @brief Push new message with timestamp
+     * @brief Push message by move (zero-copy when possible)
      * 
-     * Messages must be pushed in timestamp order (monotonically increasing).
-     * If buffer is full, overwrites oldest message.
-     * 
-     * @param message Message to store (must have .timestamp field)
+     * @param message Message to store (will be moved)
      * @note Thread-safe (write lock)
      * @note O(1) time complexity
-     * 
-     * @warning Violating timestamp order leads to undefined getData behavior!
-     */
-    void push(const T& message) {
-        UniqueLockShared lock(mutex_);
-        
-        // Validate timestamp ordering (debug only)
-        #ifndef NDEBUG
-        if (!buffer_.empty() && TimestampAccessor<T>::get(message) < newest_timestamp_) {
-            // WARNING: Timestamps must be monotonically increasing
-            // This is a logic error in the producer
-        }
-        #endif
-        
-        // Update timestamp bounds
-        if (buffer_.empty()) {
-            oldest_timestamp_ = TimestampAccessor<T>::get(message);
-        } else if (buffer_.full()) {
-            // Overwriting oldest - update lower bound
-            oldest_timestamp_ = TimestampAccessor<T>::get(buffer_[1]);  // Second-oldest becomes oldest
-        }
-        newest_timestamp_ = TimestampAccessor<T>::get(message);
-        
-        buffer_.push_back(message);
-    }
-    
-    /**
-     * @brief Push new message via move
-     * @param message Message to move into buffer
-     * @note Thread-safe (write lock)
      */
     void push(T&& message) {
         UniqueLockShared lock(mutex_);
         
         #ifndef NDEBUG
-        if (!buffer_.empty() && TimestampAccessor<T>::get(message) < newest_timestamp_) {
+        if (!buffer_.empty() && TimestampAccessor<T>::get(message) < TimestampAccessor<T>::get(buffer_.back())) {
             // WARNING: Timestamp order violation
         }
         #endif
         
-        if (buffer_.empty()) {
-            oldest_timestamp_ = TimestampAccessor<T>::get(message);
-        } else if (buffer_.full()) {
-            oldest_timestamp_ = TimestampAccessor<T>::get(buffer_[1]);
-        }
-        newest_timestamp_ = TimestampAccessor<T>::get(message);
-        
         buffer_.push_back(std::move(message));
+    }
+    
+    /**
+     * @brief Push message by const reference (requires copy)
+     */
+    void push(const T& message) {
+        push(T{message});  // Copy construct then move
+    }
+    
+    /**
+     * @brief Get next buffer slot for zero-copy write (uses SeRTial's emplace_back_in_place)
+     * 
+     * Returns a reference to the next buffer slot where user can write directly.
+     * The slot is already default-constructed and ready for in-place writes.
+     * Call finalize_write() after writing to update metadata.
+     * 
+     * @return Reference to next writable slot (zero-copy, real-time safe)
+     * @note NOT thread-safe - caller must ensure exclusive access during write
+     * @note Must call finalize_write() after writing to finalize metadata
+     * 
+     * @example
+     * @code
+     * auto& slot = buffer.get_next_slot();
+     * slot.header.timestamp = Time::now().nanoseconds();
+     * slot.payload.temperature = read_sensor();
+     * buffer.finalize_write();  // Finalizes metadata (accesses via back())
+     * @endcode
+     */
+    T& get_next_slot() noexcept {
+        return buffer_.emplace_back_in_place();
+    }
+    
+    /**
+     * @brief Finalize write after get_next_slot() - validates timestamp order
+     * 
+     * Must be called after get_next_slot() to validate timestamp ordering.
+     * 
+     * @note Thread-safe (write lock)
+     */
+    void finalize_write() {
+        #ifndef NDEBUG
+        UniqueLockShared lock(mutex_);
+        if (buffer_.size() > 1) {
+            uint64_t newest = TimestampAccessor<T>::get(buffer_.back());
+            uint64_t prev = TimestampAccessor<T>::get(buffer_[buffer_.size() - 2]);
+            if (newest < prev) {
+                // WARNING: Timestamp order violation
+            }
+        }
+        #endif
     }
     
     // ========================================================================
@@ -265,15 +273,36 @@ public:
      * auto imu = imu_mailbox.receive();  // Blocking
      * 
      * // Fetch secondary inputs synchronized to primary timestamp
-     * auto gps = gps_history.getData(imu.timestamp);
-     * auto lidar = lidar_history.getData(imu.timestamp);
+     * auto gps = gps_history.get_data(imu.timestamp);
+     * auto lidar = lidar_history.get_data(imu.timestamp);
      * 
      * if (gps && lidar) {
      *     process(imu, *gps, *lidar);  // All time-aligned!
      * }
      * @endcode
      */
-    std::optional<T> getData(
+    /**
+     * @brief Get message synchronized to requested timestamp (zero-copy)
+     * 
+     * Returns const pointer to buffer slot - no copy.
+     * 
+     * @param timestamp Requested timestamp (nanoseconds since epoch)
+     * @param tolerance Maximum acceptable time deviation
+     * @param mode Interpolation strategy (default: NEAREST)
+     * @return Const pointer to message if found, nullptr otherwise
+     * 
+     * @note Thread-safe (read lock)
+     * @note O(log n) for BEFORE/AFTER, O(n) for NEAREST
+     * @warning Returned pointer invalidated when buffer wraps (overwrites oldest)
+     * 
+     * @example
+     * @code
+     * if (const auto* msg = buffer.get_data(timestamp)) {
+     *     process(*msg);  // Zero-copy access
+     * }
+     * @endcode
+     */
+    const T* get_data(
         uint64_t timestamp,
         std::chrono::milliseconds tolerance = std::chrono::milliseconds(-1),
         InterpolationMode mode = InterpolationMode::NEAREST
@@ -281,7 +310,7 @@ public:
         SharedLock lock(mutex_);
         
         if (buffer_.empty()) {
-            return std::nullopt;
+            return nullptr;
         }
         
         // Use default tolerance if not specified
@@ -290,35 +319,35 @@ public:
         }
         
         // Convert tolerance from milliseconds to nanoseconds
-        // Timestamps are in nanoseconds (from Time::now()), so tolerance must match
         uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
         
-        // Quick bounds check (handle underflow for low timestamps)
+        // Quick bounds check
+        uint64_t oldest_ts = TimestampAccessor<T>::get(buffer_.front());
+        uint64_t newest_ts = TimestampAccessor<T>::get(buffer_.back());
+        
         uint64_t lower_bound = (timestamp >= tolerance_ns) ? (timestamp - tolerance_ns) : 0;
         uint64_t upper_bound = timestamp + tolerance_ns;
-        if (upper_bound < timestamp) {  // Overflow check
+        if (upper_bound < timestamp) {
             upper_bound = UINT64_MAX;
         }
         
-        if (upper_bound < oldest_timestamp_ || lower_bound > newest_timestamp_) {
-            return std::nullopt;  // Requested timestamp outside buffer range
+        if (upper_bound < oldest_ts || lower_bound > newest_ts) {
+            return nullptr;
         }
         
         // Dispatch to mode-specific implementation
         switch (mode) {
             case InterpolationMode::NEAREST:
-                return getData_nearest(timestamp, tolerance_ns);
+                return get_data_nearest(timestamp, tolerance_ns);
             case InterpolationMode::BEFORE:
-                return getData_before(timestamp, tolerance_ns);
+                return get_data_before(timestamp, tolerance_ns);
             case InterpolationMode::AFTER:
-                return getData_after(timestamp, tolerance_ns);
+                return get_data_after(timestamp, tolerance_ns);
             case InterpolationMode::INTERPOLATE:
-                // Future: Linear interpolation between messages
-                // For now, fall back to NEAREST
-                return getData_nearest(timestamp, tolerance_ns);
+                return get_data_nearest(timestamp, tolerance_ns);
         }
         
-        return std::nullopt;
+        return nullptr;
     }
     
     /**
@@ -326,26 +355,29 @@ public:
      * @return {oldest_timestamp, newest_timestamp} or {0, 0} if empty
      * @note Thread-safe (read lock)
      */
-    std::pair<uint64_t, uint64_t> getTimestampRange() const {
+    std::pair<uint64_t, uint64_t> get_timestamp_range() const {
         SharedLock lock(mutex_);
         if (buffer_.empty()) {
             return {0, 0};
         }
-        return {oldest_timestamp_, newest_timestamp_};
+        return {
+            TimestampAccessor<T>::get(buffer_.front()),
+            TimestampAccessor<T>::get(buffer_.back())
+        };
     }
     
 private:
     // ========================================================================
-    // Internal Lookup Implementations
+    // Internal Lookup Implementations (return pointers for zero-copy)
     // ========================================================================
     
     /**
      * @brief Find message with timestamp closest to requested
-     * @note Assumes lock is held (called from getData)
+     * @note Assumes lock is held (called from get_data)
      */
-    std::optional<T> getData_nearest(uint64_t timestamp, uint64_t tolerance_ns) const {
+    const T* get_data_nearest(uint64_t timestamp, uint64_t tolerance_ns) const {
         if (buffer_.empty()) {
-            return std::nullopt;
+            return nullptr;
         }
         
         size_type best_idx = 0;
@@ -361,19 +393,19 @@ private:
         }
         
         if (best_diff <= tolerance_ns) {
-            return buffer_[best_idx];
+            return &buffer_[best_idx];
         }
         
-        return std::nullopt;
+        return nullptr;
     }
     
     /**
      * @brief Find newest message with timestamp <= requested
-     * @note Assumes lock is held (called from getData)
+     * @note Assumes lock is held (called from get_data)
      */
-    std::optional<T> getData_before(uint64_t timestamp, uint64_t tolerance_units) const {
+    const T* get_data_before(uint64_t timestamp, uint64_t tolerance_units) const {
         if (buffer_.empty()) {
-            return std::nullopt;
+            return nullptr;
         }
         
         // Search backwards from newest to oldest
@@ -382,22 +414,22 @@ private:
             if (TimestampAccessor<T>::get(buffer_[idx]) <= timestamp) {
                 uint64_t diff = timestamp - TimestampAccessor<T>::get(buffer_[idx]);
                 if (diff <= tolerance_units) {
-                    return buffer_[idx];
+                    return &buffer_[idx];
                 }
-                break;  // Found newest candidate, but out of tolerance
+                break;
             }
         }
         
-        return std::nullopt;
+        return nullptr;
     }
     
     /**
      * @brief Find oldest message with timestamp >= requested
-     * @note Assumes lock is held (called from getData)
+     * @note Assumes lock is held (called from get_data)
      */
-    std::optional<T> getData_after(uint64_t timestamp, uint64_t tolerance_units) const {
+    const T* get_data_after(uint64_t timestamp, uint64_t tolerance_units) const {
         if (buffer_.empty()) {
-            return std::nullopt;
+            return nullptr;
         }
         
         // Search forwards from oldest to newest
@@ -405,13 +437,13 @@ private:
             if (TimestampAccessor<T>::get(buffer_[i]) >= timestamp) {
                 uint64_t diff = TimestampAccessor<T>::get(buffer_[i]) - timestamp;
                 if (diff <= tolerance_units) {
-                    return buffer_[i];
+                    return &buffer_[i];
                 }
-                break;  // Found oldest candidate, but out of tolerance
+                break;
             }
         }
         
-        return std::nullopt;
+        return nullptr;
     }
     
     // ========================================================================
@@ -420,12 +452,7 @@ private:
     
     mutable SharedMutex mutex_;                 ///< Thread synchronization
     sertial::RingBuffer<T, MaxSize> buffer_;    ///< Underlying circular buffer
-    
-    // Cached timestamp bounds (avoid scanning on every getData)
-    uint64_t oldest_timestamp_{0};  ///< Timestamp of oldest message
-    uint64_t newest_timestamp_{0};  ///< Timestamp of newest message
-    
-    std::chrono::milliseconds default_tolerance_;  ///< Default tolerance for getData
+    std::chrono::milliseconds default_tolerance_;  ///< Default tolerance for get_data
 };
 
 } // namespace commrat

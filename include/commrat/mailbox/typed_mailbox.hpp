@@ -19,6 +19,7 @@
 
 #include "mailbox.hpp"
 #include "../messaging/message_registry.hpp"
+#include "../messaging/system/system_registry.hpp"
 #include <type_traits>
 
 namespace commrat {
@@ -93,10 +94,33 @@ private:
     
     // Create underlying mailbox with all MessageDefinitions from registry
     // (We'll add type validation in send/receive methods)
-    template<typename... MessageDefs>
-    static auto extract_mailbox_type(MessageRegistry<MessageDefs...>*) -> Mailbox<MessageDefs...>;
     
-    using UnderlyingMailbox = decltype(extract_mailbox_type(static_cast<Registry*>(nullptr)));
+    // Helper to detect ::Registry member
+    template<typename T, typename = void>
+    struct HasRegistryMember : std::false_type {};
+    
+    template<typename T>
+    struct HasRegistryMember<T, std::void_t<typename T::Registry>> : std::true_type {};
+    
+    // Helper to extract Mailbox type from Registry
+    // CommRaT has ::Registry member, MessageRegistry can be decomposed directly
+    
+    template<typename R, typename Enable = void>
+    struct ExtractMailboxType;
+    
+    // Case 1: Registry has ::Registry member (CommRaT) - recurse
+    template<typename R>
+    struct ExtractMailboxType<R, std::enable_if_t<HasRegistryMember<R>::value>> {
+        using type = typename ExtractMailboxType<typename R::Registry, void>::type;
+    };
+    
+    // Case 2: MessageRegistry<...> - extract template parameters directly
+    template<typename... MessageDefs>
+    struct ExtractMailboxType<MessageRegistry<MessageDefs...>, std::enable_if_t<!HasRegistryMember<MessageRegistry<MessageDefs...>>::value>> {
+        using type = Mailbox<MessageDefs...>;
+    };
+    
+    using UnderlyingMailbox = typename ExtractMailboxType<Registry>::type;
     
     UnderlyingMailbox mailbox_;
     
@@ -263,7 +287,7 @@ public:
      * @brief Send a TimsMessage (type-restricted)
      */
     template<typename PayloadT>
-    auto send(const TimsMessage<PayloadT>& tims_message, uint32_t dest_mailbox)
+    auto send(TimsMessage<PayloadT>& tims_message, uint32_t dest_mailbox)
         -> MailboxResult<void> {
         
         static_assert(is_sendable_type<PayloadT>,
@@ -275,357 +299,141 @@ public:
         return mailbox_.send(tims_message, dest_mailbox);
     }
     
+    /**
+     * @brief Send a reply to a request message (like RACK's sendMsgReply)
+     * 
+     * Uses MessageDefinition's built-in request-reply mechanism.
+     * Automatically extracts destination from request.header.src.
+     * 
+     * @tparam RequestPayload Request payload type (must be a request with reply)
+     * @tparam ReplyPayload Reply payload type (validated against MessageDef::ReplyMessageDef)
+     * @param request The received request message
+     * @param reply The reply payload to send (must be sendable from this mailbox)
+     * @return Success or error
+     * 
+     * Example:
+     * @code
+     * auto reply = handle_subscribe_request(received_msg.payload);
+     * cmd_mailbox.send_reply(received_msg, reply);  // Type-safe + sendable check
+     * @endcode
+     */
+    template<typename RequestPayload, typename ReplyPayload>
+        requires registry::is_request_payload_v<RequestPayload, Registry> && is_sendable_type<ReplyPayload>
+    auto send_reply(const TimsMessage<RequestPayload>& request, 
+                    ReplyPayload& reply) 
+        -> MailboxResult<void> {
+        
+        // Use MessageDefinition's ReplyMessageDef to validate reply type
+        using RequestDef = registry::find_message_def_t<RequestPayload, Registry>;
+        using ExpectedReply = typename RequestDef::ReplyMessageDef::Payload;
+        
+        static_assert(std::is_same_v<ReplyPayload, ExpectedReply>,
+                      "ReplyPayload must match RequestDef::ReplyMessageDef::Payload");
+        
+        // Extract destination from request source (like RACK's getSrc())
+        return send(reply, request.header.src);
+    }
+    
     // ========================================================================
-    // Type-Safe Receive Operations
+    // Type-Safe Receive Operations (Zero-Copy API)
     // ========================================================================
     
     /**
-     * @brief Blocking receive for specific payload type
+     * @brief Zero-copy receive with timeout (PRIMARY API)
+     * 
+     * Receives a message directly into the provided storage, avoiding intermediate moves.
+     * This is the preferred API for performance-critical code.
      * 
      * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
-     * @return Received message or error
+     * @param message Storage for received message (filled on success)
+     * @param timeout Maximum time to wait
+     * @return true if message received successfully, false otherwise
+     * 
+     * @note Zero-copy: Message deserialized directly into provided reference
      */
     template<typename PayloadT>
-    auto receive() -> MailboxResult<TimsMessage<PayloadT>> {
+    bool receive(TimsMessage<PayloadT>& message, std::chrono::milliseconds timeout) {
         static_assert(is_allowed_type<PayloadT>,
                       "Message type not allowed in this typed mailbox. "
                       "Check that PayloadT is in the AllowedPayloadTypes list.");
         static_assert(is_registered_type<PayloadT>,
                       "Message type not registered in the message registry.");
-        return mailbox_.template receive<PayloadT>();
+        return mailbox_.template receive<PayloadT>(message, timeout);
     }
     
     /**
-     * @brief Receive with timeout for specific payload type
+     * @brief Zero-copy non-blocking receive
+     * 
+     * Attempts to receive a message without blocking. Returns immediately if no message available.
      * 
      * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
-     * @param timeout Maximum time to wait
-     * @return Received message or error
+     * @param message Storage for received message (filled on success)
+     * @return true if message received, false if no message available
+     * 
+     * @note Zero-copy: Message deserialized directly into provided reference
      */
     template<typename PayloadT>
-    auto receive_for(std::chrono::milliseconds timeout) -> MailboxResult<TimsMessage<PayloadT>> {
+    bool try_receive(TimsMessage<PayloadT>& message) {
         static_assert(is_allowed_type<PayloadT>,
                       "Message type not allowed in this typed mailbox.");
         static_assert(is_registered_type<PayloadT>,
                       "Message type not registered in the message registry.");
-        return mailbox_.template receive_for<PayloadT>(timeout);
+        return mailbox_.template try_receive<PayloadT>(message);
     }
     
-    /**
-     * @brief Non-blocking receive (type-restricted)
-     * 
-     * @tparam PayloadT Payload type (must be in AllowedPayloadTypes)
-     * @return Received message or TIMEOUT error if no message available
-     */
-    template<typename PayloadT>
-    auto try_receive() -> MailboxResult<TimsMessage<PayloadT>> {
-        static_assert(is_allowed_type<PayloadT>,
-                      "Message type not allowed in this typed mailbox.");
-        static_assert(is_registered_type<PayloadT>,
-                      "Message type not registered in the message registry.");
-        return mailbox_.template try_receive<PayloadT>();
-    }
+    // ========================================================================
+    // Visitor-Based Receive (Single API for any allowed type)
+    // ========================================================================
     
     /**
      * @brief Blocking receive any allowed message type using visitor pattern
      * 
+     * Uses optimized buffer size (max of AllowedPayloadTypes only).
+     * Visitor is called with TimsMessage<T> for any received allowed type.
+     * 
+     * @tparam BufferSize Stack buffer size (default: optimized for allowed types)
      * @tparam Visitor Callable accepting TimsMessage<T> for any allowed T
-     * @return Success or error
-     */
-    template<typename Visitor>
-    auto receive_any(Visitor&& visitor) -> MailboxResult<void> {
-        return mailbox_.receive_any(std::forward<Visitor>(visitor));
-    }
-    
-    /**
-     * @brief Receive any allowed message type with timeout
-     * 
-     * @tparam Visitor Callable accepting TimsMessage<T> for any allowed T
-     * @param timeout Maximum time to wait
-     * @return Success or error
-     */
-    template<typename Visitor>
-    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
-        return mailbox_.receive_any_for(timeout, std::forward<Visitor>(visitor));
-    }
-    
-    // ========================================================================
-    // Send Operations
-    // ========================================================================
-    
-    /**
-     * @brief Receive any allowed message using a visitor
-     * 
-     * The visitor will be called with the received message if its type
-     * is in AllowedPayloadTypes. Otherwise returns error.
-     * 
-     * @param visitor Callable that accepts any allowed message type
      * @return Success or error
      * 
      * Example:
      * @code
      * typed_mailbox.receive_any([](auto&& msg) {
-     *     using MsgType = std::decay_t<decltype(msg.message)>;
-     *     if constexpr (std::is_same_v<MsgType, ResetCmd>) {
-     *         std::cout << "Reset command\n";
-     *     } else if constexpr (std::is_same_v<MsgType, CalibrateCmd>) {
-     *         std::cout << "Calibrate command\n";
+     *     using PayloadT = std::decay_t<decltype(msg)>::payload_type;
+     *     if constexpr (std::is_same_v<PayloadT, ResetCmd>) {
+     *         handle_reset(msg.payload);
+     *     } else if constexpr (std::is_same_v<PayloadT, CalibrateCmd>) {
+     *         handle_calibrate(msg.payload);
      *     }
-     *     // Only AllowedPayloadTypes will match
      * });
      * @endcode
      */
+    template<size_t BufferSize = max_message_size, typename Visitor>
+    auto receive_any(Visitor&& visitor) -> MailboxResult<void> {
+        return mailbox_.template receive_any<BufferSize>(std::forward<Visitor>(visitor));
+    }
+    
+    /**
+     * @brief Receive any allowed message type with timeout
+     * 
+     * @tparam BufferSize Stack buffer size (default: optimized for allowed types)
+     * @tparam Visitor Callable accepting TimsMessage<T> for any allowed T
+     * @param timeout Maximum time to wait
+     * @return Success or error
+     */
+    template<size_t BufferSize = max_message_size, typename Visitor>
+    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
+        return mailbox_.template receive_any_for<BufferSize>(timeout, std::forward<Visitor>(visitor));
+    }
     
     // ========================================================================
     // Access to Underlying Mailbox
     // ========================================================================
     
     /**
-     * @brief Get reference to underlying RegistryMailbox
+     * @brief Get reference to underlying Mailbox
      * 
-     * Needed for interop with legacy code that expects RegistryMailbox*.
-     * Use with caution - bypasses type restrictions!
+     * Provides access to the underlying registry-based mailbox.
      */
-    auto& get_underlying_mailbox() { return mailbox_; }
-    const auto& get_underlying_mailbox() const { return mailbox_; }
-};
-
-// ============================================================================
-// Specialization with SendOnlyTypes Support
-// ============================================================================
-
-/**
- * @brief Tag type to mark send-only types in template parameter
- * 
- * Usage: TypedMailbox<Registry, ReceiveTypes<A, B>, SendOnlyTypes<C, D>>
- */
-template<typename... Ts>
-struct ReceiveTypes {
-    using Types = std::tuple<Ts...>;
-};
-
-template<typename... Ts>
-struct SendOnlyTypes {
-    using Types = std::tuple<Ts...>;
-};
-
-/**
- * @brief TypedMailbox with only send types (no receive)
- * 
- * Specialization for send-only mailboxes. No buffer needed for receiving.
- * Useful for modules without commands that only need to send outputs via CMD mailbox.
- * 
- * @code
- * // CMD mailbox with no commands (only publishes outputs)
- * using CmdMailbox = TypedMailbox<Registry, SendOnlyTypes<OutputA, OutputB>>;
- * // Buffer sized minimally (no receive types)
- * // Can send: OutputA, OutputB
- * // Cannot receive anything
- * @endcode
- */
-template<typename Registry, typename... SendOnlyTypesInner>
-class TypedMailbox<Registry, SendOnlyTypes<SendOnlyTypesInner...>> {
-private:
-    template<typename... MessageDefs>
-    static auto extract_mailbox_type(MessageRegistry<MessageDefs...>*) -> Mailbox<MessageDefs...>;
-    
-    using UnderlyingMailbox = decltype(extract_mailbox_type(static_cast<Registry*>(nullptr)));
-    UnderlyingMailbox mailbox_;
-    
-    // Type checking
-    template<typename PayloadT>
-    static constexpr bool is_send_only_type = (std::is_same_v<PayloadT, SendOnlyTypesInner> || ...);
-    
-    template<typename PayloadT>
-    static constexpr bool is_registered_type = Registry::template is_registered<PayloadT>;
-
-public:
-    // Minimal buffer (no receive types)
-    static constexpr size_t max_message_size = 64;  // Minimal size for headers only
-    
-    explicit TypedMailbox(const MailboxConfig& config)
-        : mailbox_(MailboxConfig{
-            .mailbox_id = config.mailbox_id,
-            .message_slots = config.message_slots,
-            .max_message_size = max_message_size,
-            .send_priority = config.send_priority,
-            .realtime = config.realtime
-        }) {}
-    
-    // Send operations (allow send-only types)
-    template<typename PayloadT>
-    auto send(PayloadT& message, uint32_t dest_mailbox) -> MailboxResult<void> {
-        static_assert(is_send_only_type<PayloadT>,
-                      "Message type not in SendOnlyTypes list.");
-        static_assert(is_registered_type<PayloadT>,
-                      "Message type not registered in registry.");
-        
-        TimsMessage<PayloadT> tims_msg{
-            .header = {
-                .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,
-                .timestamp = 0,
-                .seq_number = 0,
-                .flags = 0
-            },
-            .payload = message
-        };
-        return mailbox_.send(tims_msg, dest_mailbox);
-    }
-    
-    template<typename PayloadT>
-    auto send(PayloadT& message, uint32_t dest_mailbox, uint64_t timestamp) -> MailboxResult<void> {
-        static_assert(is_send_only_type<PayloadT>, "Message type not in SendOnlyTypes list.");
-        static_assert(is_registered_type<PayloadT>, "Type not registered.");
-        
-        TimsMessage<PayloadT> tims_msg{
-            .header = {
-                .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,
-                .timestamp = timestamp,
-                .seq_number = 0,
-                .flags = 0
-            },
-            .payload = message
-        };
-        return mailbox_.send(tims_msg, dest_mailbox);
-    }
-    
-    // No receive operations (compile error if attempted)
-    template<typename PayloadT>
-    auto receive() -> MailboxResult<TimsMessage<PayloadT>> = delete;
-    
-    template<typename PayloadT>
-    auto receive_timed(int64_t timeout_ns) -> MailboxResult<TimsMessage<PayloadT>> = delete;
-    
-    // receive_any also not allowed (no receive types)
-    template<typename Visitor>
-    auto receive_any(Visitor&& visitor) -> MailboxResult<void> = delete;
-    
-    // Lifecycle
-    auto create() -> MailboxResult<void> { return mailbox_.create(); }
-    auto destroy() -> MailboxResult<void> { return mailbox_.destroy(); }
-    auto start() -> MailboxResult<void> { return mailbox_.start(); }
-    void stop() { mailbox_.stop(); }
-    auto get_id() const -> uint32_t { return mailbox_.get_id(); }
-};
-
-/**
- * @brief TypedMailbox with separate send-only types
- * 
- * Specialization that accepts ReceiveTypes<...> and SendOnlyTypes<...>.
- * Buffer sized for ReceiveTypes only, but can send ReceiveTypes + SendOnlyTypes.
- * 
- * @code
- * // CMD mailbox: Receive commands (small buffer), send outputs (large)
- * using CmdMailbox = TypedMailbox<Registry, 
- *                                  ReceiveTypes<ResetCmd, CalibrateCmd>,
- *                                  SendOnlyTypes<HugeOutputData>>;
- * // Buffer sized for max(ResetCmd, CalibrateCmd)
- * // Can send: ResetCmd, CalibrateCmd, HugeOutputData
- * // Can receive: ResetCmd, CalibrateCmd only
- * @endcode
- */
-template<typename Registry, typename... ReceiveTypesInner, typename... SendOnlyTypesInner>
-class TypedMailbox<Registry, ReceiveTypes<ReceiveTypesInner...>, SendOnlyTypes<SendOnlyTypesInner...>> {
-private:
-    template<typename... MessageDefs>
-    static auto extract_mailbox_type(MessageRegistry<MessageDefs...>*) -> Mailbox<MessageDefs...>;
-    
-    using UnderlyingMailbox = decltype(extract_mailbox_type(static_cast<Registry*>(nullptr)));
-    UnderlyingMailbox mailbox_;
-    
-    // Type checking
-    template<typename PayloadT>
-    static constexpr bool is_receive_type = (std::is_same_v<PayloadT, ReceiveTypesInner> || ...);
-    
-    template<typename PayloadT>
-    static constexpr bool is_send_only_type = (std::is_same_v<PayloadT, SendOnlyTypesInner> || ...);
-    
-    template<typename PayloadT>
-    static constexpr bool is_sendable_type = is_receive_type<PayloadT> || is_send_only_type<PayloadT>;
-    
-    template<typename PayloadT>
-    static constexpr bool is_registered_type = Registry::template is_registered<PayloadT>;
-
-public:
-    // Buffer sized for receive types only!
-    static constexpr size_t max_message_size = 
-        Registry::template max_size_for_types<ReceiveTypesInner...>();
-    
-    explicit TypedMailbox(const MailboxConfig& config)
-        : mailbox_(MailboxConfig{
-            .mailbox_id = config.mailbox_id,
-            .message_slots = config.message_slots,
-            .max_message_size = max_message_size,  // Optimized!
-            .send_priority = config.send_priority,
-            .realtime = config.realtime
-        }) {}
-    
-    // Send operations (allow receive + send-only types)
-    template<typename PayloadT>
-    auto send(PayloadT& message, uint32_t dest_mailbox) -> MailboxResult<void> {
-        static_assert(is_sendable_type<PayloadT>,
-                      "Message type not sendable from this mailbox.");
-        static_assert(is_registered_type<PayloadT>,
-                      "Message type not registered in registry.");
-        
-        TimsMessage<PayloadT> tims_msg{
-            .header = {
-                .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,
-                .timestamp = 0,
-                .seq_number = 0,
-                .flags = 0
-            },
-            .payload = message
-        };
-        return mailbox_.send(tims_msg, dest_mailbox);
-    }
-    
-    template<typename PayloadT>
-    auto send(PayloadT& message, uint32_t dest_mailbox, uint64_t timestamp) -> MailboxResult<void> {
-        static_assert(is_sendable_type<PayloadT>, "Message type not sendable.");
-        static_assert(is_registered_type<PayloadT>, "Type not registered.");
-        
-        TimsMessage<PayloadT> tims_msg{
-            .header = {
-                .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,
-                .timestamp = timestamp,
-                .seq_number = 0,
-                .flags = 0
-            },
-            .payload = message
-        };
-        return mailbox_.send(tims_msg, dest_mailbox);
-    }
-    
-    // Receive operations (only receive types allowed)
-    template<typename PayloadT>
-    auto receive() -> MailboxResult<TimsMessage<PayloadT>> {
-        static_assert(is_receive_type<PayloadT>,
-                      "Message type not receivable. Only ReceiveTypes can be received.");
-        static_assert(is_registered_type<PayloadT>, "Type not registered.");
-        return mailbox_.template receive<PayloadT>();
-    }
-    
-    template<typename PayloadT>
-    auto receive_timed(int64_t timeout_ns) -> MailboxResult<TimsMessage<PayloadT>> {
-        static_assert(is_receive_type<PayloadT>, "Only ReceiveTypes can be received.");
-        static_assert(is_registered_type<PayloadT>, "Type not registered.");
-        return mailbox_.template receive_timed<PayloadT>(timeout_ns);
-    }
-    
-    // receive_any for ReceiveTypes
-    template<typename Visitor>
-    auto receive_any(Visitor&& visitor) -> MailboxResult<void> {
-        return mailbox_.receive_any(std::forward<Visitor>(visitor));
-    }
-    
-    // Lifecycle
-    auto start() -> MailboxResult<void> { return mailbox_.start(); }
-    void stop() { mailbox_.stop(); }
     auto& get_underlying_mailbox() { return mailbox_; }
     const auto& get_underlying_mailbox() const { return mailbox_; }
 };
@@ -672,3 +480,4 @@ template<typename Registry, typename... DataTypes>
 using DataMailbox = TypedMailbox<Registry, DataTypes...>;
 
 } // namespace commrat
+
