@@ -2,6 +2,7 @@
 
 #include "../messages.hpp"
 #include "message_id.hpp"
+#include "system/data_request_messages.hpp"  // For GetDataRequest, GetNextDataRequest
 #include <type_traits>
 #include <tuple>
 #include <optional>
@@ -9,9 +10,155 @@
 
 namespace commrat {
 
-// Forward declaration for Module template alias
+// Forward declarations
 template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
 class Module;
+template<typename... MessageDefs> class Mailbox;
+template<typename... MessageDefs> class MessageRegistry;
+
+// ============================================================================
+// Registry to Mailbox Type Extraction
+// ============================================================================
+
+/**
+ * @brief Helper to detect if a type has ::Registry member (CommRaT pattern)
+ */
+template<typename T, typename = void>
+struct HasRegistryMember : std::false_type {};
+
+template<typename T>
+struct HasRegistryMember<T, std::void_t<typename T::Registry>> : std::true_type {};
+
+/**
+ * @brief Extract underlying Mailbox type from Registry
+ * 
+ * Handles both MessageRegistry<MessageDefs...> and CommRaT<MessageDefs...>:
+ * - If Registry has ::Registry member (CommRaT), recurse to extract it
+ * - MessageRegistry<...> directly extracts to Mailbox<...>
+ * 
+ * Usage:
+ *   template<typename Registry>
+ *   void foo(MailboxFor<Registry>& mbx) { ... }
+ * 
+ * This allows foo() to work with both MessageRegistry and CommRaT.
+ */
+template<typename R, typename Enable = void>
+struct ExtractMailboxType;
+
+// Case 1: Registry has ::Registry member (CommRaT) - recurse
+template<typename R>
+struct ExtractMailboxType<R, std::enable_if_t<HasRegistryMember<R>::value>> {
+    using type = typename ExtractMailboxType<typename R::Registry, void>::type;
+};
+
+// Case 2: MessageRegistry<...> - extract template parameters directly
+template<typename... MessageDefs>
+struct ExtractMailboxType<MessageRegistry<MessageDefs...>, std::enable_if_t<!HasRegistryMember<MessageRegistry<MessageDefs...>>::value>> {
+    using type = Mailbox<MessageDefs...>;
+};
+
+/**
+ * @brief Helper alias for extracting Mailbox type from Registry
+ * 
+ * Use this instead of Mailbox<Registry> to support both MessageRegistry and CommRaT.
+ */
+template<typename Registry>
+using MailboxFor = typename ExtractMailboxType<Registry>::type;
+
+// ============================================================================
+// GetData Message Expansion (for Message::Data types)
+// ============================================================================
+
+/**
+ * @brief Detect if a MessageDefinition is a Data message (UserDefined::Data)
+ * 
+ * Data messages automatically get GetDataRequest and GetNextDataRequest with same local_id.
+ */
+template<typename T>
+struct has_get_data_support {
+    static constexpr bool value = T::prefix == MessagePrefix::UserDefined && 
+                                  T::subprefix == static_cast<uint8_t>(UserSubPrefix::Data);
+};
+
+/**
+ * @brief Expand Message::Data types to include GetData protocol messages
+ * 
+ * For each Message::Data<T>, automatically adds:
+ *   - GetDataRequest<T>
+ *   - GetDataReply<T> (via ExpandReplies)
+ *   - GetNextDataRequest<T>
+ *   - GetNextDataReply<T> (via ExpandReplies)
+ */
+template<typename... MessageDefs>
+struct ExpandGetDataMessages;
+
+template<>
+struct ExpandGetDataMessages<> {
+    using Result = std::tuple<>;
+};
+
+template<typename First, typename... Rest>
+struct ExpandGetDataMessages<First, Rest...> {
+private:
+    using RestExpanded = typename ExpandGetDataMessages<Rest...>::Result;
+    
+public:
+    // If First is Message::Data<T> (has GetDataRequestDef), add GetData messages
+    using Result = std::conditional_t<
+        has_get_data_support<First>::value,
+        // Add First + GetDataRequest<T> + GetNextDataRequest<T> + Rest
+        decltype(std::tuple_cat(
+            std::declval<std::tuple<
+                First,
+                typename First::GetDataRequestDef,
+                typename First::GetNextDataRequestDef
+            >>(),
+            std::declval<RestExpanded>()
+        )),
+        // Otherwise just add First + Rest
+        decltype(std::tuple_cat(
+            std::declval<std::tuple<First>>(),
+            std::declval<RestExpanded>()
+        ))
+    >;
+};
+
+// ============================================================================
+// Request-Reply Message Expansion
+// ============================================================================
+
+/**
+ * @brief Expand message definitions to include reply messages
+ * 
+ * For each MessageDefinition with has_reply = true, adds its ReplyMessageDef
+ * to the registry automatically.
+ */
+template<typename... MessageDefs>
+struct ExpandReplies;
+
+template<>
+struct ExpandReplies<> {
+    using Result = std::tuple<>;
+};
+
+template<typename First, typename... Rest>
+struct ExpandReplies<First, Rest...> {
+private:
+    using RestExpanded = typename ExpandReplies<Rest...>::Result;
+    
+public:
+    using Result = std::conditional_t<
+        First::has_reply,
+        decltype(std::tuple_cat(
+            std::declval<std::tuple<First, typename First::ReplyMessageDef>>(),
+            std::declval<RestExpanded>()
+        )),
+        decltype(std::tuple_cat(
+            std::declval<std::tuple<First>>(),
+            std::declval<RestExpanded>()
+        ))
+    >;
+};
 
 // ============================================================================
 // Message ID Auto-Increment System
@@ -44,7 +191,7 @@ struct AutoAssignIDsProcess<std::tuple<ProcessedDefs...>> {
 template<typename... ProcessedDefs, typename First, typename... Rest>
 struct AutoAssignIDsProcess<std::tuple<ProcessedDefs...>, First, Rest...> {
 private:
-    // Track highest ID for this prefix/subprefix
+    // Track highest ID for this prefix/subprefix (ignoring reply messages with negative IDs)
     template<typename MessageDef>
     struct HighestID {
         static constexpr uint16_t value = []() constexpr {
@@ -54,6 +201,7 @@ private:
                 uint16_t max_id = 0;
                 ((max_id = (ProcessedDefs::prefix == MessageDef::prefix && 
                            ProcessedDefs::subprefix == MessageDef::subprefix &&
+                           !ProcessedDefs::is_reply &&  // Ignore reply messages
                            ProcessedDefs::local_id > max_id) ? 
                            ProcessedDefs::local_id : max_id), ...);
                 return max_id;
@@ -73,11 +221,28 @@ private:
         First
     >;
     
+    // Validate auto-assigned ID doesn't exceed MAX_MESSAGE_ID
+    static_assert(!CurrentProcessed::needs_auto_id || CurrentProcessed::local_id <= MAX_MESSAGE_ID,
+                  "Auto-assigned message ID exceeds MAX_MESSAGE_ID (0x7FFF)");
+    
+    // If this is a Message::Data type (check ORIGINAL First), create GetData messages with SAME local_id
+    using CurrentWithGetData = std::conditional_t<
+        has_get_data_support<First>::value,
+        // Add CurrentProcessed + GetDataRequest<T, ID> + GetNextDataRequest<T, ID>
+        std::tuple<
+            CurrentProcessed,
+            GetDataRequest<typename CurrentProcessed::Payload, CurrentProcessed::local_id>,
+            GetNextDataRequest<typename CurrentProcessed::Payload, CurrentProcessed::local_id>
+        >,
+        // Otherwise just CurrentProcessed
+        std::tuple<CurrentProcessed>
+    >;
+    
     using RestResult = typename AutoAssignIDsProcess<std::tuple<ProcessedDefs..., CurrentProcessed>, Rest...>::Result;
     
 public:
     using Result = decltype(std::tuple_cat(
-        std::declval<std::tuple<CurrentProcessed>>(),
+        std::declval<CurrentWithGetData>(),
         std::declval<RestResult>()
     ));
 };
@@ -147,8 +312,20 @@ private:
 template<typename... MessageDefs>
 class MessageRegistry {
 private:
-    // Auto-assign IDs where needed
-    using ProcessedDefs = typename AutoAssignIDs<MessageDefs...>::Result;
+    // Step 1: Auto-assign IDs to user messages (includes automatic GetData message creation)
+    // AutoAssignIDs now handles GetData message creation with matching IDs
+    using IDsAssigned = typename AutoAssignIDs<MessageDefs...>::Result;
+    
+    // Step 2: Expand request messages to include their replies
+    template<typename Tuple>
+    struct TupleToList;
+    
+    template<typename... Defs>
+    struct TupleToList<std::tuple<Defs...>> {
+        using Expanded = typename ExpandReplies<Defs...>::Result;
+    };
+    
+    using ProcessedDefs = typename TupleToList<IDsAssigned>::Expanded;
     
     // Extract payload types from MessageDefinitions
     template<typename Tuple>
@@ -163,6 +340,9 @@ private:
     static constexpr bool collisions_checked = CheckCollisions<MessageDefs...>::check();
 
 public:
+    // Message definitions tuple - exposed for introspection and utilities
+    using MessageDefsTuple = ProcessedDefs;
+    
     // Payload types tuple - exposed for introspection
     using PayloadTypes = typename ExtractPayloads<ProcessedDefs>::PayloadTypes;
     
@@ -178,8 +358,13 @@ public:
     template<typename T>
     static constexpr bool is_registered_v = IsInTuple<T, PayloadTypes>::value;
 
-    // Number of registered message types
+    // Number of registered message types (use size() for actual count after expansion)
     static constexpr size_t num_types = sizeof...(MessageDefs);
+    
+    // Actual size after expansion (replies, GetData, etc.)
+    static constexpr size_t size() {
+        return std::tuple_size_v<MessageDefsTuple>;
+    }
     
     // Maximum message size across all registered types (for buffer allocation)
     // NOTE: We calculate size of TimsMessage<Payload> not just Payload, because that's what gets serialized
@@ -483,13 +668,6 @@ public:
     }
     
     /**
-     * @brief Get number of registered message types
-     */
-    static constexpr size_t size() {
-        return num_types;
-    }
-    
-    /**
      * @brief Get list of all message IDs in the registry
      */
     template<typename... Defs>
@@ -524,6 +702,21 @@ public:
     static constexpr std::size_t get_type_index() {
         return type_index<T>();
     }
+    
+    // ========================================================================
+    // System Infrastructure (for Module2 compatibility)
+    // ========================================================================
+    
+    /**
+     * @brief System infrastructure placeholder
+     * 
+     * Provides basic WorkMailbox type for Module2.
+     * CommRaT specializes this with subscription-protocol-specific mailbox.
+     */
+    struct System {
+        // Generic WorkMailbox - unrestricted (sends/receives any registered type)
+        using WorkMailbox = Mailbox<MessageDefs...>;
+    };
     
 private:
     // Recursive visitor implementation
