@@ -12,7 +12,7 @@
  * - Address depends on output type_id (must be per-output)
  * 
  * All outputs are buffered - no streaming-only variant needed.
- * Buffer supports both continuous publishing AND getData queries.
+ * Buffer supports both continuous publishing AND get_data queries.
  * 
  * Architecture inspired by RACK framework (github.com/smolorz/RACK)
  */

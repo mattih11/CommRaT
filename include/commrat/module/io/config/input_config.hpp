@@ -1,6 +1,6 @@
 #pragma once
 
-#include "commrat/timestamp.hpp"
+#include "commrat/platform/timestamp.hpp"
 #include <cstdint>
 #include <cstddef>
 
@@ -24,19 +24,19 @@ struct CmdInputConfig {
 struct ContinuousInputConfig {
     uint8_t producer_system_id{0};
     uint8_t producer_instance_id{0};
-    Duration poll_timeout{Milliseconds(100)};  // How long to wait for data
+    Milliseconds poll_timeout{Milliseconds(100)};  // How long to wait for data
 };
 
 /**
  * @brief Configuration for SyncedInput
  * 
- * Pull model - needs producer addressing + getData settings
- * No subscription - queries producer's buffer directly via getData RPC
+ * Pull model - needs producer addressing + get_data settings
+ * No subscription - queries producer's buffer directly via get_data RPC
  */
 struct SyncedInputConfig {
     uint8_t producer_system_id{0};
     uint8_t producer_instance_id{0};
-    Duration tolerance{Milliseconds(50)};      // Max time difference for getData
+    Milliseconds tolerance{Milliseconds(50)};      // Max time difference for get_data
     InterpolationMode interpolation{InterpolationMode::NEAREST};
     bool use_shared_work_mbx{true};            // True: use module's work_mbx, False: dedicated mailbox
 };

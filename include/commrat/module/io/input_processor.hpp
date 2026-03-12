@@ -2,7 +2,7 @@
  * @file input_processor.hpp
  * @brief Input processing helpers for Module
  * 
- * Handles synchronized input gathering, getData synchronization,
+ * Handles synchronized input gathering, get_data synchronization,
  * and calling input process functions.
  * Unified for single and multiple inputs.
  */
@@ -61,7 +61,7 @@ protected:
     /**
      * @brief Gather all inputs synchronized to primary timestamp
      * 
-     * Places primary input at its index, then uses getData to synchronize
+     * Places primary input at its index, then uses get_data to synchronize
      * all secondary inputs to the primary's timestamp.
      * 
      * @tparam PrimaryIdx Index of primary input
@@ -83,7 +83,7 @@ protected:
         // Place primary input at its index
         std::get<PrimaryIdx>(all_inputs) = primary_msg.payload;
         
-        // Phase 6.10: Sync secondary inputs using getData with primary timestamp from header
+        // Phase 6.10: Sync secondary inputs using get_data with primary timestamp from header
         // TimsMessage.header.timestamp is the authoritative timestamp
         bool all_synced = sync_secondary_inputs<PrimaryIdx>(primary_msg.header.timestamp, all_inputs);
         
@@ -125,7 +125,7 @@ protected:
     
 private:
     /**
-     * @brief Sync all secondary inputs via getData
+     * @brief Sync all secondary inputs via get_data
      */
     template<std::size_t PrimaryIdx>
     bool sync_secondary_inputs(uint64_t primary_timestamp, InputTypesTuple& all_inputs) {
@@ -139,7 +139,7 @@ private:
     template<std::size_t PrimaryIdx, std::size_t... Is>
     bool sync_secondary_inputs_impl(uint64_t primary_timestamp, InputTypesTuple& all_inputs,
                                      std::index_sequence<Is...>) {
-        // For each input index (except primary), call getData
+        // For each input index (except primary), call get_data
         bool all_success = true;
         
         // Fold expression: process each secondary input
@@ -153,7 +153,7 @@ private:
     /**
      * @brief Sync a single secondary input at given index
      * 
-     * Uses getData with tolerance to find message closest to primary timestamp.
+     * Uses get_data with tolerance to find message closest to primary timestamp.
      * Updates input metadata on success, marks invalid on failure.
      */
     template<std::size_t Index>
@@ -162,8 +162,8 @@ private:
         using InputType = std::tuple_element_t<Index, InputTypesTuple>;
         auto& mailbox = std::get<Index>(*module.input_mailboxes_);
         
-        // Non-blocking getData with tolerance
-        auto result = mailbox.template getData<InputType>(
+        // Non-blocking get_data with tolerance
+        auto result = mailbox.template get_data<InputType>(
             primary_timestamp,
             module.config_.sync_tolerance(),
             InterpolationMode::NEAREST
@@ -172,13 +172,13 @@ private:
         if (!result.has_value()) {
             // Phase 6.10: Mark input as invalid
             module.mark_input_invalid(Index);
-            return false;  // getData failed
+            return false;  // get_data failed
         }
         
         // Phase 6.10: Populate metadata for this input
         // Index matches position in Inputs<T1, T2, T3, ...>
-        // getData succeeded - data is "new" (successfully retrieved from buffer)
-        // Note: is_new_data = true means getData returned a value (not nullopt)
+        // get_data succeeded - data is "new" (successfully retrieved from buffer)
+        // Note: is_new_data = true means get_data returned a value (not nullopt)
         //       is_new_data = false would indicate using fallback/default data
         module.update_input_metadata(Index, result.value(), true);
         

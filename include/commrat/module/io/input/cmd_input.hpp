@@ -1,58 +1,150 @@
 #pragma once
 
-#include "commrat/commrat.hpp"
-#include "commrat/mailbox/typed_mailbox.hpp"
+#include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/helpers/type_name.hpp"
+#include "commrat/mailbox/mailbox.hpp"
+#include "commrat/messaging/data_with_commands.hpp"
+#include "commrat/platform/timestamp.hpp"
+#include <cstdint>
+
+namespace commrat {
 
 /**
- * @brief Command-only input interface
+ * @brief Command-only input interface (RACK RackProxy pattern)
  * 
- * Provides command interface to a remote module without receiving data.
- * Useful for sending control commands (SetRate, Reset, etc.) to modules
- * without subscribing to their output data stream.
+ * Provides RPC interface to a remote module's output without receiving data.
+ * Commands are type-specific - extracted from OutputType's command list.
  * 
- * Does NOT participate in process() - only provides command methods.
+ * Features:
+ * - Compile-time type_id calculation from OutputType
+ * - Compile-time command extraction from DataWithCommands
+ * - Send-and-receive RPC with configurable timeout
+ * - Type-safe command/reply pairs
+ * - Error handling (timeout, error, not available)
+ * - No data subscription
  * 
- * Architecture inspired by RACK framework (github.com/smolorz/RACK)
+ * @tparam Registry Message registry
+ * @tparam OutputType Output message type (Data or DataWithCommands)
+ * 
+ * Example:
+ * @code
+ * using SensorData = DataWithCommands<SensorPayload, CalibrateCmd, SetRateCmd>;
+ * 
+ * CmdInput<MyRegistry, SensorData> input(work_mbx, sys_id, inst_id);
+ * 
+ * // Send command (type-safe - only commands from SensorData::Commands allowed)
+ * TimsMessage<CalibrateCmdPayload> cmd{...};
+ * TimsMessage<CalibrateReplyPayload> reply;
+ * bool ok = input.send_command(cmd, reply);
+ * @endcode
+ * 
+ * RACK Equivalent: RackProxy::proxySendRecvDataCmd()
+ * Modern approach: Templates + compile-time command extraction
  */
-template<typename CommratApp, typename T>
-class CmdInput 
-    requires (is_commrat_message_v<T>),
-             (CommratApp::UserRegistry::template is_registered<T>),
-             (is_message_registry_v<typename CommratApp::UserRegistry>) 
-{
+template<typename Registry, typename OutputType>
+class CmdInput {
 public:
-    using Type = T;
-    using ConfigType = CmdInputConfig;
-    using CommandMailbox = TypedMailbox<typename CommratApp::SystemRegistry::SystemCommands, 
-                                        typename CommratApp::UserRegistry::template UserCommands<T>>;
+    // Extract data message (unwrap DataWithCommands if needed)
+    using DataMessage = ExtractDataMessage_t<OutputType>;
+    
+    // Extract command list (empty tuple if no commands)
+    using CommandList = ExtractCommands_t<OutputType>;
+    
+    // Compile-time type_id calculation from output payload type
+    static constexpr uint32_t output_message_id = Registry::template get_message_id<OutputType>();
+    static constexpr uint8_t type_id = static_cast<uint8_t>(output_message_id & 0xFF);
     
     /**
      * @brief Construct command input
+     * @param work_mbx Shared mailbox for receiving replies
      * @param producer_system_id Producer's system ID
      * @param producer_instance_id Producer's instance ID
+     * @param cmd_timeout Default timeout for commands
      */
-    CmdInput(SystemId producer_system_id, InstanceId producer_instance_id)
-        : producer_system_id_(producer_system_id)
+    CmdInput(MailboxFor<Registry>& work_mbx,
+             uint8_t producer_system_id,
+             uint8_t producer_instance_id,
+             Milliseconds cmd_timeout = Milliseconds(100))
+        : work_mbx_(work_mbx)
+        , producer_system_id_(producer_system_id)
         , producer_instance_id_(producer_instance_id)
-        , producer_cmd_address_(calculate_cmd_mailbox_address(producer_system_id, 
-                                                               producer_instance_id, 
-                                                               CommratApp::template get_message_id<T>()))
+        , producer_cmd_address_(encode_address(type_id, producer_system_id, 
+                                               producer_instance_id, 0))  // CMD mailbox index = 0
+        , cmd_timeout_(cmd_timeout)
     {}
     
     /**
-     * @brief Send command to producer module
-     * @tparam CmdType Command type (must be valid for this output type)
+     * @brief Send command and receive reply (RPC with timeout)
+     * 
+     * RACK proxySendRecvDataCmd pattern:
+     * 1. Send command message to producer's CMD mailbox
+     * 2. Block waiting for reply with timeout
+     * 3. Filter replies by source address (ignore other messages)
+     * 4. Handle error/timeout/not_available responses
+     * 5. Return reply data via out-parameter
+     * 
+     * @tparam CmdType Command message type (must be registered)
      * @param command Command to send
-     * @return Result of send operation
+     * @param reply Output parameter - receives reply if successful
+     * @param timeout Command timeout (default: constructor value)
+     * @return True if reply received, false on timeout/error
      */
-    template<typename CmdType>
-    CmdType::ReplyType send_command(const CmdType& command) -> CmdType::ReplyType {
-        // TODO: Implement using TiMS send to producer_cmd_address_
-        return CmdType::ReplyType{}; // MailboxResult<void>::success();
+    template<typename CmdType, typename ReplyType>
+    bool send_command(const TimsMessage<CmdType>& command, 
+                     TimsMessage<ReplyType>& reply,
+                     Milliseconds timeout = Milliseconds::zero()) {
+        // Use constructor default if not specified
+        if (timeout == Milliseconds::zero()) {
+            timeout = cmd_timeout_;
+        }
+        
+        // Create mutable copy for send (serialize modifies header)
+        TimsMessage<CmdType> cmd_copy = command;
+        
+        // 1. Send command to producer's CMD mailbox
+        auto send_result = work_mbx_.send(cmd_copy, producer_cmd_address_);
+        if (!send_result) {
+            return false;
+        }
+        
+        // 2. Wait for reply (RACK while-loop pattern - filter by source)
+        Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
+        while (Time::now() < deadline) {
+            TimsMessage<ReplyType> received;
+            bool got_msg = work_mbx_.receive(
+                received,
+                Milliseconds(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::nanoseconds(deadline - Time::now())
+                ))
+            );
+            
+            if (!got_msg) {
+                continue;  // Timeout on this attempt, loop until deadline
+            }
+            
+            // 3. Filter by source address (RACK pattern)
+            if (extract_type_id(received.header.src) == type_id &&
+                extract_system_id(received.header.src) == producer_system_id_ &&
+                extract_instance_id(received.header.src) == producer_instance_id_) {
+                
+                // 4. Got reply from correct producer
+                reply = std::move(received);
+                return true;
+            }
+            // Else: Message from different source, keep waiting
+        }
+        
+        // Timeout - no reply from producer
+        // Timeout - no reply from producer
+        return false;
     }
     
 protected:
-    SystemId producer_system_id_;
-    InstanceId producer_instance_id_;
-    uint32_t producer_cmd_address_;  // Producer's command mailbox address
+    MailboxFor<Registry>& work_mbx_;        ///< Shared mailbox for RPC replies
+    uint8_t producer_system_id_;         ///< Producer's system ID
+    uint8_t producer_instance_id_;       ///< Producer's instance ID
+    uint32_t producer_cmd_address_;      ///< Producer's CMD mailbox address
+    Milliseconds cmd_timeout_;               ///< Default timeout for commands
 };
+
+} // namespace commrat
