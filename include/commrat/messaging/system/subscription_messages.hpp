@@ -10,14 +10,10 @@ namespace commrat {
  * 
  * Consumer sends this to producer to request data stream.
  * Producer will add consumer to its subscriber list.
- * 
- * RACK-style addressing: subscriber_base_addr contains [type][sys][inst][0]
- * mailbox_index specifies which mailbox to send data to (DATA mailbox index)
  */
 struct SubscribeRequestPayload {
-    uint32_t subscriber_base_addr{0};    ///< Consumer's base address ([type][sys][inst][mbx=0])
-    uint8_t mailbox_index{0};            ///< Which mailbox to send data to (DATA mailbox index)
-    int64_t requested_period_ms{0};      ///< Desired update period in ms (0 = as fast as possible)
+    uint32_t subscriber_addr{0};    ///< Consumer's DATA mailbox address to receive data on
+    int64_t requested_period_ms{0}; ///< Desired update period in ms (0 = as fast as possible)
 };
 
 /**
@@ -37,7 +33,7 @@ struct SubscribeReplyPayload {
  * Consumer sends this to producer to stop receiving data.
  */
 struct UnsubscribeRequestPayload {
-    uint32_t subscriber_base_addr{0};    ///< Consumer's base mailbox address (no mailbox_index)
+    uint32_t subscriber_addr{0};    ///< Consumer's mailbox address (same as used in subscribe)
 };
 
 /**
@@ -48,38 +44,30 @@ struct UnsubscribeReplyPayload {
 };
 
 // ============================================================================
-// Message Definitions with Compile-Time IDs
+// Message Definitions with Request-Reply Pairing
 // ============================================================================
 
-// Subscribe request/reply pair with explicit IDs
+// Subscribe request with automatic reply registration
 using SubscribeRequest = MessageDefinition<
     SubscribeRequestPayload,
     MessagePrefix::System,
     SystemSubPrefix::Subscription,
-    0x0001  // Explicit ID for request
+    0x0001,                        // Request ID
+    SubscribeReplyPayload          // Reply type (automatically gets ID = -1)
 >;
 
-using SubscribeReply = MessageDefinition<
-    SubscribeReplyPayload,
-    MessagePrefix::System,
-    SystemSubPrefix::Subscription,
-    0x0002  // Explicit ID for reply (could use Reply<SubscribeRequest> with negative ID)
->;
-
-// Unsubscribe request/reply pair with explicit IDs
+// Unsubscribe request with automatic reply registration
 using UnsubscribeRequest = MessageDefinition<
     UnsubscribeRequestPayload,
     MessagePrefix::System,
     SystemSubPrefix::Subscription,
-    0x0003
+    0x0003,                        // Request ID
+    UnsubscribeReplyPayload        // Reply type (automatically gets ID = -3)
 >;
 
-using UnsubscribeReply = MessageDefinition<
-    UnsubscribeReplyPayload,
-    MessagePrefix::System,
-    SystemSubPrefix::Subscription,
-    0x0004
->;
+// Reply message definitions (automatically created via ReplyMessageDef)
+using SubscribeReply = typename SubscribeRequest::ReplyMessageDef;
+using UnsubscribeReply = typename UnsubscribeRequest::ReplyMessageDef;
 
 // Type aliases for accessing payloads
 using SubscribeRequestType = typename SubscribeRequest::Payload;
