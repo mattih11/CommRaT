@@ -154,7 +154,7 @@ struct Input {
  * **How Multi-Input Works:**
  * 1. First type in Inputs<T, U, V> is automatically PRIMARY (drives execution)
  * 2. Module blocks on PRIMARY input receive()
- * 3. Secondary inputs synchronized via getData(primary_timestamp, tolerance)
+ * 3. Secondary inputs synchronized via get_data(primary_timestamp, tolerance)
  * 4. All inputs time-aligned before process() is called
  * 
  * @tparam Ts... The payload types to receive (first is primary)
@@ -174,7 +174,7 @@ struct Input {
  *         {10, 1},  // IMU source (primary)
  *         {11, 1}   // GPS source (secondary)
  *     },
- *     .sync_tolerance_ns = 50'000'000   // 50ms tolerance for getData
+ *     .sync_tolerance_ns = 50'000'000   // 50ms tolerance for get_data
  * };
  * @endcode
  * 
@@ -185,7 +185,7 @@ struct Input {
  *                                    Inputs<IMUData, GPSData>> {  // IMU first = primary
  * protected:
  *     void process(const IMUData& imu,      // Blocking receive (100Hz)
- *                  const GPSData& gps,      // getData at imu.timestamp (10Hz)
+ *                  const GPSData& gps,      // get_data at imu.timestamp (10Hz)
  *                  FusedData& output) override {
  *         // Check freshness
  *         if (!has_new_data<1>()) {
@@ -198,7 +198,7 @@ struct Input {
  * 
  * @note Secondary inputs use HistoricalMailbox with circular buffering
  * @note Metadata accessors available: get_input_metadata<N>(), has_new_data<N>()
- * @see HistoricalMailbox for getData implementation details
+ * @see HistoricalMailbox for get_data implementation details
  * @see InputMetadata for metadata structure
  */
 template<typename... Ts>
@@ -215,7 +215,7 @@ struct Inputs {
  * When a module has multiple continuous inputs (Inputs<T, U, V>), one must be
  * designated as PRIMARY. The primary input drives execution - the module blocks
  * waiting for primary input, then fetches time-synchronized secondary inputs
- * using getData(timestamp).
+ * using get_data(timestamp).
  * 
  * @tparam T The payload type of the primary input (must be in Inputs<...>)
  * 

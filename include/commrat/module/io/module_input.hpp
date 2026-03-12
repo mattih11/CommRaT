@@ -17,7 +17,7 @@
  * 
  * 3. SyncedInput - Pull model timestamp sync (inherits CmdInput)
  *    - get_data(timestamp) queries producer's buffer
- *    - RACK-style getData for multi-rate sensor fusion
+ *    - RACK-style get_data for multi-rate sensor fusion
  *    - No data_mbx, only RPC to producer
  * 
  * Architecture inspired by RACK framework (github.com/smolorz/RACK)

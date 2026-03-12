@@ -3,18 +3,18 @@
 #include "commrat/commrat.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/mailbox/timestamped_ring_buffer.hpp"
-#include "commrat/timestamp.hpp"
+#include "commrat/platform/timestamp.hpp"
 #include <optional>
 
 /**
- * @brief Buffered output - stores timestamped data for getData queries
+ * @brief Buffered output - stores timestamped data for get_data queries
  * 
  * Combines functionality from HistoricalMailbox's buffer handling with
- * clean separation: storage (TimestampedRingBuffer) vs communication (CommandMailbox)
+ * clean separation: storage (OutputBuffer) vs communication (CommandMailbox)
  * 
  * Stores recent outputs to support:
  * - publish() sends to all ContinuousInput subscribers immediately
- * - getData(timestamp) queries from SyncedInput consumers
+ * - get_data(timestamp) queries from SyncedInput consumers
  * - Temporal synchronization for multi-rate sensor fusion
  * 
  * Buffer is ONLY on output side (producer stores data)
@@ -25,6 +25,7 @@
  * Architecture inspired by RACK framework (github.com/smolorz/RACK)
  * This is the clean separation: storage in output, communication via mailboxes
  */
+
 template<typename CommratApp, typename T, std::size_t SLOTS = 100>
 class BufferedOutput
     requires (is_commrat_message_v<T>),
@@ -38,10 +39,15 @@ public:
                                         typename CommratApp::UserRegistry::template UserCommands<T>>;
     
     /**
+     * @brief Default constructor (for tuple construction)
+     */
+    BufferedOutput() = default;
+    
+    /**
      * @brief Construct buffered output
      * @param system_id This module's system ID
      * @param instance_id This module's instance ID
-     * @param default_tolerance Default tolerance for getData queries
+     * @param default_tolerance Default tolerance for get_data queries
      */
     BufferedOutput(SystemId system_id, 
                    InstanceId instance_id,
@@ -57,9 +63,75 @@ public:
     {}
     
     /**
-     * @brief Publish data to all continuous subscribers
+     * @brief Initialize after default construction
+     * @param system_id This module's system ID
+     * @param instance_id This module's instance ID
+     * @param default_tolerance Default tolerance for get_data queries
+     */
+    void initialize(SystemId system_id, 
+                    InstanceId instance_id,
+                    Milliseconds default_tolerance = Milliseconds(50)) {
+        system_id_ = system_id;
+        instance_id_ = instance_id;
+        cmd_address_ = calculate_cmd_mailbox_address(system_id, instance_id, 
+                                                      CommratApp::template get_message_id<T>());
+        // TODO: Initialize cmd_mbx_ with cmd_address_
+        buffer_ = OutputBuffer<TimsMessage<T>, SLOTS>(default_tolerance);
+        default_tolerance_ = default_tolerance;
+    }
+    
+    /**
+     * @brief Get workspace for zero-copy write (Module2 API)
      * 
-     * Stores in buffer for getData queries AND sends to continuous subscribers.
+     * Returns reference to next buffer slot for user to write payload directly.
+     * Call publish_workspace() after writing to finalize and send.
+     * 
+     * @return Reference to workspace payload (user writes here)
+     * 
+     * @example
+     * @code
+     * auto& payload = output.get_workspace();
+     * payload.temperature = read_sensor();
+     * output.publish_workspace(Time::now());  // Finalizes and publishes
+     * @endcode
+     */
+    T& get_workspace() {
+        // Get next slot from buffer (returns TimsMessage<T>&)
+        TimsMessage<T>& msg = buffer_.get_next_slot();
+        return msg.payload;  // Return just payload reference
+    }
+    
+    /**
+     * @brief Publish workspace - finalizes header and sends to subscribers
+     * 
+     * Must be called after get_workspace() to finalize the message.
+     * Sets timestamp/header fields, finalizes buffer write, sends to subscribers.
+     * 
+     * @param timestamp Timestamp for this message
+     */
+    void publish_workspace(Timestamp timestamp) {
+        // Access the message that was just written (via buffer_.back())
+        TimsMessage<T>& msg = buffer_.back();
+        
+        // Fill header (payload already written by user)
+        msg.header.timestamp = timestamp.nanoseconds();
+        msg.header.sequence_number = next_seq_number_++;
+        msg.header.message_id = CommratApp::template get_message_id<T>();
+        msg.header.src_address = encode_address(0, system_id_, instance_id_, 0);  // TODO: Proper encoding
+        
+        // Finalize buffer write (updates timestamp metadata)
+        buffer_.finalize_write();
+        
+        // TODO: Send to all continuous subscribers
+        // for (auto& subscriber : continuous_subscribers_) {
+        //     subscriber.data_mbx.send(msg);
+        // }
+    }
+    
+    /**
+     * @brief Publish data to all continuous subscribers (legacy API)
+     * 
+     * Stores in buffer for get_data queries AND sends to continuous subscribers.
      * 
      * @param data Data to publish
      * @param timestamp Timestamp for this data
@@ -77,7 +149,7 @@ public:
             .payload = data
         };
         
-        // Store in timestamped buffer (for getData queries)
+        // Store in timestamped buffer (for get_data queries)
         buffer_.push(msg);
         
         // TODO: Send to all continuous subscribers' data_mbx
@@ -89,10 +161,10 @@ public:
     }
     
     /**
-     * @brief Get data synchronized to timestamp (RACK-style getData)
+     * @brief Get data synchronized to timestamp (RACK-style get_data)
      * 
      * Called by SyncedInput consumers to fetch data at specific timestamp.
-     * Uses TimestampedRingBuffer's optimized search (binary for BEFORE/AFTER,
+     * Uses OutputBuffer's optimized search (binary for BEFORE/AFTER,
      * linear for NEAREST).
      * 
      * @param timestamp Requested timestamp (ns since epoch)
@@ -103,22 +175,22 @@ public:
      * @note Thread-safe: Can be called concurrently with publish()
      * @note O(log n) for BEFORE/AFTER, O(n) for NEAREST
      */
-    auto getData(
+    auto get_data(
         uint64_t timestamp,
         Milliseconds tolerance = Milliseconds(-1),
         InterpolationMode mode = InterpolationMode::NEAREST
     ) const -> std::optional<TimsMessage<T>> {
         // Use default tolerance if not specified
         auto actual_tolerance = (tolerance.count() < 0) ? default_tolerance_ : tolerance;
-        return buffer_.getData(timestamp, actual_tolerance, mode);
+        return buffer_.get_data(timestamp, actual_tolerance, mode);
     }
     
     /**
      * @brief Get timestamp range currently buffered
      * @return {oldest_timestamp, newest_timestamp} or {0, 0} if empty
      */
-    std::pair<uint64_t, uint64_t> getTimestampRange() const {
-        return buffer_.getTimestampRange();
+    std::pair<uint64_t, uint64_t> get_timestamp_range() const {
+        return buffer_.get_timestamp_range();
     }
     
     /**
@@ -157,11 +229,9 @@ private:
     InstanceId instance_id_;
     uint32_t cmd_address_;                                          // This output's command mailbox address
     CommandMailbox cmd_mbx_;                                        // Receives commands, sends acks
-    TimestampedRingBuffer<TimsMessage<T>, SLOTS> buffer_;          // Timestamped data storage
-    Milliseconds default_tolerance_;                                // Default tolerance for getData
+    OutputBuffer<TimsMessage<T>, SLOTS> buffer_;          // Timestamped data storage
+    Milliseconds default_tolerance_;                                // Default tolerance for get_data
     uint32_t next_seq_number_ = 0;                                  // Sequence counter
-    
-    // TODO: Subscriber list
-    // std::vector<SubscriberInfo> continuous_subscribers_;  // ContinuousInput consumers
-    // std::vector<SubscriberInfo> synced_subscribers_;      // SyncedInput consumers (getData only)
+    //TODO use sertial container
+    sertial::fixed_vector<SubscriberInfo, kMaxSubscribers> continuous_subscribers_;
 };
