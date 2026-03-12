@@ -83,7 +83,7 @@ subscriber_base_addr[2] = (9 << 16) | (system_id << 8) | instance_id;
 - **Parallel reception**: Each input can receive independently
 - **Type safety**: Producer sends IMUData to IMU-mailbox, GPSData to GPS-mailbox
 - **Historical buffering**: Each input has its own HistoricalMailbox
-- **getData synchronization**: Can query specific input's history by type
+- **get_data synchronization**: Can query specific input's history by type
 - **No multiplexing**: Inputs don't share a mailbox, no need to demux
 
 **Use Cases**:

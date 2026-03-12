@@ -58,19 +58,19 @@ auto CreateDataMailbox() -> TypedMailbox<InputType>;
 ```cpp
 template<typename CommratApp, typename T, std::size_t SLOTS = 100>
 class BufferedOutput {
-    TimestampedRingBuffer<TimsMessage<T>, SLOTS> buffer_;  // Timestamped storage
+    OutputBuffer<TimsMessage<T>, SLOTS> buffer_;  // Timestamped storage
     TypedMailbox<Commands...> cmd_mbx_;                     // Communication channel
     
     auto publish(const T& data, Timestamp ts) -> MailboxResult<void>;
-    auto getData(uint64_t timestamp, Milliseconds tolerance, InterpolationMode mode) 
+    auto get_data(uint64_t timestamp, Milliseconds tolerance, InterpolationMode mode) 
         -> std::optional<TimsMessage<T>>;
 };
 ```
 
 **Combined functionality:**
-- **TimestampedRingBuffer**: Stores recent outputs with timestamp indexing (from HistoricalMailbox)
+- **OutputBuffer**: Stores recent outputs with timestamp indexing (from HistoricalMailbox)
 - **Command Mailbox**: Receives Subscribe/Unsubscribe + user commands
-- **Dual purpose**: Supports both publish() for ContinuousInput AND getData() for SyncedInput
+- **Dual purpose**: Supports both publish() for ContinuousInput AND get_data() for SyncedInput
 - **No tuple complexity**: Strongly typed for single type T (no per-type tuple like HistoricalMailbox)
 
 **Command Mailbox Details:**
@@ -136,7 +136,7 @@ class SyncedInput : public CmdInput<CommratApp, T> {
 ```
 - get_data(timestamp) queries producer's BufferedOutput (RPC)
 - NO data_mbx_ (no continuous stream, only RPC)
-- Optional work_mbx_ (may not need subscription for getData)
+- Optional work_mbx_ (may not need subscription for get_data)
 - Tolerance and interpolation configuration
 - Tracks validity/freshness metadata
 
@@ -163,7 +163,7 @@ class SyncedInput : public CmdInput<CommratApp, T> {
 ### Phase 3: Update Module Framework (PENDING)
 1. Update Module base class to use BufferedOutput/Input classes
 2. Integrate subscription protocol with new command mailboxes
-3. Implement publish() and getData() RPC in framework
+3. Implement publish() and get_data() RPC in framework
 4. Wire up continuous vs synced input handling in process() dispatcher
 3. Type-safe, single responsibility
 
@@ -181,7 +181,7 @@ class SyncedInput : public CmdInput<CommratApp, T> {
 4. **Three input patterns** - CmdInput (commands only), ContinuousInput (push), SyncedInput (pull)
 5. **Single output type** - BufferedOutput supports both continuous and synced consumers
 6. **No inheritance complexity** - Outputs are single class, inputs have clear hierarchy
-7. **Timestamped access** - BufferedOutput uses TimestampedRingBuffer for efficient getData
+7. **Timestamped access** - BufferedOutput uses OutputBuffer for efficient get_data
 
 ## Implementation Summary
 
@@ -191,16 +191,16 @@ class SyncedInput : public CmdInput<CommratApp, T> {
 ```
 CmdInput<CommratApp, T>              // Base: command-only interface
 ├── ContinuousInput<CommratApp, T>    // Push model: data_mbx + subscribe()
-└── SyncedInput<CommratApp, T>        // Pull model: getData(timestamp)
+└── SyncedInput<CommratApp, T>        // Pull model: get_data(timestamp)
 ```
 
 **Output Class** (✅ DONE):
 ```
-BufferedOutput<CommratApp, T, SLOTS>  // Single class: TimestampedRingBuffer + cmd_mbx
+BufferedOutput<CommratApp, T, SLOTS>  // Single class: OutputBuffer + cmd_mbx
 ```
 
 **Key Achievements**:
-- ✅ Moved TimestampedRingBuffer from HistoricalMailbox to BufferedOutput
+- ✅ Moved OutputBuffer from HistoricalMailbox to BufferedOutput
 - ✅ Clean separation: storage (output) vs communication (mailboxes)
 - ✅ No tuple complexity - each output strongly typed for single T
 - ✅ Three input patterns for different communication needs
@@ -217,7 +217,7 @@ BufferedOutput<CommratApp, T, SLOTS>  // Single class: TimestampedRingBuffer + c
 **Phase 3 - Module Framework Integration**:
 - ⏳ Wire BufferedOutput into Module base class
 - ⏳ Implement subscription protocol (Subscribe/Ack flow)
-- ⏳ Implement getData RPC for SyncedInput
+- ⏳ Implement get_data RPC for SyncedInput
 - ⏳ Update process() dispatcher for input type handling
 
 **Phase 4 - Cleanup**:
@@ -232,9 +232,9 @@ BufferedOutput<CommratApp, T, SLOTS>  // Single class: TimestampedRingBuffer + c
    - One work mailbox handles all subscriptions for the module
    - Cleaner, more memory efficient
 
-2. Input data flow - continuous vs getData()?
+2. Input data flow - continuous vs get_data()?
    - **Continuous input**: Data goes directly to process(), no buffering needed
-   - **getData()**: Needs producer's buffer (output-side storage)
+   - **get_data()**: Needs producer's buffer (output-side storage)
    - Inputs never need local buffers - only outputs store data
 
 3. ~~Command mailbox per-output vs shared?~~

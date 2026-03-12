@@ -626,7 +626,7 @@ int main(int argc, char** argv) {
 
 Once per-binary deployment works:
 
-1. **Phase 7.1**: Optional secondary inputs (getData can fail)
+1. **Phase 7.1**: Optional secondary inputs (get_data can fail)
 2. **Phase 7.2**: Input buffering strategies
 3. **Phase 7.3**: ROS 2 adapter
 4. **Phase 7.4**: Performance profiling
