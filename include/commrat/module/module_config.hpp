@@ -20,7 +20,7 @@ namespace commrat {
 
 // Default mailbox slot counts (configurable per module)
 constexpr uint32_t DEFAULT_CMD_SLOTS = 10;   // Command/subscription buffering
-constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for getData
+constexpr uint32_t DEFAULT_DATA_SLOTS = 50;  // Historical buffering for get_data
 
 // ============================================================================
 // Output Configuration (TaggedUnion)
@@ -74,8 +74,8 @@ struct MultiInputConfig {
         mutable size_t input_index{0};  // Auto-populated during subscription
     };
     std::vector<InputSource> sources;  // Order matches Inputs<T1, T2, ...>
-    size_t history_buffer_size{100};   // Buffer capacity for getData synchronization
-    std::chrono::milliseconds sync_tolerance{50};  // Tolerance for getData calls
+    size_t history_buffer_size{100};   // Buffer capacity for get_data synchronization
+    std::chrono::milliseconds sync_tolerance{50};  // Tolerance for get_data calls
 };
 
 using InputConfig = rfl::TaggedUnion<"input_type", NoInputConfig, SingleInputConfig, MultiInputConfig>;

@@ -47,7 +47,7 @@ public:
         uint32_t sequence_number;    ///< Message sequence number
         uint32_t message_id;         ///< Message type ID
         bool is_new_data;            ///< True if freshly received, false if stale/reused
-        bool is_valid;               ///< True if getData succeeded, false if failed
+        bool is_valid;               ///< True if get_data succeeded, false if failed
         
         // Helper to get input type (for debugging/logging)
         static constexpr const char* type_name() { return typeid(T).name(); }
@@ -128,11 +128,11 @@ public:
     /**
      * @brief Check if input is valid by index
      * 
-     * For multi-input modules, returns true if getData succeeded.
+     * For multi-input modules, returns true if get_data succeeded.
      * For single-input modules, always returns true (receive succeeded).
      * 
      * @tparam Index The input index
-     * @return True if valid, false if getData failed
+     * @return True if valid, false if get_data failed
      */
     template<std::size_t Index>
     bool is_input_valid() const {
