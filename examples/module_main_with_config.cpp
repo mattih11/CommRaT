@@ -55,12 +55,12 @@ using MyApp = commrat::CommRaT<
  * - Single output (FilteredData)
  * - Subscription via config.input_sources
  */
-class FilterModule : public MyApp::Module<
+class FilterModule : public MyApp::Module2<
     commrat::Output<FilteredData>,
     commrat::Input<SensorData>
 > {
 public:
-    using MyApp::Module<commrat::Output<FilteredData>, commrat::Input<SensorData>>::Module;
+    using MyApp::Module2<commrat::Output<FilteredData>, commrat::Input<SensorData>>::Module2;
 
 protected:
     void process(const SensorData& input, FilteredData& output) override {
@@ -99,7 +99,7 @@ private:
 };
 
 // Deploy as standalone binary with config file!
-COMMRAT_MODULE_MAIN(FilterModule, MyApp)
+COMMRAT_MODULE_MAIN(FilterModule)
 
 // Debug: Print message IDs at compile time
 static_assert(MyApp::get_message_id<SensorData>() != 0, "SensorData has ID");

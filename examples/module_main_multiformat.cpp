@@ -6,7 +6,7 @@
  * - Multi-input synchronization (IMU + GPS)
  * - JSON config file or CLI args
  * - Primary input driven execution
- * - getData synchronization
+ * - get_data synchronization
  * 
  * Create config.json:
  * {
@@ -71,30 +71,30 @@ using MyApp = commrat::CommRaT<
  * 
  * Demonstrates:
  * - Multi-input (IMU primary, GPS secondary)
- * - getData synchronization to IMU timestamp
+ * - get_data synchronization to IMU timestamp
  * - Metadata access (is_valid, has_new_data)
  * - Config loading from JSON file or CLI
  */
-class FusionModule : public MyApp::Module<
+class FusionModule : public MyApp::Module2<
     commrat::Output<FusedPose>,
-    commrat::Inputs<IMUData, GPSData>  // IMU first = primary
+    commrat::Input<IMUData>,  // IMU first = primary
+    commrat::SyncedInput<GPSData>   // GPS second = secondary
 > {
 public:
-    using MyApp::Module<commrat::Output<FusedPose>, commrat::Inputs<IMUData, GPSData>>::Module;
+    using MyApp::Module2<commrat::Output<FusedPose>, commrat::Input<IMUData>, commrat::SyncedInput<GPSData>>::Module2;
 
 protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedPose& output) override {
+    void process(const IMUData& imu, const commrat::Synced<GPSData>& gps, FusedPose& output) override {
         // Check GPS validity
-        auto gps_meta = get_input_metadata<1>();
-        bool gps_valid = gps_meta.is_valid && gps_meta.is_new_data;
+        bool gps_valid = gps.is_valid() && gps.is_fresh();
         
         // Simple fusion (in real system: Kalman filter)
         
         if (gps_valid) {
             // GPS available - use it
-            output.latitude = gps.latitude;
-            output.longitude = gps.longitude;
-            output.altitude = gps.altitude;
+            output.latitude = gps->latitude;
+            output.longitude = gps->longitude;
+            output.altitude = gps->altitude;
             
             // Integrate IMU for velocity (simplified)
             output.velocity_x = imu.accel_x * 0.01f;  // dt = 10ms
@@ -124,9 +124,9 @@ protected:
         
         // Remember last valid GPS
         if (gps_valid) {
-            last_latitude_ = gps.latitude;
-            last_longitude_ = gps.longitude;
-            last_altitude_ = gps.altitude;
+            last_latitude_ = gps->latitude;
+            last_longitude_ = gps->longitude;
+            last_altitude_ = gps->altitude;
         }
     }
 
@@ -137,4 +137,4 @@ private:
 };
 
 // Deploy as standalone binary - supports JSON config or CLI args!
-COMMRAT_MODULE_MAIN(FusionModule, MyApp)
+COMMRAT_MODULE_MAIN(FusionModule)

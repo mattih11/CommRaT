@@ -58,12 +58,9 @@ using ExampleApp = commrat::CommRaT<
 
 // Re-export I/O specifications for convenience
 using commrat::Output;
-using commrat::Outputs;
 using commrat::Input;
-using commrat::Inputs;
-using commrat::NoOutput;
-using commrat::PeriodicInput;
-using commrat::LoopInput;
+using commrat::Period;
+using commrat::SyncedInput;
 using commrat::ModuleConfig;
 using commrat::MailboxConfig;
 

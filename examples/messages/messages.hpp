@@ -22,11 +22,8 @@ namespace user_app {
 
 // Re-export I/O specifications
 using commrat::Output;
-using commrat::Outputs;
 using commrat::Input;
-using commrat::Inputs;
-using commrat::PeriodicInput;
-using commrat::LoopInput;
 using commrat::ModuleConfig;
+using commrat::Period;
 
 } // namespace user_app

@@ -48,13 +48,15 @@ using SensorApp = commrat::CommRaT<
 // Producer Module (Multi-Output)
 // ============================================================================
 
-class SensorProducerModule : public SensorApp::Module<
-    commrat::Outputs<TemperatureData, PressureData>,
-    commrat::PeriodicInput
+class SensorProducerModule : public SensorApp::Module2<
+    commrat::Output<TemperatureData>,
+    commrat::Output<PressureData>,
+    commrat::Period<100>
 > {
 public:
     SensorProducerModule(const commrat::ModuleConfig& config)
-        : SensorApp::Module<commrat::Outputs<TemperatureData, PressureData>, commrat::PeriodicInput>(config)
+        : SensorApp::Module2<commrat::Output<TemperatureData>,
+            commrat::Output<PressureData>, commrat::Period<100>>(config)
         , reading_count_(0) {}
 
 protected:
@@ -89,13 +91,13 @@ private:
 // Temperature Receiver Module
 // ============================================================================
 
-class TempReceiverModule : public SensorApp::Module<
+class TempReceiverModule : public SensorApp::Module2<
     commrat::Output<TemperatureData>,
     commrat::Input<TemperatureData>
 > {
 public:
     TempReceiverModule(const commrat::ModuleConfig& config)
-        : SensorApp::Module<commrat::Output<TemperatureData>, commrat::Input<TemperatureData>>(config)
+        : SensorApp::Module2<commrat::Output<TemperatureData>, commrat::Input<TemperatureData>>(config)
         , received_count_(0) {}
 
 protected:
@@ -117,13 +119,13 @@ private:
 // Pressure Receiver Module
 // ============================================================================
 
-class PressureReceiverModule : public SensorApp::Module<
+class PressureReceiverModule : public SensorApp::Module2<
     commrat::Output<PressureData>,
     commrat::Input<PressureData>
 > {
 public:
     PressureReceiverModule(const commrat::ModuleConfig& config)
-        : SensorApp::Module<commrat::Output<PressureData>, commrat::Input<PressureData>>(config)
+        : SensorApp::Module2<commrat::Output<PressureData>, commrat::Input<PressureData>>(config)
         , received_count_(0) {}
 
 protected:
