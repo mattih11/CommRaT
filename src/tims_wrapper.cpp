@@ -1,4 +1,4 @@
-#include "commrat/tims_wrapper.hpp"
+#include "commrat/platform/tims_wrapper.hpp"
 #include <cstring>
 #include <chrono>
 
@@ -125,7 +125,8 @@ TimsResult TimsWrapper::send_raw(const void* data, size_t size, uint32_t dest_ma
 }
 
 ssize_t TimsWrapper::receive_raw(void* buffer, size_t buffer_size, 
-                                  std::chrono::milliseconds timeout) {
+                                  std::chrono::milliseconds timeout,
+                                  TimsMetadata* metadata) {
     if (!is_initialized_ || tims_fd_ < 0) {
         return -1;
     }
@@ -155,6 +156,15 @@ ssize_t TimsWrapper::receive_raw(void* buffer, size_t buffer_size,
     
     // Parse header for byte order
     tims_parse_head_byteorder(&head);
+    
+    // Extract metadata if requested
+    if (metadata) {
+        metadata->src = head.src;
+        metadata->dest = head.dest;
+        metadata->seq_nr = head.seq_nr;
+        metadata->priority = head.priority;
+        metadata->flags = head.flags;
+    }
     
     messages_received_.fetch_add(1, std::memory_order_relaxed);
     

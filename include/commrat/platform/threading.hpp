@@ -81,6 +81,16 @@ public:
     Thread() = default;
     
     /**
+     * @brief Create and start thread with function and default config
+     * 
+     * @param func Function to execute
+     */
+    template<typename Func>
+    explicit Thread(Func&& func)
+        : Thread(ThreadConfig{}, std::forward<Func>(func)) {
+    }
+    
+    /**
      * @brief Create and start thread with function
      * 
      * @param config Thread configuration
