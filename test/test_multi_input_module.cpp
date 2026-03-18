@@ -6,12 +6,10 @@
  * - Multi-subscription protocol
  * - HistoricalMailbox per input type
  * - Primary input drives execution
- * - Secondary inputs synchronized via getData()
+ * - Secondary inputs synchronized via get_data()
  */
 
 #include <commrat/commrat.hpp>
-#include <commrat/registry_module.hpp>
-#include <commrat/mailbox/historical_mailbox.hpp>
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -51,7 +49,7 @@ using TestApp = CommRaT<
 // Producer Modules
 // ============================================================================
 
-class IMUModule : public TestApp::Module<Output<IMUData>, PeriodicInput> {
+class IMUModule : public TestApp::Module2<Output<IMUData>, Period<10>> {
 protected:
     void process(IMUData& output) override {
         output = IMUData{
@@ -64,7 +62,7 @@ private:
     int counter_{0};
 };
 
-class GPSModule : public TestApp::Module<Output<GPSData>, PeriodicInput> {
+class GPSModule : public TestApp::Module2<Output<GPSData>, Period<100>> {
 protected:
     void process(GPSData& output) override {
         output = GPSData{
@@ -84,7 +82,7 @@ private:
 
 // TODO: Once Phase 6.6 is complete, this should work:
 /*
-class SensorFusionModule : public TestApp::Module<
+class SensorFusionModule : public TestApp::Module2<
     Output<FusedData>,
     Inputs<IMUData, GPSData>,
     PrimaryInput<IMUData>

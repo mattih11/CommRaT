@@ -53,9 +53,9 @@ using TestApp = CommRaT<
 // Test 1: PeriodicInput + Output<T> → OutputData process()
 // ============================================================================
 
-class PeriodicSingleOutputModule : public TestApp::Module<Output<SensorData>, PeriodicInput> {
+class PeriodicSingleOutputModule : public TestApp::Module2<Output<SensorData>, Period<100>> {
 public:
-    using Module::Module;
+    using Module2::Module2;  // Inherit constructor
     
     int process_call_count = 0;
     
@@ -99,9 +99,9 @@ void test_periodic_single_output() {
 // Test 2: LoopInput + Output<T> → OutputData process()
 // ============================================================================
 
-class LoopSingleOutputModule : public TestApp::Module<Output<FilteredData>, LoopInput> {
+class LoopSingleOutputModule : public TestApp::Module2<Output<FilteredData>> {
 public:
-    using Module::Module;
+    using Module2::Module2;
     
     int process_call_count = 0;
     
@@ -141,9 +141,9 @@ void test_loop_single_output() {
 // Test 3: Input<T> + Output<U> → OutputData process_continuous(const InputData&)
 // ============================================================================
 
-class ContinuousSingleOutputModule : public TestApp::Module<Output<FilteredData>, Input<SensorData>> {
+class ContinuousSingleOutputModule : public TestApp::Module2<Output<FilteredData>, Input<SensorData>> {
 public:
-    using Module::Module;
+    using Module2::Module2;
     
     int process_call_count = 0;
     
@@ -184,9 +184,9 @@ void test_continuous_single_output() {
 // Test 4: Backward Compatibility - Raw Type Output
 // ============================================================================
 
-class BackwardCompatibleModule : public TestApp::Module<SensorData, PeriodicInput> {
+class BackwardCompatibleModule : public TestApp::Module2<Output<SensorData>, Period<100>> {
 public:
-    using Module::Module;
+    using Module2::Module2;  // Inherit constructor
     
     int process_call_count = 0;
     
@@ -232,19 +232,19 @@ void test_type_aliases() {
     std::cout << "[Test 5] Type Aliases Verification\n";
     
     // Verify OutputData and InputData type aliases
-    using M1 = TestApp::Module<Output<SensorData>, PeriodicInput>;
+    using M1 = TestApp::Module2<Output<SensorData>, Period<100>>;
     static_assert(std::is_same_v<M1::OutputData, SensorData>, 
                   "OutputData should be SensorData");
     static_assert(std::is_same_v<M1::InputData, void>, 
                   "InputData should be void for PeriodicInput");
     
-    using M2 = TestApp::Module<Output<FilteredData>, Input<SensorData>>;
+    using M2 = TestApp::Module2<Output<FilteredData>, Input<SensorData>>;
     static_assert(std::is_same_v<M2::OutputData, FilteredData>, 
                   "OutputData should be FilteredData");
     static_assert(std::is_same_v<M2::InputData, SensorData>, 
                   "InputData should be SensorData for Input<SensorData>");
     
-    using M3 = TestApp::Module<SensorData, PeriodicInput>;  // Raw type
+    using M3 = TestApp::Module2<Output<SensorData>, Period<100>>;  // Raw type
     static_assert(std::is_same_v<M3::OutputData, SensorData>, 
                   "Raw type should be normalized to Output<T>");
     
@@ -261,9 +261,9 @@ void test_compile_time_constraints() {
     std::cout << "[Test 6] Compile-Time Constraints\n";
     
     // These should compile (Phase 5 allows single I/O)
-    using Valid1 = TestApp::Module<Output<SensorData>, PeriodicInput>;
-    using Valid2 = TestApp::Module<Output<FilteredData>, Input<SensorData>>;
-    using Valid3 = TestApp::Module<SensorData, LoopInput>;  // Raw type
+    using Valid1 = TestApp::Module2<Output<SensorData>, Period<100>>;
+    using Valid2 = TestApp::Module2<Output<FilteredData>, Input<SensorData>>;
+    using Valid3 = TestApp::Module2<Output<SensorData>, Period<100>>;  // Raw type
     
     // These should NOT compile (Phase 5 rejects multi-I/O)
     // Uncomment to verify compile-time rejection:
