@@ -26,9 +26,10 @@ void signal_handler(int signal) {
 // Producer Module - Publishes temperature data @ 100ms
 // ============================================================================
 
-class SensorModule : public ExampleApp::Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public ExampleApp::Module2<Output<TemperatureData>, Period<100>> {
 public:
-    explicit SensorModule(const ModuleConfig& config) : ExampleApp::Module<Output<TemperatureData>, PeriodicInput>(config) {}
+
+    explicit SensorModule(const ModuleConfig& config) : ExampleApp::Module2<Output<TemperatureData>, Period<100>>(config) {}
     
 protected:
     void process(TemperatureData& output) override {
@@ -39,7 +40,7 @@ protected:
         std::cout << "[Producer] Published temperature: " << temp << "°C\n";
         
         output = {
-            .sensor_id = config_.instance_id(),
+            .sensor_id = 42,
             .temperature_c = temp,
             .confidence = 1.0f
         };
@@ -49,10 +50,10 @@ protected:
 // ============================================================================
 // Consumer Module - Receives temperature data via automatic subscription
 // ============================================================================
-
-class FilterModule : public ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>> {
+    
+class FilterModule : public ExampleApp::Module2<Output<TemperatureData>, Input<TemperatureData>> {
 public:
-    explicit FilterModule(const ModuleConfig& config) : ExampleApp::Module<Output<TemperatureData>, Input<TemperatureData>>(config) {}
+    explicit FilterModule(const ModuleConfig& config) : ExampleApp::Module2<Output<TemperatureData>, Input<TemperatureData>>(config) {}
     
 protected:
     static constexpr size_t HISTORY_SIZE = 5;

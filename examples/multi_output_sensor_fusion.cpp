@@ -72,15 +72,19 @@ using FusionApp = commrat::CommRaT<
 // Sensor Fusion Module (3 Outputs)
 // ============================================================================
 
-class SensorFusionModule : public FusionApp::Module<
-    commrat::Outputs<RawSensorData, FilteredData, DiagnosticsData>,
-    commrat::PeriodicInput
+class SensorFusionModule : public FusionApp::Module2<
+    commrat::Output<RawSensorData>,
+    commrat::Output<FilteredData>,
+    commrat::Output<DiagnosticsData>,
+    commrat::Period<100>
 > {
 public:
     SensorFusionModule(const commrat::ModuleConfig& config)
-        : FusionApp::Module<
-            commrat::Outputs<RawSensorData, FilteredData, DiagnosticsData>,
-            commrat::PeriodicInput
+        : FusionApp::Module2<
+            commrat::Output<RawSensorData>,
+            commrat::Output<FilteredData>,
+            commrat::Output<DiagnosticsData>,
+            commrat::Period<100>
           >(config)
         , sample_count_(0)
         , total_processing_time_us_(0)
@@ -159,13 +163,13 @@ private:
 // Raw Data Logger (Subscriber 1)
 // ============================================================================
 
-class RawDataLogger : public FusionApp::Module<
+class RawDataLogger : public FusionApp::Module2<
     commrat::Output<RawSensorData>,
     commrat::Input<RawSensorData>
 > {
 public:
     RawDataLogger(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<RawSensorData>, commrat::Input<RawSensorData>>(config)
+        : FusionApp::Module2<commrat::Output<RawSensorData>, commrat::Input<RawSensorData>>(config)
         , log_count_(0) {}
 
 protected:
@@ -190,13 +194,13 @@ private:
 // Filter Consumer (Subscriber 2)
 // ============================================================================
 
-class FilterConsumer : public FusionApp::Module<
+class FilterConsumer : public FusionApp::Module2<
     commrat::Output<FilteredData>,
     commrat::Input<FilteredData>
 > {
 public:
     FilterConsumer(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<FilteredData>, commrat::Input<FilteredData>>(config)
+        : FusionApp::Module2<commrat::Output<FilteredData>, commrat::Input<FilteredData>>(config)
         , consume_count_(0) {}
 
 protected:
@@ -221,13 +225,13 @@ private:
 // Diagnostics Monitor (Subscriber 3)
 // ============================================================================
 
-class DiagnosticsMonitor : public FusionApp::Module<
+class DiagnosticsMonitor : public FusionApp::Module2<
     commrat::Output<DiagnosticsData>,
     commrat::Input<DiagnosticsData>
 > {
 public:
     DiagnosticsMonitor(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<DiagnosticsData>, commrat::Input<DiagnosticsData>>(config)
+        : FusionApp::Module2<commrat::Output<DiagnosticsData>, commrat::Input<DiagnosticsData>>(config)
         , monitor_count_(0) {}
 
 protected:

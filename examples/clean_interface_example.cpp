@@ -26,9 +26,9 @@ using namespace user_app;  // Module, Mailbox, PeriodicInput, ContinuousInput
  * - No registry parameter needed!
  * - No MessageDefinition in user code!
  */
-class SensorModule : public App::Module<Output<TemperatureData>, PeriodicInput> {
+class SensorModule : public App::Module2<Output<TemperatureData>, Period<100>> {
 public:
-    explicit SensorModule(const ModuleConfig& config) : App::Module<Output<TemperatureData>, PeriodicInput>(config) {}
+    explicit SensorModule(const ModuleConfig& config) : App::Module2<Output<TemperatureData>, Period<100>>(config) {}
     
 protected:
     // Return payload type directly
@@ -56,9 +56,9 @@ private:
  * - Output<T> for single output
  * - No registry parameter!
  */
-class FilterModule : public App::Module<Output<TemperatureData>, Input<TemperatureData>> {
+class FilterModule : public App::Module2<Output<TemperatureData>, Input<TemperatureData>> {
 public:
-    explicit FilterModule(const ModuleConfig& config) : App::Module<Output<TemperatureData>, Input<TemperatureData>>(config) {}
+    explicit FilterModule(const ModuleConfig& config) : App::Module2<Output<TemperatureData>, Input<TemperatureData>>(config) {}
     
 protected:
     // Receives payload, returns payload

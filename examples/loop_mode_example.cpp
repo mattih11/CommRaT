@@ -45,10 +45,10 @@ using CounterApp = CommRaT<Message::Data<CounterData>>;
  * - 100% CPU usage on one core
  * - Measures actual throughput
  */
-class FastCounterModule : public CounterApp::Module<Output<CounterData>, LoopInput> {
+class FastCounterModule : public CounterApp::Module2<Output<CounterData>> {
 public:
     explicit FastCounterModule(const ModuleConfig& config)
-        : Module(config)
+        : Module2(config)
         , value_(0)
         , iteration_count_(0)
         , last_report_time_(std::chrono::steady_clock::now())
@@ -102,10 +102,10 @@ private:
  * Monitors the counter module and reports statistics.
  * Uses Input<CounterData> to process every message from the counter.
  */
-class ThroughputMonitor : public CounterApp::Module<Output<CounterData>, Input<CounterData>> {
+class ThroughputMonitor : public CounterApp::Module2<Output<CounterData>, Input<CounterData>> {
 public:
     explicit ThroughputMonitor(const ModuleConfig& config)
-        : Module(config)
+        : Module2(config)
         , total_messages_(0)
         , min_throughput_(UINT64_MAX)
         , max_throughput_(0)

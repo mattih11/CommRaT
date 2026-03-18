@@ -1,61 +1,93 @@
 /**
  * @file command_example.cpp
- * @brief Demonstrates variadic command handling in modules
+ * @brief Demonstrates simple command handling with DataWithCommands
  */
 
-#include "messages/messages.hpp"
+#include "messages/common_messages.hpp"
 #include <iostream>
-#include <thread>
+#include <csignal>
+#include <atomic>
 #include <cmath>
+#include "commrat/platform/timestamp.hpp"
 
-using namespace user_app;
+using namespace example_messages;
+using commrat::Time;
+using commrat::Milliseconds;
+using commrat::ModuleConfig;
 
 // ============================================================================
-// Define Command Payloads
+// Define Command Payloads with Reply types
 // ============================================================================
 
 struct ResetCmd {
     bool hard_reset{false};
+    
+    struct Reply {
+        bool success{false};
+        uint32_t previous_mode{0};
+    };
 };
 
 struct CalibrateCmd {
     float offset{0.0f};
+    
+    struct Reply {
+        bool success{false};
+        float previous_offset{0.0f};
+    };
 };
 
 struct SetModeCmd {
     uint32_t mode{0};
+    
+    struct Reply {
+        bool success{false};
+        uint32_t previous_mode{0};
+    };
 };
 
-// Add commands to registry (in real code, this goes in user_messages.hpp)
-namespace user_app {
-    // Extended CommRaT application with commands
-    using ExtendedApp = commrat::CommRaT<
-        commrat::Message::Data<TemperatureData>,
-        commrat::Message::Command<ResetCmd>,
-        commrat::Message::Command<CalibrateCmd>,
-        commrat::Message::Command<SetModeCmd>
+// ============================================================================
+// Extended Application with Commands
+// ============================================================================
+
+namespace example_messages {
+    // Simple approach: Associate commands with data type using DataWithCommands
+    using TempDataWithCommands = commrat::DataWithCommands<
+        TemperatureData,
+        ResetCmd,
+        CalibrateCmd,
+        SetModeCmd
+    >;
+    
+    // Application with data+commands in one clean definition
+    using CommandApp = commrat::CommRaT<
+        TempDataWithCommands,
+        commrat::Message::Data<StatusData>
     >;
 }
 
 // ============================================================================
-// Module with Multiple Command Handlers
+// Module with Command Handlers - Simple!
 // ============================================================================
 
 /**
- * @brief Sensor module that handles multiple command types
+ * @brief Sensor module with command handling
  * 
- * Notice the variadic CommandTypes at the end:
- *   Module<Output<TempData>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>
- * 
- * The module automatically dispatches commands to the correct on_command() handler.
+ * Notice how clean this is:
+ *   - Just specify Output<TempDataWithCommands> and Period<>
+ *   - Commands automatically handled by framework
+ *   - Implement on_command<0>() for each command type (output index 0)
  */
-class CommandableSensor : public ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, 
-                                                       ResetCmd, CalibrateCmd, SetModeCmd> {
+class CommandableSensor : public CommandApp::Module2<
+    Output<TemperatureData>,  // Output type (commands associated via DataWithCommands)
+    Period<200>               // 200ms periodic execution
+> {
 public:
     explicit CommandableSensor(const ModuleConfig& config) 
-        : ExtendedApp::Module<Output<TemperatureData>, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>(config) {}
+        : CommandApp::Module2<Output<TemperatureData>, Period<200>>(config) {}
     
 protected:
+    // Periodic data generation
     void process(TemperatureData& output) override {
         float raw_temp = 20.0f + std::sin(counter_++ * 0.1f) * 5.0f;
         float calibrated_temp = raw_temp + calibration_offset_;
@@ -64,36 +96,48 @@ protected:
                   << " Temp=" << calibrated_temp << "°C"
                   << " (offset=" << calibration_offset_ << ")\n";
         
-        output = {
-            .temperature_celsius = calibrated_temp
-        };
+        output.sensor_id = 1;
+        output.temperature_c = calibrated_temp;
+        output.confidence = 1.0f;
     }
     
     // Command handlers - framework calls the right one automatically!
+    // OutputIndex template parameter allows multi-output modules with different commands per output
     
-    void on_command(const ResetCmd& cmd) {
-        std::cout << "[Sensor] Reset command received (hard=" 
-                  << cmd.hard_reset << ")\n";
+    template<size_t OutputIndex>
+    void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+        std::cout << "[Sensor] Reset command (hard=" << cmd.hard_reset << ")\n";
+        
+        reply.previous_mode = mode_;
         
         if (cmd.hard_reset) {
             calibration_offset_ = 0.0f;
             mode_ = 0;
             counter_ = 0;
+            reply.success = true;
+        } else {
+            // Soft reset - just reset counter
+            counter_ = 0;
+            reply.success = true;
         }
     }
     
-    void on_command(const CalibrateCmd& cmd) {
-        std::cout << "[Sensor] Calibrate command received (offset=" 
-                  << cmd.offset << ")\n";
+    template<size_t OutputIndex>
+    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+        std::cout << "[Sensor] Calibrate (offset=" << cmd.offset << ")\n";
         
+        reply.previous_offset = calibration_offset_;
         calibration_offset_ = cmd.offset;
+        reply.success = true;
     }
     
-    void on_command(const SetModeCmd& cmd) {
-        std::cout << "[Sensor] SetMode command received (mode=" 
-                  << cmd.mode << ")\n";
+    template<size_t OutputIndex>
+    void on_command(const SetModeCmd& cmd, typename SetModeCmd::Reply& reply) {
+        std::cout << "[Sensor] SetMode (mode=" << cmd.mode << ")\n";
         
+        reply.previous_mode = mode_;
         mode_ = cmd.mode;
+        reply.success = true;
     }
 
 private:
@@ -103,88 +147,63 @@ private:
 };
 
 // ============================================================================
+// Global Shutdown Signal
+// ============================================================================
+std::atomic<bool> shutdown_requested{false};
+
+void signal_handler(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        shutdown_requested.store(true);
+    }
+}
+
+// ============================================================================
 // Main - Send Commands to Module
 // ============================================================================
 
 int main() {
-    std::cout << "=== Variadic Command Handling Example ===\n\n";
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    std::cout << "=== Simple Command Handling Example ===\n\n";
     
     // Create sensor module with command handling
     ModuleConfig sensor_config{
         .name = "CommandableSensor",
-        .outputs = commrat::SimpleOutputConfig{.system_id = 0, .instance_id = 0},
+        .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = std::chrono::milliseconds(200),
-        .message_slots = 10,
-        .max_subscribers = 8,
-        .priority = 10,
-        .realtime = false
+        .period = std::chrono::milliseconds(200)
     };
     
     CommandableSensor sensor(sensor_config);
     sensor.start();
     
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::cout << "Sensor running. Press Ctrl+C to stop.\n\n";
     
-    // Create control mailbox to send commands
-    commrat::MailboxConfig control_config{
-        .mailbox_id = 200,
-        .message_slots = 10,
-        .max_message_size = 4096,
-        .send_priority = 10,
-        .realtime = false
-    };
+    // TODO: Add command sender module that sends commands to sensor
+    // For now, just run the sensor andshow periodic output
     
-    // Use RegistryMailbox to send any message type
-    using AppRegistry = commrat::MessageRegistry<
-        commrat::MessageDefinition<TemperatureData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data, 65535>,
-        commrat::MessageDefinition<ResetCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>,
-        commrat::MessageDefinition<CalibrateCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>,
-        commrat::MessageDefinition<SetModeCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands, 65535>
-    >;
-    commrat::RegistryMailbox<AppRegistry> control(control_config);
-    control.start();
-    
-    std::cout << "\n=== Sending Commands ===\n\n";
-    
-    // Send SetMode command
-    // Send SetMode command (to CMD mailbox = base + 0)
-    uint32_t sensor_cmd_mailbox = 131072;  // system_id=0, instance_id=0, CMD=0
-    std::cout << ">>> Sending SetMode(mode=1)\n";
-    SetModeCmd set_mode{.mode = 1};
-    control.send(set_mode, sensor_cmd_mailbox);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    
-    // Send Calibrate command
-    std::cout << "\n>>> Sending Calibrate(offset=2.5)\n";
-    CalibrateCmd calibrate{.offset = 2.5f};
-    control.send(calibrate, sensor_cmd_mailbox);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    
-    // Send SetMode again
-    std::cout << "\n>>> Sending SetMode(mode=2)\n";
-    set_mode.mode = 2;
-    control.send(set_mode, sensor_cmd_mailbox);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    
-    // Send Reset command
-    std::cout << "\n>>> Sending Reset(hard=true)\n";
-    ResetCmd reset{.hard_reset = true};
-    control.send(reset, sensor_cmd_mailbox);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Wait for shutdown signal
+    while (!shutdown_requested.load()) {
+        Time::sleep(Milliseconds(100));
+    }
     
     // Cleanup
     std::cout << "\n=== Stopping ===\n";
-    control.stop();
     sensor.stop();
     
     std::cout << "\n=== Summary ===\n";
-    std::cout << "✓ Module declared with variadic CommandTypes:\n";
-    std::cout << "  Module<TempData, PeriodicInput, ResetCmd, CalibrateCmd, SetModeCmd>\n\n";
-    std::cout << "✓ Framework automatically dispatches to correct on_command() handler\n";
-    std::cout << "✓ Type-safe command handling at compile-time\n";
-    std::cout << "✓ Commands sent as payload types (ResetCmd, CalibrateCmd, etc.)\n";
-    std::cout << "✓ No manual command ID checking or casting!\n";
+    std::cout << "Simple Module2 approach:\n";
+    std::cout << "  Module2<Output<TempData>, Period<200>>\n\n";
+    std::cout << "Commands associated with data:\n";
+    std::cout << "  DataWithCommands<TempData, ResetCmd, CalibrateCmd, SetModeCmd>\n\n";
+    std::cout << "Command handlers:\n";
+    std::cout << "  template<size_t OutIdx> void on_command(const CmdType&, Reply&)\n\n";
+    std::cout << "Benefits:\n";
+    std::cout << "  - No variadic template pollution in module declaration\n";
+    std::cout << "  - Commands grouped with their data type\n";
+    std::cout << "  - Automatic request/reply handling\n";
+    std::cout << "  - Type-safe at compile-time\n";
     
     return 0;
 }

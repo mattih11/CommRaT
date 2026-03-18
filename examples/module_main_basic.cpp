@@ -45,12 +45,12 @@ using MyApp = commrat::CommRaT<
  * - Single output (SensorData)
  * - Simple data generation
  */
-class BasicSensorModule : public MyApp::Module<
+class BasicSensorModule : public MyApp::Module2<
     commrat::Output<SensorData>,
-    commrat::PeriodicInput
+    commrat::Period<100>  // Default period of 100ms (can be overridden via CLI)
 > {
 public:
-    using MyApp::Module<commrat::Output<SensorData>, commrat::PeriodicInput>::Module;
+    using MyApp::Module2<commrat::Output<SensorData>, commrat::Period<100>>::Module2;  // Inherit constructor
 
 protected:
     void process(SensorData& output) override {
@@ -71,4 +71,4 @@ protected:
 };
 
 // Deploy as standalone binary!
-COMMRAT_MODULE_MAIN(BasicSensorModule, MyApp)
+COMMRAT_MODULE_MAIN(BasicSensorModule)
