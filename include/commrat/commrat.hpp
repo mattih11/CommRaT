@@ -13,18 +13,23 @@
  * Users include this + their messages header, that's it!
  */
 
+#include <cstdint>
+
+// Type aliases
+using SystemId = uint32_t;
+using InstanceId = uint32_t;
+
 // Core framework components
 #include "commrat/messages.hpp"
 #include "commrat/messaging/message_id.hpp"
 #include "commrat/messaging/message_registry.hpp"
 #include "commrat/messaging/message_helpers.hpp"
-#include "commrat/module/io_spec.hpp"
+#include "commrat/module/io/io_spec.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/platform/tims_wrapper.hpp"
 #include "commrat/mailbox/mailbox.hpp"
-#include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
-#include "commrat/registry_module.hpp"
+#include "commrat/module2.hpp"
 #include "commrat/introspection/introspection_helper.hpp"
 
 /**
@@ -108,11 +113,66 @@ namespace commrat {
  * @see Output, Input, PeriodicInput for I/O specifications
  */
 template<typename... MessageDefs>
-class CommRaT : public MessageRegistry<MessageDefs...> {
-private:
-    using Registry = MessageRegistry<MessageDefs...>;
+class CommRaT : public MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest> {
+public:  // Make Registry public so TypedMailbox can access it
+    using Registry = MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest>;
+    
+    // Verify system messages are registered
+    static_assert(Registry::template is_registered<SubscribeRequestPayload>, 
+                  "SubscribeRequestPayload must be in registry");
+    static_assert(Registry::template is_registered<SubscribeReplyPayload>, 
+                  "SubscribeReplyPayload must be in registry");
+    static_assert(Registry::template is_registered<UnsubscribeRequestPayload>, 
+                  "UnsubscribeRequestPayload must be in registry");
+    static_assert(Registry::template is_registered<UnsubscribeReplyPayload>, 
+                  "UnsubscribeReplyPayload must be in registry");
 
 public:
+    // User-defined messages only (for introspection of user types)
+    using UserRegistry = MessageRegistry<MessageDefs...>;
+    
+    // System registry access (all system messages in main registry now)
+    struct System {
+        // System message payload types
+        using PayloadTypes = std::tuple<
+            SubscribeRequestPayload,
+            SubscribeReplyPayload,
+            UnsubscribeRequestPayload,
+            UnsubscribeReplyPayload
+        >;
+        
+        // Helper to get message ID from main registry
+        template<typename T>
+        static constexpr uint32_t get_message_id() {
+            return Registry::template get_message_id<T>();
+        }
+        
+        // System message definitions tuple (for introspection)
+        using SystemMessageDefs = std::tuple<
+            SubscribeRequest,
+            typename SubscribeRequest::ReplyMessageDef,
+            UnsubscribeRequest,
+            typename UnsubscribeRequest::ReplyMessageDef
+        >;
+        
+        // Extract payload types from message definitions
+        using SystemPayloads = std::tuple<
+            typename SubscribeRequest::Payload,
+            typename SubscribeRequest::ReplyMessageDef::Payload,
+            typename UnsubscribeRequest::Payload,
+            typename UnsubscribeRequest::ReplyMessageDef::Payload
+        >;
+        
+        // WorkMailbox for subscription protocol (WORK mailbox handles Subscribe/Unsubscribe)
+        using WorkMailbox = TypedMailbox<
+            Registry,
+            SubscribeRequestPayload,
+            SubscribeReplyPayload,
+            UnsubscribeRequestPayload,
+            UnsubscribeReplyPayload
+        >;
+    };
+    
     // Inherit all registry functionality
     using Registry::is_registered;
     using Registry::get_message_id;
@@ -156,8 +216,9 @@ public:
      * @see Input, Inputs, PeriodicInput, LoopInput for input specifications
      * @see ModuleConfig for configuration structure
      */
-    template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
-    using Module = commrat::Module<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
+    // TODO reactivate
+    // template<typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
+    // using Module = commrat::Module2<Registry, OutputSpec_, InputSpec_, CommandTypes...>;
     
     /**
      * @brief Mailbox template - create mailboxes for this application
@@ -176,9 +237,9 @@ public:
      * sensor_mailbox.send(data, dest_address);
      * 
      * // Receive
-     * auto result = sensor_mailbox.receive<SensorData>();
-     * if (result) {
-     *     process(result->message);
+     * TimsMessage<SensorData> msg;
+     * if (sensor_mailbox.receive(msg, Milliseconds(100))) {
+     *     process(msg.payload);
      * }
      * @endcode
      * 
@@ -186,10 +247,39 @@ public:
      * @see HistoricalMailbox for timestamp-synchronized receives
      */
     template<typename PayloadT>
-    using Mailbox = RegistryMailbox<Registry>;
+    using Mailbox = commrat::Mailbox<MessageDefs..., SubscribeRequest, UnsubscribeRequest>;
     
     /**
-     * @brief HistoricalMailbox template - mailbox with time-synchronized getData()
+     * @brief Module2 template - create modules for this application using new I/O tuple architecture
+     * 
+     * Module2 uses variadic I/O specifications for cleaner API and better compilation.
+     * 
+     * @tparam IOSpecs... Variadic I/O specifications (Output<T>, Input<T>, Period<D>, SyncedInput<T>)
+     * 
+     * **Usage:**
+     * @code
+     * class MySensor : public MyApp::Module2<Output<SensorData>, Period<Milliseconds(10)>> {
+     * protected:
+     *     void process(SensorData& output) override {
+     *         output.value = read_sensor();
+     *     }
+     * };
+     * 
+     * class MyFilter : public MyApp::Module2<Output<FilteredData>, Input<SensorData>> {
+     * protected:
+     *     void process(const SensorData& input, FilteredData& output) override {
+     *         output.value = filter(input.value);
+     *     }
+     * };
+     * @endcode
+     * 
+     * @note Module2 requires CommRaT (not raw MessageRegistry) for System::WorkMailbox
+     */
+    template<typename... IOSpecs>
+    using Module2 = commrat::Module2<CommRaT, IOSpecs...>;
+    
+    /**
+     * @brief HistoricalMailbox template - mailbox with time-synchronized get_data()
      * 
      * Provides RACK-style timestamp-based message retrieval for multi-rate sensor fusion.
      * Buffers recent messages and returns the closest match to a requested timestamp.
@@ -204,7 +294,7 @@ public:
      * // In fusion module (driven by IMU)
      * void process(const IMUData& imu, FusedData& output) {
      *     // Get GPS data closest to IMU timestamp
-     *     auto gps = gps_history.getData<GPSData>(imu.header.timestamp);
+     *     auto gps = gps_history.get_data<GPSData>(imu.header.timestamp);
      *     if (gps) {
      *         output = fuse(imu, *gps);
      *     }
@@ -213,15 +303,16 @@ public:
      * 
      * **Algorithm:**
      * 1. Maintains circular buffer of recent messages with timestamps
-     * 2. `getData(target_timestamp, tolerance)` finds closest message
+     * 2. `get_data(target_timestamp, tolerance)` finds closest message
      * 3. Returns std::nullopt if no message within tolerance
      * 
      * @note Memory: `sizeof(TimsMessage<T>) * HistorySize` per type
      * @note Thread-safe: Uses internal mutex for concurrent access
      * @see Inputs for automatic multi-input synchronization
      */
-    template<std::size_t HistorySize>
-    using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;
+    //TODO Check about that.
+    //template<std::size_t HistorySize>
+    //using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;
     
     /**
      * @brief Introspection helper - export message schemas to any format
