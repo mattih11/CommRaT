@@ -5,7 +5,7 @@
  * This example demonstrates:
  * 1. Multi-input processing (Inputs<IMUData, GPSData>)
  * 2. Primary input designation (PrimaryInput<IMUData>)
- * 3. Synchronized getData for secondary inputs
+ * 3. Synchronized get_data for secondary inputs
  * 4. Freshness and validity checking
  * 5. Input metadata accessors
  * 
@@ -92,13 +92,13 @@ using FusionApp = commrat::CommRaT<
  * - Generates realistic acceleration and gyro data
  * - Simulates vehicle motion
  */
-class IMUSensor : public FusionApp::Module<
+class IMUSensor : public FusionApp::Module2<
     commrat::Output<IMUData>,
-    commrat::PeriodicInput
+    commrat::Period<10>
 > {
 public:
     IMUSensor(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<IMUData>, commrat::PeriodicInput>(config)
+        : FusionApp::Module2<commrat::Output<IMUData>, commrat::Period<10>>(config)
         , gen_(rd_())
         , accel_noise_(0.0f, 0.05f)  // 0.05 m/s² noise
         , gyro_noise_(0.0f, 0.01f)   // 0.01 rad/s noise
@@ -144,13 +144,13 @@ private:
  * - Generates realistic GPS coordinates
  * - Simulates vehicle trajectory
  */
-class GPSSensor : public FusionApp::Module<
+class GPSSensor : public FusionApp::Module2<
     commrat::Output<GPSData>,
-    commrat::PeriodicInput
+    commrat::Period<100>
 > {
 public:
     GPSSensor(const commrat::ModuleConfig& config, double start_lat, double start_lon)
-        : FusionApp::Module<commrat::Output<GPSData>, commrat::PeriodicInput>(config)
+        : FusionApp::Module2<commrat::Output<GPSData>, commrat::Period<100>>(config)
         , gen_(rd_())
         , pos_noise_(0.0, 0.00001)   // ~1m GPS noise
         , alt_noise_(0.0f, 2.0f)     // 2m altitude noise
@@ -200,52 +200,47 @@ private:
  * - Uses metadata accessors to check GPS freshness
  * - Handles stale GPS data gracefully
  */
-class SensorFusion : public FusionApp::Module<
+class SensorFusion : public FusionApp::Module2<
     commrat::Output<FusedData>,
-    commrat::Inputs<IMUData, GPSData>  // IMU (first) is automatically primary
+    commrat::Input<IMUData>, commrat::SyncedInput<GPSData>  // IMU (first) is automatically primary
 > {
 public:
     SensorFusion(const commrat::ModuleConfig& config)
-        : FusionApp::Module<
+        : FusionApp::Module2<
             commrat::Output<FusedData>,
-            commrat::Inputs<IMUData, GPSData>
+            commrat::Input<IMUData>, commrat::SyncedInput<GPSData>
           >(config)
         , imu_count_(0)
         , gps_stale_warnings_(0)
     {
-        std::cout << "[Fusion] Initialized with sync_tolerance=" 
-                  << config.sync_tolerance().count() << "ms\n";
+        std::cout << "[Fusion] Initialized\n";
     }
 
 protected:
     /**
      * @brief Fuse IMU and GPS data with time synchronization
      * 
-     * Called at IMU rate (100Hz). GPS data is fetched via getData
+     * Called at IMU rate (100Hz). GPS data is fetched via get_data
      * synchronized to IMU timestamp.
      * 
      * @param imu Primary input (received via blocking receive)
-     * @param gps Secondary input (fetched via getData)
+     * @param gps Secondary input (fetched via get_data, wrapped in Synced<>)
      * @return Fused sensor data
      */
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
+    void process(const IMUData& imu, const commrat::Synced<GPSData>& gps, FusedData& output) override {
         imu_count_++;
         
         // ====================================================================
-        // Access Input Metadata (Phase 6.10)
+        // Access Input Metadata
         // ====================================================================
         
-        // Index-based access (always works)
-        auto imu_meta = get_input_metadata<0>();  // IMU = index 0
-        auto gps_meta = get_input_metadata<1>();  // GPS = index 1
+        // Index-based timestamp access
+        uint64_t imu_ts = get_input_timestamp<0>();
+        uint64_t gps_ts = get_input_timestamp<1>();
         
-        // Type-based access (cleaner when types unique)
-        uint64_t imu_ts = get_input_timestamp<IMUData>();
-        uint64_t gps_ts = get_input_timestamp<GPSData>();
-        
-        // Check GPS freshness
-        bool gps_fresh = has_new_data<1>();       // Index-based
-        bool gps_valid = is_input_valid<1>();     // getData succeeded?
+        // Check GPS freshness via Synced<> wrapper
+        bool gps_fresh = gps.is_fresh();    // Exact timestamp match
+        bool gps_valid = gps.is_valid();    // Any data available
         
         // Calculate GPS age
         uint64_t gps_age_ns = imu_ts - gps_ts;
@@ -256,7 +251,7 @@ protected:
         // ====================================================================
         
         if (!gps_fresh && gps_stale_warnings_ < 5) {
-            std::cout << "[Fusion] ⚠ GPS stale (age: " << gps_age_ms << " ms, "
+            std::cout << "[Fusion] WARNING: GPS stale (age: " << gps_age_ms << " ms, "
                       << "reused from previous iteration)\n";
             gps_stale_warnings_++;
             if (gps_stale_warnings_ == 5) {
@@ -265,21 +260,24 @@ protected:
         }
         
         if (!gps_valid) {
-            std::cerr << "[Fusion] ❌ GPS getData FAILED!\n";
+            std::cerr << "[Fusion] ERROR: GPS get_data FAILED!\n";
         }
         
         // ====================================================================
         // Sensor Fusion Algorithm (Simplified)
         // ====================================================================
         
+        // Access GPS data via Synced wrapper (use stale_or for fallback)
+        GPSData gps_data = gps.stale_or(GPSData{37.7749, -122.4194, 100.0f, 0.0f});
+        
         // Use GPS position directly
-        double fused_lat = gps.latitude;
-        double fused_lon = gps.longitude;
-        float fused_alt = gps.altitude;
+        double fused_lat = gps_data.latitude;
+        double fused_lon = gps_data.longitude;
+        float fused_alt = gps_data.altitude;
         
         // Estimate velocity from GPS speed and IMU acceleration
-        float vel_x = gps.speed * std::cos(0.1f);  // Simplified
-        float vel_y = gps.speed * std::sin(0.1f);
+        float vel_x = gps_data.speed * std::cos(0.1f);  // Simplified
+        float vel_y = gps_data.speed * std::sin(0.1f);
         float vel_z = 0.0f;
         
         // Use IMU acceleration directly
@@ -294,8 +292,8 @@ protected:
         if (imu_count_ % 100 == 0) {  // Every second (100 samples @ 100Hz)
             std::cout << "[Fusion] #" << imu_count_ 
                       << " | IMU: [" << imu.accel_x << ", " << imu.accel_y << ", " << imu.accel_z << "] m/s²"
-                      << " | GPS: (" << gps.latitude << ", " << gps.longitude << ") "
-                      << (gps_fresh ? "✓fresh" : "⚠stale")
+                      << " | GPS: (" << gps_data.latitude << ", " << gps_data.longitude << ") "
+                      << (gps_fresh ? "fresh" : "stale")
                       << " age=" << gps_age_ms << "ms\n";
         }
         
@@ -330,13 +328,13 @@ private:
 /**
  * @brief Monitor that displays fused data
  */
-class FusionMonitor : public FusionApp::Module<
+class FusionMonitor : public FusionApp::Module2<
     commrat::Output<FusedData>,  // Pass-through
     commrat::Input<FusedData>
 > {
 public:
     FusionMonitor(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<FusedData>, commrat::Input<FusedData>>(config)
+        : FusionApp::Module2<commrat::Output<FusedData>, commrat::Input<FusedData>>(config)
         , count_(0)
     {
         std::cout << "[Monitor] Initialized\n";
@@ -352,7 +350,7 @@ protected:
                       << " | Pos: (" << input.latitude << ", " << input.longitude 
                       << "), alt=" << input.altitude << "m"
                       << " | Vel: [" << input.velocity_x << ", " << input.velocity_y << "] m/s"
-                      << " | GPS: " << (input.gps_fresh ? "✓" : "⚠") << "\n";
+                      << " | GPS: " << (input.gps_fresh ? "fresh" : "stale") << "\n";
         }
         
         output = input;
@@ -404,9 +402,7 @@ int main() {
             .sources = {
                 {.system_id = 10, .instance_id = 1},  // IMU (primary, first in list)
                 {.system_id = 11, .instance_id = 1}   // GPS (secondary)
-            },
-            .history_buffer_size = 100,
-            .sync_tolerance = commrat::Milliseconds(100)  // 100ms tolerance for getData
+            }
         }
     };
     
@@ -452,7 +448,7 @@ int main() {
     // Run Until Signal
     // ========================================================================
     
-    std::cout << "\n🚗 Running sensor fusion... (Press Ctrl+C to stop)\n\n";
+    std::cout << "\nRunning sensor fusion... (Press Ctrl+C to stop)\n\n";
     
     while (!shutdown_requested.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -462,7 +458,7 @@ int main() {
     // Clean Shutdown
     // ========================================================================
     
-    std::cout << "\n🛑 Shutting down...\n";
+    std::cout << "\n[STOP] Shutting down...\n";
     
     // Stop in reverse order
     monitor.stop();
@@ -470,7 +466,7 @@ int main() {
     gps.stop();
     imu.stop();
     
-    std::cout << "✅ Done!\n";
+    std::cout << "[OK] Done!\n";
     
     return 0;
 }

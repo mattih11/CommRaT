@@ -503,8 +503,8 @@ void continuous_publish(const ReceivedMessage<InputType>& received) {
 void multi_input_publish(const ReceivedMessage<PrimaryType>& primary) {
     TimsHeader header = primary.header;  // Primary timestamp
     
-    // Secondary inputs synchronized via getData(primary.header.timestamp)
-    auto secondary = historical_mailbox_.getData<SecondaryType>(
+    // Secondary inputs synchronized via get_data(primary.header.timestamp)
+    auto secondary = historical_mailbox_.get_data<SecondaryType>(
         primary.header.timestamp,
         config_.sync_tolerance_ns
     );
@@ -514,7 +514,7 @@ void multi_input_publish(const ReceivedMessage<PrimaryType>& primary) {
 }
 ```
 
-### Phase 6: Multi-Input Synchronization (RACK-style getData)
+### Phase 6: Multi-Input Synchronization (RACK-style get_data)
 
 **Problem:** Fusing sensors with different rates (e.g., 100Hz IMU + 10Hz GPS).
 
@@ -524,13 +524,13 @@ void multi_input_publish(const ReceivedMessage<PrimaryType>& primary) {
 class HistoricalMailbox<T> {
     sertial::RingBuffer<TimsMessage<T>, CAPACITY> history_;
     
-    std::optional<T> getData(uint64_t target_timestamp, uint64_t tolerance);
+    std::optional<T> get_data(uint64_t target_timestamp, uint64_t tolerance);
 };
 ```
 
 **Algorithm:**
 1. Primary input blocks on receive() (drives execution)
-2. Secondary inputs use `getData(primary_timestamp, tolerance)`
+2. Secondary inputs use `get_data(primary_timestamp, tolerance)`
 3. Returns closest message within tolerance window
 4. If no match, returns `std::nullopt`
 
@@ -541,7 +541,7 @@ struct InputMetadata<T> {
     uint32_t sequence_number;
     uint32_t message_id;
     bool is_new_data;          // True if fresh, false if reused
-    bool is_valid;             // True if getData succeeded
+    bool is_valid;             // True if get_data succeeded
 };
 ```
 
@@ -788,7 +788,7 @@ auto send(const T& msg) { /* ... */ }
 
 See [ROADMAP.md](../ROADMAP.md) for detailed discussion of:
 
-- Input synchronization policy (getData failure modes)
+- Input synchronization policy (get_data failure modes)
 - Output publishing order (sequential vs. parallel)
 - Command reply mechanism (one-way vs. request-response)
 - Error recovery strategies (restart, degrade, failover)

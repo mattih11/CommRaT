@@ -65,7 +65,7 @@ template<typename UserRegistry,
 class Module;
 ```
 
-**Multi-Input with Synchronized getData**
+**Multi-Input with Synchronized get_data**
 ```cpp
 // 3-input sensor fusion with time synchronization
 class FusionModule : public MyApp::Module<
@@ -76,8 +76,8 @@ class FusionModule : public MyApp::Module<
 protected:
     void process(
         const IMUData& imu,      // PRIMARY - blocking receive
-        const GPSData& gps,      // SECONDARY - getData(imu.timestamp)
-        const LidarData& lidar,  // SECONDARY - getData(imu.timestamp)
+        const GPSData& gps,      // SECONDARY - get_data(imu.timestamp)
+        const LidarData& lidar,  // SECONDARY - get_data(imu.timestamp)
         FusedData& output        // OUTPUT - result written here
     ) override {
         output = fuse_sensors(imu, gps, lidar);
@@ -103,7 +103,7 @@ void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, Fus
     
     // Check data validity
     if (!is_input_valid<2>()) {
-        std::cerr << "Lidar getData failed\n";
+        std::cerr << "Lidar get_data failed\n";
     }
     
     output = fuse_sensors(imu, gps, lidar);
@@ -112,7 +112,7 @@ void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, Fus
 
 **Additional Capabilities:**
 - I/O specification types: `Output<T>`, `Outputs<Ts...>`, `Input<T>`, `Inputs<Ts...>`
-- Multi-input synchronization via `HistoricalMailbox` with `getData(timestamp, tolerance)`
+- Multi-input synchronization via `HistoricalMailbox` with `get_data(timestamp, tolerance)`
 - Primary input designation: `PrimaryInput<T>` for explicit control
 - Automatic timestamp propagation through message chains
 - Input metadata: timestamp, sequence number, freshness, validity
@@ -124,7 +124,7 @@ void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, Fus
 - `PeriodicInput` - Timer-based execution
 - `LoopInput` - Maximum throughput (100% CPU)
 - `Input<T>` - Processes input stream
-- `Inputs<Ts...>` - Multi-input with synchronized getData
+- `Inputs<Ts...>` - Multi-input with synchronized get_data
 
 **Features:**
 - Automatic subscription management
@@ -149,7 +149,7 @@ examples/
 test/
 ├── test_timestamp_logic.cpp      # Metadata accessors
 ├── test_3input_fusion.cpp        # Multi-input synchronization
-├── test_historical_mailbox.cpp   # HistoricalMailbox getData
+├── test_historical_mailbox.cpp   # HistoricalMailbox get_data
 └── test_process_signature.cpp    # Type constraints
 ```
 
@@ -183,13 +183,13 @@ test/
 ### Multi-Input Implementation (Complete)
 - `HistoricalMailbox` with timestamped history
 - Multi-input mailbox creation and management
-- `multi_input_loop()` with getData synchronization
+- `multi_input_loop()` with get_data synchronization
 - Compilation tests with type safety validation
 
 ### End-to-End Multi-Input (Complete)
 - 3-input sensor fusion test (IMU + GPS + LiDAR)
 - Primary/secondary input coordination
-- getData with tolerance-based synchronization
+- get_data with tolerance-based synchronization
 - Secondary input receive threads
 - **Status**: Fully functional - Example 03 demonstrates successful fusion with sync ages <100ms
 
@@ -210,6 +210,17 @@ test/
 - Outputs: message IDs, type names, field layouts, JSON schemas
 - Simple plain structs with default initializers (no complex wrappers)
 
+### Zero-Copy Architecture (Complete - Phase 6.12)
+- **Workspace pattern** for outputs: `get_workspace()` → fill payload → `publish_workspace()`
+- **Direct receive** for inputs: `mailbox.receive(message, timeout)` - deserialize into provided storage
+- **Reference access** throughout: All accessors return `const T&` or `const TimsHeader&`
+- **Eliminated overhead**: No cached timestamps, no separate metadata storage, no intermediate buffers
+- **Performance**: Only ONE unavoidable move (deserialization), everything else is references
+- **Memory savings**: ~(sizeof(T) + 40) bytes per input
+- **API update**: New zero-copy methods added to `Mailbox` and `TypedMailbox`
+- **Real-time safe**: All buffers pre-allocated, deterministic execution, bounded memory
+- See [ZERO_COPY_ARCHITECTURE.md](work/ZERO_COPY_ARCHITECTURE.md) for complete details
+
 ### Module Cleanup (Complete)
 - Extracted helper modules for better organization
 - registry_module.hpp reduced to 1,003 lines (49% reduction from original 1,952)
@@ -222,7 +233,7 @@ test/
 ### Planned Features
 
 **Optional Secondary Inputs**
-- Graceful getData failure handling
+- Graceful get_data failure handling
 - Fallback strategies for missing/stale data
 - `Optional<T>` wrapper for secondary inputs
 

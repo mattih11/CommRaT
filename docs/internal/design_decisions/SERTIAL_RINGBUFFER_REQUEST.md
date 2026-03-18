@@ -8,7 +8,7 @@
 
 ## Overview
 
-CommRaT needs a **realtime-safe ring buffer** for storing recent messages in producer modules. This enables time-synchronized multi-input processing similar to RACK's getData mechanism.
+CommRaT needs a **realtime-safe ring buffer** for storing recent messages in producer modules. This enables time-synchronized multi-input processing similar to RACK's get_data mechanism.
 
 **Key Requirements:**
 - **Zero runtime allocation** - fully compile-time sized

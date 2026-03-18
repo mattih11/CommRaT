@@ -71,9 +71,9 @@ using HelloApp = commrat::CommRaT<
  * 
  * Override process() to generate data.
  */
-class CounterModule : public HelloApp::Module<
+class CounterModule : public HelloApp::Module2<
     commrat::Output<CounterMessage>,  // What this module produces
-    commrat::PeriodicInput            // How it generates data (timer-driven)
+    commrat::Period<100>            // How it generates data (timer-driven)
 > {
 public:
     /**
@@ -81,7 +81,7 @@ public:
      * @param config Module configuration (system_id, period, etc.)
      */
     explicit CounterModule(const commrat::ModuleConfig& config)
-        : Module(config)
+        : Module2(config)
         , counter_(0)
     {
         std::cout << "[Counter] Starting counter at " << counter_ << "\n";
@@ -135,7 +135,7 @@ private:
  * 
  * Override process() to handle incoming messages.
  */
-class DisplayModule : public HelloApp::Module<
+class DisplayModule : public HelloApp::Module2<
     commrat::Output<CounterMessage>,     // Pass-through output
     commrat::Input<CounterMessage>       // What this module receives
 > {
@@ -145,7 +145,7 @@ public:
      * @param config Module configuration (system_id, source_system_id, etc.)
      */
     explicit DisplayModule(const commrat::ModuleConfig& config)
-        : Module(config)
+        : Module2(config)
         , message_count_(0)
     {
         std::cout << "[Display] Ready to receive counter values\n";

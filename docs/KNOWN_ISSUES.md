@@ -52,7 +52,7 @@ Commands are currently one-way (fire-and-forget). No built-in support for reques
 
 ## Resolved Issues
 
-### 1. Multi-Input getData Synchronization (RESOLVED - High Priority)
+### 1. Multi-Input get_data Synchronization (RESOLVED - High Priority)
 
 **Status**: Resolved (commit 519469b)  
 **Affected**: Example 03 (Multi-Input Fusion), test_multi_input_module  
@@ -69,7 +69,7 @@ Commands are currently one-way (fire-and-forget). No built-in support for reques
 - GPS at 10Hz: 100ms spacing = 100,000,000 ns between messages
 - IMU at 100Hz: 10ms spacing = 10,000,000 ns between messages
 - Even perfect timing has >10ms difference, but tolerance was 0.0001ms
-- **Result**: All getData queries failed with "no matching message within tolerance"
+- **Result**: All get_data queries failed with "no matching message within tolerance"
 
 **Solution** (commit 519469b):
 ```cpp
@@ -164,7 +164,7 @@ Current variadic command handling with overloaded `on_command()` functions works
 **Priority**: High
 
 No comprehensive integration tests for multi-input synchronization:
-- Test getData with various tolerance values
+- Test get_data with various tolerance values
 - Test rate mismatch scenarios (fast primary + slow secondary)
 - Test missing secondary input handling
 - Test stale data detection

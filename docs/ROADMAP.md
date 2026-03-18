@@ -25,7 +25,7 @@ This document tracks planned features, improvements, and long-term ideas for Com
 
 **Optional Secondary Inputs**
 - Make synchronized inputs return `std::optional<const T&>`
-- Allows graceful handling when getData fails (tolerance exceeded)
+- Allows graceful handling when get_data fails (tolerance exceeded)
 - Avoids using stale data without freshness checks
 - Status: Planned
 - Priority: High
@@ -215,7 +215,7 @@ The following design decisions remain open from multi-I/O architecture planning 
 - Priority: Low (current architecture works)
 - Risk: High (major refactoring)
 
-**Async getData**
+**Async get_data**
 - Non-blocking future-based historical data retrieval
 - Use case: Complex fusion with optional inputs
 - Status: Concept phase
@@ -224,7 +224,7 @@ The following design decisions remain open from multi-I/O architecture planning 
 ### Quality of Life
 
 **Adaptive Sync Tolerance**
-- Dynamically adjust getData tolerance based on message arrival rate
+- Dynamically adjust get_data tolerance based on message arrival rate
 - Automatically tune for optimal synchronization
 - Status: Concept phase
 - Priority: Low
@@ -256,7 +256,7 @@ For historical context on completed work, see `docs/internal/phase_history/` and
 
 **Multi-Input Synchronization** (Complete)
 - Primary/secondary input pattern
-- HistoricalMailbox with getData mechanism
+- HistoricalMailbox with get_data mechanism
 - Timestamp-based synchronization with tolerance
 - 100% success rate in sensor fusion testing
 

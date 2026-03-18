@@ -64,7 +64,7 @@ docs/
 │   │   ├── PHASE_6_MULTI_INPUT.md
 │   │   └── ARCHITECTURE_EVOLUTION.md
 │   ├── design_decisions/              # Why we made specific choices
-│   │   ├── RACK_STYLE_GETDATA.md
+│   │   ├── RACK_STYLE_get_data.md
 │   │   ├── THREE_MAILBOX_DESIGN.md
 │   │   ├── TIMESTAMP_MANAGEMENT.md
 │   │   └── SERTIAL_INTEGRATION.md
@@ -84,7 +84,7 @@ Comprehensive guide covering:
 - **Core Concepts**: Messages, Modules, Mailboxes, Registries
 - **Module Types**: Periodic, Loop, Continuous, Multi-input
 - **Message Flow**: Publishing, subscribing, synchronization
-- **Multi-Input**: getData synchronization, timestamp alignment
+- **Multi-Input**: get_data synchronization, timestamp alignment
 - **Metadata Access**: Input timestamps, freshness flags
 - **Configuration**: ModuleConfig options, addressing
 - **Best Practices**: Real-time constraints, threading model
@@ -136,7 +136,7 @@ Each example should have:
 ### 3. Internal Documentation (Priority 2)
 
 Move design documents to `docs/internal/`:
-- `RACK_ANALYSIS.md` → `design_decisions/RACK_STYLE_GETDATA.md`
+- `RACK_ANALYSIS.md` → `design_decisions/RACK_STYLE_get_data.md`
 - `IO_SYNC_STRATEGY.md` → `design_decisions/MULTI_INPUT_SYNCHRONIZATION.md`
 - `ARCHITECTURE_REFACTOR_PLAN.md` → `refactoring/REGISTRY_MODULE_EXTRACTION.md`
 - `FIXES_APPLIED.md` → `phase_history/BUG_FIXES_LOG.md`

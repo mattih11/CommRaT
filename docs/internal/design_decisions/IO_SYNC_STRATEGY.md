@@ -40,7 +40,7 @@ Rationale:
 
 ### Future Extension (Phase 6+)
 
-Multi-input will be supported via **synchronized getData pattern**:
+Multi-input will be supported via **synchronized get_data pattern**:
 
 ```cpp
 // Phase 6 syntax (future):
@@ -61,7 +61,7 @@ protected:
 
 ---
 
-## Synchronization Mechanism: getData(timestamp)
+## Synchronization Mechanism: get_data(timestamp)
 
 ### Concept
 
@@ -80,7 +80,7 @@ Producer Side:
 │    [t4]: data_4  ← Newest              │
 │                                         │
 │  Subscribers receive t4 via push       │
-│  getData(t2) returns interpolated      │
+│  get_data(t2) returns interpolated      │
 └─────────────────────────────────────────┘
 ```
 
@@ -106,7 +106,7 @@ class HistoricalMailbox {
     MailboxResult<TimsMessage<T>> receive();
     
     // Non-blocking fetch at timestamp (consumer side - secondary inputs)
-    std::optional<TimsMessage<T>> getData(uint64_t timestamp, 
+    std::optional<TimsMessage<T>> get_data(uint64_t timestamp, 
                                           InterpolationMode mode = NEAREST);
 };
 
@@ -151,8 +151,8 @@ Module with Inputs<IMUData, GPSData, LidarData> + PrimaryInput<IMUData>:
 │    auto imu = input_mailbox<0>().receive();  ← IMU (PRIMARY)
 │                                                            │
 │    // 2. Fetch SECONDARY inputs at same timestamp         │
-│    auto gps = input_mailbox<1>().getData(imu.timestamp);  │
-│    auto lidar = input_mailbox<2>().getData(imu.timestamp);│
+│    auto gps = input_mailbox<1>().get_data(imu.timestamp);  │
+│    auto lidar = input_mailbox<2>().get_data(imu.timestamp);│
 │                                                            │
 │    // 3. Process synchronized inputs                      │
 │    if (gps && lidar) {  // Check all secondaries present  │
@@ -229,7 +229,7 @@ public:
     
     // New: non-blocking timestamped fetch for secondary inputs
     template<typename T>
-    std::optional<TimsMessage<T>> getData(
+    std::optional<TimsMessage<T>> get_data(
         uint64_t timestamp,
         std::chrono::milliseconds tolerance = std::chrono::milliseconds(50),
         InterpolationMode mode = InterpolationMode::NEAREST
@@ -475,7 +475,7 @@ int main() {
 
 ### 5. **RACK Similarity**
 - Familiar pattern for RACK users
-- Same `getData(timestamp)` semantics
+- Same `get_data(timestamp)` semantics
 - Easy migration from RACK to CommRaT
 
 ---
@@ -511,7 +511,7 @@ Total: ~150 KB per multi-input module (acceptable)
 **Example**:
 ```cpp
 // IMU arrives at t=1.2345s
-auto gps = gps_mailbox.getData(1.2345s, tolerance=50ms);
+auto gps = gps_mailbox.get_data(1.2345s, tolerance=50ms);
 // Returns GPS at t=1.230s (15ms old, within tolerance)
 
 if (!gps) {
@@ -552,7 +552,7 @@ if (!gps) {
 
 - [ ] Phase 6.1: PrimaryInput<T> tag type
 - [ ] Phase 6.2: HistoricalMailbox with ring buffer
-- [ ] Phase 6.3: getData(timestamp) implementation
+- [ ] Phase 6.3: get_data(timestamp) implementation
 - [ ] Phase 6.4: MultiInputModule base class
 - [ ] Phase 6.5: Compile-time primary validation
 - [ ] Phase 6.6: Multi-input fusion example
@@ -634,7 +634,7 @@ The **primary-input-driven synchronization** strategy provides:
 
 ## References
 
-- **RACK getData()**: Similar historical data fetch mechanism
+- **RACK get_data()**: Similar historical data fetch mechanism
 - **ARCHITECTURE_ANALYSIS.md**: Overall Phase 5-7 roadmap
 - **io_spec.hpp**: I/O specification types (Phase 5.1)
 - **registry_module.hpp**: Module base class implementation

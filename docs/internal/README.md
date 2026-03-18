@@ -20,7 +20,7 @@ This knowledge helps future contributors understand the codebase and make inform
 
 Explains why specific technical choices were made:
 
-- **RACK_ANALYSIS.md**: RACK-style getData mechanism for multi-input synchronization
+- **RACK_ANALYSIS.md**: RACK-style get_data mechanism for multi-input synchronization
 - **IO_SYNC_STRATEGY.md**: Multi-input timestamp alignment and synchronization strategy
 - **SERTIAL_RINGBUFFER_REQUEST.md**: Requirements for timestamped ring buffer implementation
 
@@ -55,7 +55,7 @@ CommRaT has evolved through several major phases:
 - Helper base class pattern for conditional virtuals
 
 ### Phase 6: Multi-Input Synchronization (Complete - Phase 6.10)
-- **6.1-6.2**: TimestampedRingBuffer with getData lookup
+- **6.1-6.2**: OutputBuffer with get_data lookup
 - **6.3**: HistoricalMailbox wrapper
 - **6.4-6.5**: Module configuration and validation
 - **6.6-6.7**: Subscription protocol for multi-input
@@ -64,7 +64,7 @@ CommRaT has evolved through several major phases:
 - **6.10**: Timestamp metadata accessors (get_input_metadata, freshness tracking)
 
 ### Phase 7: Planned Future Work
-- Optional secondary inputs (getData failure handling)
+- Optional secondary inputs (get_data failure handling)
 - Advanced buffering strategies
 - ROS 2 adapter (separate repository)
 - Performance profiling tools

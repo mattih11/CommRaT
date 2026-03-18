@@ -75,13 +75,13 @@ using WeatherApp = commrat::CommRaT<
  * - process(T& out1, U& out2) fills both outputs by reference
  * - Each subscriber receives only their expected message type
  */
-class WeatherStation : public WeatherApp::Module<
-    commrat::Outputs<TemperatureData, PressureData>,  // Multi-output!
-    commrat::PeriodicInput
+class WeatherStation : public WeatherApp::Module2<
+    commrat::Output<TemperatureData>, commrat::Output<PressureData>,  // Multi-output!
+    commrat::Period<100>                              // How it generates data (timer-driven)
 > {
 public:
     WeatherStation(const commrat::ModuleConfig& config, uint32_t station_id)
-        : WeatherApp::Module<commrat::Outputs<TemperatureData, PressureData>, commrat::PeriodicInput>(config)
+        : WeatherApp::Module2<commrat::Output<TemperatureData>, commrat::Output<PressureData>, commrat::Period<100>>(config)
         , station_id_(station_id)
         , gen_(rd_())
         , temp_dist_(18.0f, 28.0f)     // 18-28°C
@@ -142,13 +142,13 @@ private:
  * - Receives only temperature messages (pressure filtered out)
  * - Pass-through pattern: Output<TemperatureData> returns input
  */
-class TemperatureMonitor : public WeatherApp::Module<
+class TemperatureMonitor : public WeatherApp::Module2<
     commrat::Output<TemperatureData>,  // Pass-through output
     commrat::Input<TemperatureData>
 > {
 public:
     TemperatureMonitor(const commrat::ModuleConfig& config)
-        : WeatherApp::Module<commrat::Output<TemperatureData>, commrat::Input<TemperatureData>>(config)
+        : WeatherApp::Module2<commrat::Output<TemperatureData>, commrat::Input<TemperatureData>>(config)
         , count_(0)
     {
         std::cout << "[TempMonitor] Initialized\n";
@@ -191,13 +191,13 @@ private:
  * - Receives only pressure messages (temperature filtered out)
  * - Pass-through pattern for consistency
  */
-class PressureMonitor : public WeatherApp::Module<
+class PressureMonitor : public WeatherApp::Module2<
     commrat::Output<PressureData>,
     commrat::Input<PressureData>
 > {
 public:
     PressureMonitor(const commrat::ModuleConfig& config)
-        : WeatherApp::Module<commrat::Output<PressureData>, commrat::Input<PressureData>>(config)
+        : WeatherApp::Module2<commrat::Output<PressureData>, commrat::Input<PressureData>>(config)
         , count_(0)
     {
         std::cout << "[PressureMonitor] Initialized\n";
