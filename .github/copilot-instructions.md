@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Phase 6.10 COMPLETE (timestamp metadata accessors)  
-**Next**: Phase 7 (optional inputs, buffering, ROS 2 adapter)
+**Current Status**: Phase 1.5 COMPLETE (Producer-side GetData request handling)  
+**Next**: Subscription protocol integration (Subscribe/Unsubscribe handlers in ModuleOutput)
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, type safety computed at compile time
@@ -16,17 +16,59 @@
 ## Architecture
 
 ### 3-Mailbox System
-Each module has three mailboxes:
+Each module has three mailboxes with distinct roles:
 
 ```cpp
-CMD  mailbox: base_address + 0   // User commands
-WORK mailbox: base_address + 16  // Subscription protocol
-DATA mailbox: base_address + 32  // Input data streams
+CMD  mailbox: base_address + 0   // Per-output: Command/request handling (blocking receive)
+WORK mailbox: base_address + 16  // Per-module: Outbound messages only (no thread)
+DATA mailbox: base_address + 32  // Per-input: Continuous data streams (blocking receive)
 ```
 
-**Threading**: command_loop() + work_loop() + data_thread_, all use blocking receives (0% CPU when idle)
+**CMD Mailbox (Per-Output)**:
+- **Purpose**: Receive and handle requests/commands for specific output
+- **Messages**: SubscribeRequest, UnsubscribeRequest, GetDataRequest, GetNextDataRequest, user commands
+- **Threading**: One dedicated blocking receive thread per output (N threads total)
+- **Replies**: Sent via same CMD mailbox (request/reply pattern)
+- **Address**: Varies per output (different type_id in address calculation)
 
-**Message Flow**: Consumer subscribes → Producer acknowledges → Producer publishes to subscriber's DATA mailbox
+**WORK Mailbox (Per-Module)**:
+- **Purpose**: Send-only mailbox for module-initiated communication
+- **Messages**: Subscribe to producers, control messages, publish output data to subscribers
+- **Threading**: NO dedicated thread - sends from main/data thread
+- **Usage**: Module uses this to communicate with other modules without blocking
+- **Address**: Single mailbox per module instance
+
+**DATA Mailbox (Per-Input)**:
+- **Purpose**: Receive continuous data streams from producers
+- **Messages**: Published output data (TemperatureData, SensorData, etc.)
+- **Threading**: Implicit in ContinuousInput (blocking receive on primary input)
+- **Flow**: Producer publishes via WORK → Consumer receives via DATA
+- **Address**: Varies per input type
+
+**Threading Model (N outputs, M inputs)**:
+- **1 data_thread**: Runs process() based on execution mode (timer, input-driven, loop)
+- **N command_threads**: One per output, blocking receive on CMD mailbox (0% CPU when idle)
+- **M input threads**: Implicit in input handlers (ContinuousInput blocks on DATA mailbox)
+- **Total**: N + 1 explicit threads (+ M implicit in inputs)
+
+**Message Flow Patterns**:
+- **Subscription Protocol**:
+  1. Consumer sends SubscribeRequest to Producer's CMD mailbox (via WORK)
+  2. Producer's command_thread receives and processes request
+  3. Producer replies SubscribeReply via CMD mailbox
+  4. Producer adds consumer to subscriber list
+  5. Producer publishes data via WORK → Consumer's DATA mailbox
+
+- **Data Request (Get Synchronization)**:
+  1. Consumer sends GetDataRequest to Producer's CMD mailbox
+  2. Producer's command_thread searches history for matching timestamp
+  3. Producer replies GetDataReply with matched data via CMD mailbox
+  4. One-shot operation (no subscription created)
+
+- **Module Control**:
+  1. Module sends control messages via WORK mailbox
+  2. Target module receives on CMD mailbox
+  3. Target processes and optionally replies via CMD
 
 ## Code Style & Conventions
 
@@ -87,6 +129,47 @@ struct TemperatureData {
 using TempMsg = Message::Data<TemperatureData>;
 ```
 
+### Message ID System
+
+**Auto-Increment ID Assignment**:
+- `AUTO_ID = 0` - Marker for auto-assigned IDs (0 = -0, perfect for request/reply)
+- IDs auto-assigned starting from 1 within each prefix/subprefix combination
+- `MAX_MESSAGE_ID = 0x7FFF` - Maximum ID for non-reply messages (sign bit reserved)
+
+**Request/Reply Protocol**:
+```cpp
+// Request message with reply
+using MyRequest = MessageDefinition<
+    RequestPayload,
+    MessagePrefix::System,
+    SystemSubPrefix::Subscription,
+    0x0010,                // Request ID
+    ReplyPayload           // Reply type (automatically gets ID = -0x0010 = 0xFFF0)
+>;
+
+// Reply automatically created
+using MyReply = typename MyRequest::ReplyMessageDef;
+
+// Validation
+static_assert(MyRequest::has_reply);
+static_assert(MyRequest::is_request);
+static_assert(!MyReply::is_request);
+static_assert(MyReply::local_id == static_cast<uint16_t>(-0x0010));  // 0xFFF0
+```
+
+**Allowed Reply Categories**:
+- `System::Control` - Control commands with replies
+- `System::Subscription` - Subscription protocol (Subscribe, Unsubscribe, GetData)
+- `UserDefined::Commands` - User command messages with replies
+
+**System Messages** (auto-included in registry):
+```cpp
+SubscribeRequest/Reply         // Continuous data subscription
+UnsubscribeRequest/Reply       // Stop subscription
+GetDataRequest/Reply           // Timestamp-synchronized data fetch (CMD mailbox)
+GetNextDataRequest/Reply       // One-shot data fetch (CMD mailbox)
+```
+
 ### Application Definition & Module Pattern
 
 **CommRaT<>** defines your application - combines message registry with Module/Mailbox:
@@ -99,95 +182,216 @@ using MyApp = CommRaT<
     Message::Command<ResetCmd>
 >;
 
-// 2. CREATE MODULES
-// Producer (periodic publishing)
-class SensorModule : public MyApp::Module<Output<TemperatureData>, PeriodicInput> {
+// 2. CREATE MODULES (Zero-Copy Workspace API)
+// Timer-driven producer
+class SensorModule : public MyApp::Module2<Output<TemperatureData>, Period<Milliseconds(10)>> {
 protected:
-    TemperatureData process() override {
-        // Called every config_.period
-        return TemperatureData{...};
+    void process(TemperatureData& output) override {
+        // Write directly to output workspace (zero-copy)
+        output.sensor_id = id_;
+        output.temperature_c = read_sensor();
     }
 };
 
-// Consumer (continuous input processing)
-class FilterModule : public MyApp::Module<Output<FilteredData>, Input<TemperatureData>> {
+// Input-driven consumer
+class FilterModule : public MyApp::Module2<Output<FilteredData>, Input<TemperatureData>> {
 protected:
-    FilteredData process(const TemperatureData& input) override {
-        // Called for each received message
-        return apply_filter(input);
+    void process(const TemperatureData& input, FilteredData& output) override {
+        // Input is const ref (zero-copy), output is mutable ref (workspace)
+        output.value = apply_filter(input);
     }
 };
 
-// Multi-output (void process with output references)
-class MultiOutputModule : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
+// Multi-output
+class MultiSensor : public MyApp::Module2<Output<DataA>, Output<DataB>, Period<Milliseconds(10)>> {
 protected:
     void process(DataA& out1, DataB& out2) override {
-        out1 = DataA{...};
-        out2 = DataB{...};
+        out1 = read_sensor_a();
+        out2 = read_sensor_b();
     }
 };
 
-// Multi-input (first type is automatically primary)
-class SensorFusion : public MyApp::Module<
+// Multi-input (first is primary, rest use get_data synchronization)
+class SensorFusion : public MyApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData>  // IMU (first) drives execution
+    Input<IMUData>,              // Primary (drives execution)
+    SyncedInput<GPSData>         // Secondary (synchronized)
 > {
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
-        // GPS synchronized to IMU timestamp via getData
-        return fuse_sensors(imu, gps);
+    void process(const IMUData& imu, const std::optional<GPSData>& gps, FusedData& output) override {
+        output = gps ? fuse_sensors(imu, *gps) : dead_reckoning(imu);
     }
 };
 ```
 
 **Key Points:**
-- Use `MyApp::Module<OutputSpec, InputSpec, ...Commands>`
-- Output specs: `Output<T>`, `Outputs<T, U>`
-- Input specs: `Input<T>`, `Inputs<T, U, V>`, `PeriodicInput`, `LoopInput`
-- Multi-input: First type in `Inputs<>` is automatically primary
-- Virtual `process()` **must use `override` keyword**
-- Multi-output: `void process(T1& out1, T2& out2)`
+- Use `MyApp::Module2<IOSpecs...>` with I/O tuple architecture
+- Output specs: `Output<T>` (one or more)
+- Input specs: `Input<T>` (primary, continuous), `SyncedInput<T>` (secondary, pull-based)
+- Execution modes: `Period<Duration>` (timer) or auto-inferred (input-driven or loop)
+- Process signature: `void process(const Input&..., Output&...) override` (zero-copy)
+- Multi-output: Each output is separate `Output<T>` parameter
+- Multi-input: First `Input<T>` is primary, `SyncedInput<T>` types use `Synced<T>`
+
+**I/O Metadata Access**:
+```cpp
+class MySensor : public MyApp::Module2<Output<Data>, Period<...>> {
+    // All metadata in clean IO::Meta struct
+    using IO = typename IOBuilder::Meta;
+    
+    // Access metadata
+    static_assert(IO::num_outputs == 1);
+    static_assert(IO::is_timer_driven);
+    
+    // Type extraction
+    using DataType = typename IO::SingleOutputType;
+    
+    // Primary input (multi-input sync)
+    if constexpr (IO::has_primary_input) {
+        auto primary_ts = get_input<IO::primary_input_index>();
+    }
+};
+```
 
 ### Multi-Input Synchronization
 
-**Multi-input modules** synchronize different-rate sensors:
-
 ```cpp
-class SensorFusion : public MyApp::Module<
+class SensorFusion : public MyApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData>  // IMU first = primary
+    Input<IMUData>,          // Primary (continuous)
+    SyncedInput<GPSData>     // Secondary (pull-based)
 > {
 protected:
-    FusedData process(const IMUData& imu, const GPSData& gps) override {
-        // Access metadata for freshness/validity
-        auto gps_meta = get_input_metadata<1>();  // Index-based
-        bool fresh = has_new_data<1>();
-        bool valid = is_input_valid<1>();
+    void process(const IMUData& imu, Synced<GPSData> gps, FusedData& output) override {
+        // Synced<T> forces explicit fresh/stale/invalid handling
         
-        // GPS automatically synchronized to IMU timestamp via getData
-        return fuse_sensors(imu, gps);
+        // Strict check - fresh data only
+        if (gps) {
+            output = fuse_sensors(imu, gps.value());
+        } else {
+            output = dead_reckoning(imu);  // GPS not fresh
+        }
+        
+        // Alternative: Use stale data if available
+        if (gps.is_valid()) {
+            output = fuse_sensors(imu, gps.stale());  // Fresh or stale
+        }
+        
+        // Or use value_or/stale_or helpers
+        GPSData data = gps.value_or(default_gps);  // Fresh or default
+        GPSData data = gps.stale_or(default_gps);  // Valid or default
+        
+        // Access metadata
+        bool gps_fresh = gps.is_fresh();
+        bool gps_stale = gps.has_stale();
+        bool gps_valid = gps.is_valid();
     }
-};
-
-// Configuration
-ModuleConfig fusion_config{
-    .name = "SensorFusion",
-    .system_id = 20,
-    .instance_id = 1,
-    .period = Milliseconds(10),  // Primary input rate (100Hz)
-    .input_sources = {
-        {10, 1},  // IMU (primary)
-        {11, 1}   // GPS (secondary)
-    },
-    .sync_tolerance = 50'000'000  // 50ms tolerance for getData
 };
 ```
 
 **How it works:**
-1. Primary input blocks on receive() - drives execution
-2. Secondary inputs use getData(primary_timestamp, tolerance)
-3. HistoricalMailbox buffers recent messages
-4. Metadata tracks freshness and validity
+1. Primary `Input<T>` blocks on receive() - drives execution
+2. Secondary `SyncedInput<T>` uses get_data(primary_timestamp) automatically
+3. Process receives `Synced<T>` for synced inputs (zero-copy wrapper)
+4. `Synced<T>` API forces explicit fresh/stale/invalid handling:
+   - `operator bool()` - strict (fresh only)
+   - `value()` - fresh data (asserts if stale/invalid)
+   - `stale()` - any valid data (asserts if invalid)
+   - `value_or()` / `stale_or()` - safe defaults
+
+### Synced<T> Wrapper (Zero-Copy Data Access)
+
+**Purpose**: Provide zero-copy access to synchronized secondary input data with explicit freshness/staleness/validity handling.
+
+**Design**:
+```cpp
+template<typename T>
+class Synced {
+    const T* data_;        // Zero-copy pointer (not owned)
+    bool is_valid_;        // True if data pointer is valid
+    bool is_fresh_;        // True if data is fresh (exact timestamp match)
+    
+public:
+    // User API (const access)
+    explicit operator bool() const { return is_fresh_; }  // STRICT: fresh only!
+    bool is_fresh() const;      // True if exact timestamp match
+    bool has_stale() const;     // True if valid but not fresh
+    bool is_valid() const;      // True if any data available
+    
+    const T& value() const;     // Fresh data (asserts if not fresh)
+    const T& stale() const;     // Any valid data (asserts if invalid)
+    const T& operator*() const; // Alias for stale() (most permissive)
+    
+    const T& value_or(const T& default_value) const;  // Fresh or default
+    const T& stale_or(const T& default_value) const;  // Valid or default
+    
+    // Internal API (for SyncedInput only - not for users)
+    Synced& operator=(const T&);  // Set fresh data
+    void mark_stale();            // Mark data as stale (keep pointer)
+    void reset();                 // Invalidate (clear pointer)
+};
+```
+
+**Usage Patterns**:
+```cpp
+void process(const IMUData& imu, Synced<GPSData> gps, FusedData& output) {
+    // Pattern 1: Strict freshness check
+    if (gps) {
+        output = fuse_sensors(imu, gps.value());
+    } else {
+        output = dead_reckoning(imu);
+    }
+    
+    // Pattern 2: Accept stale data
+    if (gps.is_valid()) {
+        output = fuse_sensors(imu, gps.stale());
+    }
+    
+    // Pattern 3: Use helpers for defaults
+    output = fuse_sensors(imu, gps.value_or(default_gps));  // Fresh or default
+    output = fuse_sensors(imu, gps.stale_or(default_gps));  // Valid or default
+}
+```
+
+**Benefits**:
+- Zero-copy (const T* internally, no copying)
+- Forces explicit handling of fresh/stale/invalid states
+- Type-safe (no raw pointers exposed to users)
+- Ergonomic (const reference parameter, not optional<reference_wrapper>)
+
+### Data Request Messages (CMD Mailbox)
+
+**GetDataRequest** - Timestamp-synchronized data retrieval:
+```cpp
+struct GetDataRequestPayload {
+    uint64_t target_timestamp;      // Target timestamp in nanoseconds
+    uint64_t tolerance_ns;          // Max time difference allowed
+    uint8_t interpolation_mode;     // NEAREST, LINEAR, etc.
+};
+
+template<typename T>
+struct GetDataReplyPayload {
+    TimsMessage<T> message;         // The matched message
+    bool found;                     // True if match found within tolerance
+    bool is_fresh;                  // True if exact timestamp match
+    int64_t timestamp_delta_ns;     // Actual time difference
+};
+```
+
+**GetNextDataRequest** - One-shot data fetch:
+```cpp
+struct GetNextDataRequestPayload {
+    // Empty - just request next available
+};
+
+template<typename T>
+struct GetNextDataReplyPayload {
+    TimsMessage<T> message;         // Next available message
+    bool found;                     // True if data available
+};
+```
+
+**Usage**: SyncedInput uses these internally for multi-input synchronization. Replies go to CMD mailbox (not WORK) since they may be large.
 
 ### Timestamp Management
 
@@ -201,30 +405,111 @@ ModuleConfig fusion_config{
 **Accessing Metadata:**
 
 ```cpp
-class FilterModule : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
+class FilterModule : public MyApp::Module2<Output<FilteredData>, Input<SensorData>> {
 protected:
-    FilteredData process(const SensorData& input) override {
-        // Index-based access (always works)
-        auto meta = get_input_metadata<0>();
+    void process(const SensorData& input, FilteredData& output) override {
+        // Index-based metadata access
         uint64_t ts = get_input_timestamp<0>();
         bool fresh = has_new_data<0>();
         bool valid = is_input_valid<0>();
         
-        return apply_filter(input);
+        output = apply_filter(input);
     }
 };
 ```
 
-**Metadata Structure:**
+### Command Dispatch Pattern (CMD Mailbox)
+
+**Per-Output CMD Mailboxes**: Each output has its own CMD mailbox (different type_id in address). Commands received via blocking receive in dedicated command thread.
+
+**Clean Visitor Pattern** using registry data directly (NO duplication):
+
 ```cpp
-struct InputMetadata<T> {
-    uint64_t timestamp;       // From TimsHeader (ns since epoch)
-    uint32_t sequence_number;
-    uint32_t message_id;
-    bool is_new_data;         // True if fresh
-    bool is_valid;            // True if getData succeeded
+// Command thread for specific output (one thread per output)
+template<size_t OutputIndex>
+void command_loop_impl() {
+    auto& output = get_output<OutputIndex>();
+    
+    // Get command types from registry (single source of truth!)
+    using SystemCommands = typename Registry::subscription_messages_t<>;  // From registry
+    using UserCommands = ExtractUserCommands_t<OutputMessageDef>;        // From DataWithCommands
+    
+    while (!should_stop_) {
+        cmd_mailbox.receive_any([&](auto&& received_msg) {
+            using CmdType = typename std::decay_t<decltype(received_msg)>::payload_type;
+            
+            // System command check (simple tuple membership)
+            if constexpr (is_in_tuple_v<CmdType, SystemCommands>) {
+                handle_system_command(output, received_msg);
+                // Send reply via CMD mailbox
+            } 
+            // User command check (from DataWithCommands)
+            else if constexpr (is_in_tuple_v<CmdType, UserCommands>) {
+                typename CmdType::Reply reply;
+                on_command<OutputIndex>(received_msg.payload, reply);
+                // Send reply via CMD mailbox
+            } 
+            // Unknown command
+            else {
+                // Send UnknownCommandReply via CMD mailbox
+            }
+        });
+    }
+}
+```
+
+**User Command Implementation**:
+```cpp
+class MySensor : public MyApp::Module2<Output<SensorData>> {
+protected:
+    void process(SensorData& output) override {
+        output = read_sensor();
+    }
+    
+    // Optional: Implement command handlers for output 0
+    template<size_t OutputIndex>
+    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+        apply_calibration(cmd.offset);
+        reply.success = true;
+    }
 };
 ```
+
+**Key Points**:
+- System commands from `Registry::subscription_messages_t<>` (single source of truth)
+- User commands from `DataWithCommands<Payload, Cmd1, ...>` (no duplication)
+- Simple `is_in_tuple_v<Cmd, Tuple>` check for dispatch
+- CMD mailbox address varies per output (different type_id)
+- All receives blocking (0% CPU when idle)
+
+### Structured I/O Access
+
+**Named access** to inputs and outputs (alternative to index-based):
+
+```cpp
+class MultiInputModule : public MyApp::Module2<
+    Output<FusedData>,
+    Input<IMUData>,
+    SyncedInput<GPSData>
+> {
+protected:
+    void process(const IMUData& imu, Synced<GPSData> gps, FusedData& output) override {
+        // Named struct access (IDE autocomplete friendly)
+        auto ins = inputs();          // Returns rfl::NamedTuple
+        // ins.imu_data, ins.gps_data  (field names from payload types)
+        
+        auto outs = outputs();
+        // outs.fused_data
+        
+        // Both named and index access work:
+        // rfl::get<0>(ins) == ins.imu_data
+        
+        output = fuse_sensors(imu, gps.value_or(default_gps));
+    }
+};
+```
+
+**Benefits**: Auto-complete, self-documenting, zero-copy (references only)
 
 ### Multi-Output Type Filtering
 
@@ -248,30 +533,34 @@ Result: Each subscriber receives ONLY their subscribed message type!
 
 ```
 CommRaT/
-├── include/commrat/          # Public headers
-│   ├── commrat.hpp          # Main include (CommRaT<> application template)
-│   ├── registry_module.hpp  # Module base class (3-mailbox, multi-output)
-│   ├── io_spec.hpp          # I/O specification types (Phase 5.1)
-│   ├── mailbox.hpp          # Payload-only mailbox wrapper
-│   ├── message_registry.hpp # Compile-time registry (internal, use CommRaT)
-│   ├── messages.hpp         # Core message types
-│   └── tims_wrapper.hpp     # TiMS C API wrapper
-├── src/                     # Implementation files
-│   └── tims_wrapper.cpp     # TiMS initialization
-├── examples/                # Usage examples
-│   ├── continuous_input_example.cpp  # Producer→Consumer pattern
-│   ├── clean_interface_example.cpp   # Simple API showcase
-│   ├── command_example.cpp           # Variadic command handling
-│   └── loop_mode_example.cpp         # LoopInput maximum throughput demo
-├── test/                    # Test executables
-├── docs/                    # Documentation
-│   ├── README.md           # Documentation overview and quick reference
-│   ├── work/               # Active development documentation
-│   │   ├── ARCHITECTURE_ANALYSIS.md  # Phase 5 roadmap (multi-I/O)
-│   │   └── FIXES_APPLIED.md          # Historical bug fixes
-│   └── archive/            # Archived historical documentation
-├── tims/                   # TiMS library (external dependency)
-└── SeRTial/                # Serialization library (submodule)
+├── include/commrat/
+│   ├── module2.hpp                        # Module base class (I/O tuple architecture)
+│   ├── module/io/
+│   │   ├── io_spec.hpp                    # I/O specification (Output, Input, Period, SyncedInput)
+│   │   ├── synced.hpp                     # Synced<T> wrapper (zero-copy with validity/freshness)
+│   │   ├── output_infrastructure.hpp      # Structured output access helpers
+│   │   ├── input_infrastructure.hpp       # Structured input access helpers
+│   │   ├── output/module_output.hpp       # Output with workspace API
+│   │   └── input/
+│   │       ├── continuous_input.hpp       # Primary input (blocking receive)
+│   │       └── synced_input.hpp          # Secondary input (get_data)
+│   ├── mailbox/typed_mailbox.hpp          # Type-restricted mailboxes
+│   ├── messaging/
+│   │   ├── message_registry.hpp           # Compile-time message registry
+│   │   └── system/
+│   │       ├── subscription_messages.hpp  # Subscribe/Unsubscribe protocol
+│   │       └── data_request_messages.hpp  # GetData/GetNextData protocol
+│   └── platform/
+│       ├── threading.hpp                  # Thread, Mutex abstractions
+│       └── timestamp.hpp                  # Time, Duration, Timestamp
+├── examples/
+│   └── module2_simple_example.cpp         # Timer/Input/Loop examples
+├── docs/work/
+│   ├── ZERO_COPY_ARCHITECTURE.md          # Zero-copy design
+│   ├── MODULE_REFACTOR_STRATEGY.md        # Module2 roadmap
+│   └── MODULE_REFACTOR_QUICKSTART.md      # Quick reference
+├── tims/                                  # TiMS library
+└── SeRTial/                               # Serialization library
 ```
 
 ## Documentation Strategy
@@ -309,16 +598,13 @@ CommRaT/
 
 ### Documentation Structure
 
-**Active Documentation** (`docs/`):
-- `README.md` - Comprehensive overview, current state (Phase 6.10), and roadmap
-- `USER_GUIDE.md` - Comprehensive framework documentation (Sections 1-8 complete)
-- `KNOWN_ISSUES.md` - Active issues, limitations, and workarounds
-- `work/ARCHITECTURE_ANALYSIS.md` - Detailed Phase 5 design (multi-I/O modules)
-- `work/IO_SYNC_STRATEGY.md` - Multi-input synchronization strategy (Phase 6)
-- `work/RACK_ANALYSIS.md` - RACK-style getData mechanism design
-- `work/SERTIAL_RINGBUFFER_REQUEST.md` - RingBuffer requirements for buffered inputs
-- `work/FIXES_APPLIED.md` - Historical record of bug fixes and solutions
-- `archive/` - Archived historical documentation from earlier phases
+**Active Documentation** (`docs/work/`):
+- `ZERO_COPY_ARCHITECTURE.md` - Zero-copy workspace design (Phase 6 complete)
+- `MODULE_REFACTOR_STRATEGY.md` - Module2 I/O tuple architecture roadmap
+- `MODULE_REFACTOR_QUICKSTART.md` - Quick reference for current state
+- `MODULE2_PRODUCTION_ROADMAP.md` - Path to production-ready Module2
+- `REGISTRY_CONSOLIDATION.md` - Registry cleanup and utility design
+- `KNOWN_ISSUES.md` - Active issues and workarounds
 
 **When to update documentation:**
 - Major architectural changes → Update `ARCHITECTURE_ANALYSIS.md`
@@ -362,9 +648,9 @@ auto send(T& message, uint32_t dest_mailbox) -> MailboxResult<void>;
 ### Address Calculation
 ```cpp
 uint32_t base = calculate_base_address(system_id, instance_id);
-uint32_t cmd_mbx  = base + 0;   // Command mailbox
-uint32_t work_mbx = base + 16;  // Subscription protocol
-uint32_t data_mbx = base + 32;  // Data streaming
+uint32_t cmd_mbx  = base + 0;   // Per-output: Command/request receive (with thread)
+uint32_t work_mbx = base + 16;  // Per-module: Outbound send-only (no thread)
+uint32_t data_mbx = base + 32;  // Per-input: Data stream receive (implicit thread)
 ```
 
 ### Visitor Pattern for Type Dispatch
@@ -435,14 +721,14 @@ NO heap allocations in hot paths (periodic_loop, continuous_loop, process functi
 ```cpp
 // VALID: Stack-based, bounded containers
 template<typename T>
-void process_data(const T& input) {
+void process(const T& input) {
     sertial::fixed_vector<T, 100> buffer;  // Stack-allocated
     std::array<float, 50> results;          // Fixed size
     // Process without allocations...
 }
 
 // ERROR: Dynamic allocation in hot path
-void process_data(const T& input) {
+void process(const T& input) {
     std::vector<T> buffer;        // Heap allocation!
     buffer.push_back(input);      // May reallocate!
 }
@@ -475,23 +761,28 @@ void process_data(const T& input) {
 ## Future Considerations
 
 ### Completed Features
-- Phase 5.3: Multi-output with type-specific filtering
-- Phase 6.9: Multi-input with synchronized getData (RACK-style)
-- Phase 6.10: Timestamp metadata accessors
+- Zero-copy workspace API (OutputBuffer, ModuleOutput)
+- Structured I/O access (outputs()/inputs() with named fields)
+- I/O tuple architecture (Module2 with BuildIOTuple)
+- Multi-output support (separate Output<T> for each)
+- Multi-input foundation (Input<T> + SyncedInput<T>)
+- Synced<T> wrapper (zero-copy with fresh/stale/invalid handling)
+- Message ID system (AUTO_ID=0, MAX_MESSAGE_ID=0x7FFF validation)
+- Request/reply protocol (automatic reply message generation)
+- System messages (Subscribe, Unsubscribe, GetData, GetNextData)
+- **GetData message auto-registration** (UserDefined::GetData/GetNextData subprefixes, same local_id as data message)
+- **Consumer-side get_data** (SyncedInput with get_data() and get_next_data() RPCs)
+- **Producer-side get_data handling** (ModuleOutput CMD mailbox handlers for GetDataRequest/GetNextDataRequest)
 
-### Planned Features (Phase 7+)
-- Optional secondary inputs (getData failure handling)
-- Input buffering strategies (sliding window, latest-only)
-- RingBuffer integration for message history
-- ROS 2 adapter (rclcpp-commrat) - separate repository
-- DDS compatibility layer
+### In Progress
+- **Subscription protocol producer/consumer implementation** (Subscribe/Unsubscribe handlers in ModuleOutput)
+- TypedMailbox/WorkMailbox template fixes
+
+### Planned
+- Input buffering (RingBuffer for historical data)
+- Command infrastructure integration
+- ROS 2 adapter (separate repository)
 - Performance profiling tools
-- Static analysis for real-time safety
-
-### Technical Debt
-- Command dispatch (on_command overloads) needs better ergonomics
-- Multi-input getData synchronization has timing issues (see KNOWN_ISSUES.md #1)
-- Type-based metadata accessors incomplete (index-based works, type-based needs full tuple unpacking)
 
 ## Questions to Ask Yourself
 

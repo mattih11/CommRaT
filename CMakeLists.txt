@@ -187,6 +187,23 @@ target_link_libraries(test_address_collisions PRIVATE commrat)
 target_include_directories(test_address_collisions PRIVATE /usr/local/include/rack)
 add_test(NAME test_address_collisions COMMAND test_address_collisions)
 
+# GetData auto-registration test
+add_executable(test_getdata_registration test/test_getdata_registration.cpp)
+target_link_libraries(test_getdata_registration PRIVATE commrat)
+target_include_directories(test_getdata_registration PRIVATE /usr/local/include/rack)
+add_test(NAME test_getdata_registration COMMAND test_getdata_registration)
+
+# ModuleOutput GetData handler test (producer-side request handling)
+add_executable(test_module_output_getdata test/test_module_output_getdata.cpp)
+target_link_libraries(test_module_output_getdata PRIVATE commrat)
+target_include_directories(test_module_output_getdata PRIVATE /usr/local/include/rack)
+add_test(NAME test_module_output_getdata COMMAND test_module_output_getdata)
+
+add_executable(test_subscription_protocol test/test_subscription_protocol.cpp)
+target_link_libraries(test_subscription_protocol PRIVATE commrat)
+target_include_directories(test_subscription_protocol PRIVATE /usr/local/include/rack)
+add_test(NAME test_subscription_protocol COMMAND test_subscription_protocol)
+
 # Add examples as tests (use wrapper for continuous examples)
 add_test(NAME example_continuous_input COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_continuous_example.sh $<TARGET_FILE:example_continuous_input>)
 add_test(NAME example_clean_interface COMMAND example_clean_interface)

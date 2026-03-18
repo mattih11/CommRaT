@@ -14,7 +14,7 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 ## Features
 
 - **Timestamp Metadata Accessors**: Access input timestamps, sequence numbers, freshness/validity flags
-- **Multi-Input Synchronization**: Fuse multiple sensor streams with time-aligned getData
+- **Multi-Input Synchronization**: Fuse multiple sensor streams with time-aligned get_data
 - **Multi-Output Modules**: Produce multiple message types simultaneously with type-specific delivery
 - **Ultra-Clean User Interface**: Define messages ONCE, use payload types everywhere
 - **Payload-Only API**: CommRaT<Messages...> template with Module<OutputSpec, InputSpec> base class
