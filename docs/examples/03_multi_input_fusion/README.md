@@ -1,6 +1,6 @@
 # Example 03: Multi-Input Fusion
 
-✅ **STATUS**: Fully functional! This example demonstrates multi-input sensor fusion with time-synchronized getData. Fixed in commit 519469b (tolerance unit conversion bug).
+✅ **STATUS**: Fully functional! This example demonstrates multi-input sensor fusion with time-synchronized get_data. Fixed in commit 519469b (tolerance unit conversion bug).
 
 This example demonstrates **multi-input sensor fusion** with **time-synchronized data** from multiple sources at different rates. An IMU sensor running at 100Hz is fused with GPS data at 10Hz using CommRaT's multi-input synchronization.
 
@@ -8,7 +8,7 @@ This example demonstrates **multi-input sensor fusion** with **time-synchronized
 
 1. **Multi-input processing**: Using `Inputs<T, U>` to receive multiple message types
 2. **Primary input**: Designating which input drives execution with `PrimaryInput<T>`
-3. **getData synchronization**: Fetching secondary inputs synchronized to primary timestamp
+3. **get_data synchronization**: Fetching secondary inputs synchronized to primary timestamp
 4. **Metadata accessors**: Checking freshness and validity of synchronized inputs
 5. **Different update rates**: Handling sensors at 100Hz and 10Hz simultaneously
 
@@ -41,7 +41,7 @@ This example demonstrates **multi-input sensor fusion** with **time-synchronized
 
 **Key points:**
 - IMU runs at 100Hz (primary input - drives execution)
-- GPS runs at 10Hz (secondary input - fetched via getData)
+- GPS runs at 10Hz (secondary input - fetched via get_data)
 - Fusion outputs at 100Hz (same as primary rate)
 - GPS data time-aligned to IMU timestamps within 50ms tolerance
 
@@ -105,7 +105,7 @@ protected:
         
         // Check GPS freshness
         bool gps_fresh = has_new_data<1>();       // New GPS data?
-        bool gps_valid = is_input_valid<1>();     // getData succeeded?
+        bool gps_valid = is_input_valid<1>();     // get_data succeeded?
         
         // Calculate GPS age
         uint64_t gps_age_ns = imu_ts - gps_ts;
@@ -158,7 +158,7 @@ commrat::ModuleConfig fusion_config{
 - `period`: Must match primary input rate (10ms = 100Hz)
 - `input_sources`: List of (system_id, instance_id) for each input
   - **Order matters**: Index 0 = primary, index 1+ = secondary
-- `sync_tolerance`: Maximum age for getData synchronization (50ms)
+- `sync_tolerance`: Maximum age for get_data synchronization (50ms)
 
 ## How Multi-Input Synchronization Works
 
@@ -170,10 +170,10 @@ commrat::ModuleConfig fusion_config{
 3. Fusion receives IMU data
 ```
 
-### Secondary Input (getData)
+### Secondary Input (get_data)
 
 ```
-4. Fusion calls getData<GPSData>(timestamp=T, tolerance=50ms)
+4. Fusion calls get_data<GPSData>(timestamp=T, tolerance=50ms)
 5. HistoricalMailbox searches for GPS message where:
    |GPS.timestamp - T| < 50ms
 6. Returns closest GPS message (or error if none within tolerance)
@@ -182,10 +182,10 @@ commrat::ModuleConfig fusion_config{
 ### Process Execution
 
 ```
-7. If getData succeeds:
+7. If get_data succeeds:
    - process(imu, gps) called with synchronized data
    - Output timestamp = IMU timestamp (primary)
-8. If getData fails:
+8. If get_data fails:
    - Last valid GPS data reused (if available)
    - is_new_data<1>() returns false (stale)
 ```
@@ -254,7 +254,7 @@ Starting fusion...
 1. **Rate mismatch handled**: 100Hz IMU + 10Hz GPS → 100Hz fusion output
 2. **Synchronization working**: GPS data time-aligned to IMU timestamps within 100ms
 3. **Freshness tracking**: System shows GPS age (17ms, 36ms, 66ms, 87ms) all within tolerance
-4. **Successful getData**: Secondary input synchronization fully functional (fixed in commit 519469b)
+4. **Successful get_data**: Secondary input synchronization fully functional (fixed in commit 519469b)
 5. **Metadata rich**: Timestamps, freshness flags, validity flags all accessible
 
 ## Common Patterns
@@ -283,7 +283,7 @@ if (!has_new_data<1>()) {
 
 ```cpp
 if (!is_input_valid<1>()) {
-    std::cerr << "GPS getData failed - no data within tolerance\n";
+    std::cerr << "GPS get_data failed - no data within tolerance\n";
     // Handle missing secondary input
 }
 ```

@@ -96,8 +96,8 @@ class SensorFusion : public MyApp::Module<
 protected:
     void process(
         const IMUData& imu,      // Received (blocking)
-        const GPSData& gps,      // Fetched via getData
-        const LidarData& lidar,  // Fetched via getData
+        const GPSData& gps,      // Fetched via get_data
+        const LidarData& lidar,  // Fetched via get_data
         FusedData& output        // Output written here
     ) override {
         output = fuse_sensors(imu, gps, lidar);
@@ -1795,8 +1795,8 @@ class SensorFusion : public MyApp::Module<
 protected:
     void process(
         const IMUData& imu,      // PRIMARY - blocking receive
-        const GPSData& gps,      // SECONDARY - time-synchronized getData
-        const LidarData& lidar,  // SECONDARY - time-synchronized getData
+        const GPSData& gps,      // SECONDARY - time-synchronized get_data
+        const LidarData& lidar,  // SECONDARY - time-synchronized get_data
         FusedData& output,       // OUTPUT reference - data will be published
     ) override {
         // All inputs guaranteed time-aligned to imu.header.timestamp!
@@ -1807,7 +1807,7 @@ protected:
 
 **Key concepts:**
 - **Primary input** (IMUData): Drives execution rate via blocking receive
-- **Secondary inputs** (GPSData, LidarData): Fetched via `getData(timestamp)` to match primary
+- **Secondary inputs** (GPSData, LidarData): Fetched via `get_data(timestamp)` to match primary
 - **Automatic synchronization**: Module ensures all inputs aligned to primary timestamp
 
 ### 7.3 Primary vs Secondary Inputs
@@ -1819,7 +1819,7 @@ protected:
 - **Designated by**: `PrimaryInput<IMUData>` template parameter
 
 **Secondary Inputs:**
-- **Non-blocking getData**: Fetches best-match message from history buffer
+- **Non-blocking get_data**: Fetches best-match message from history buffer
 - **Time-aligned**: Retrieved based on primary input's timestamp
 - **May be stale**: If no recent message within tolerance, returns older data
 - **Freshness tracked**: `has_new_data<Index>()` indicates if data is fresh
@@ -1853,18 +1853,18 @@ commrat::ModuleConfig fusion_config{
 | Field | Purpose | Example |
 |-------|---------|---------|
 | `input_sources` | System/instance IDs of input producers | `{{10,1}, {11,1}, {12,1}}` |
-| `sync_tolerance` | Max timestamp difference for getData | `50'000'000` (50ms in ns) |
+| `sync_tolerance` | Max timestamp difference for get_data | `50'000'000` (50ms in ns) |
 | `period` | Primary input's expected rate | `Milliseconds(10)` (100Hz) |
 
 **Order matters:** First input_source is PRIMARY, rest are SECONDARY (unless PrimaryInput specified).
 
-### 7.5 How getData Synchronization Works
+### 7.5 How get_data Synchronization Works
 
 **Under the hood:**
 
 1. **HistoricalMailbox**: Each secondary input has a circular buffer (default: 100 messages)
 2. **Automatic buffering**: Every received message stored with timestamp
-3. **getData(timestamp, tolerance)**: Finds closest message within tolerance
+3. **get_data(timestamp, tolerance)**: Finds closest message within tolerance
 4. **Best-match algorithm**: Returns message with smallest `|msg.timestamp - requested_timestamp|`
 
 **Example timeline:**
@@ -1877,12 +1877,12 @@ Lidar:      ●----●----●----●----●----●----●    (20Hz secondary, ac
 
 At t=150ms (IMU arrives):
 - Primary: receive() blocks, gets IMU@150ms
-- GPS: getData(150ms, 50ms) → returns GPS@200ms (closest within tolerance)
-- Lidar: getData(150ms, 50ms) → returns Lidar@150ms (exact match)
+- GPS: get_data(150ms, 50ms) → returns GPS@200ms (closest within tolerance)
+- Lidar: get_data(150ms, 50ms) → returns Lidar@150ms (exact match)
 ```
 
 **Tolerance selection:**
-- Too small: Secondary inputs often invalid (getData fails)
+- Too small: Secondary inputs often invalid (get_data fails)
 - Too large: Temporal misalignment (stale data accepted)
 - **Rule of thumb**: 2-3x slowest sensor period (e.g., GPS@5Hz → 50ms tolerance)
 
@@ -1904,9 +1904,9 @@ void process(
         std::cout << "GPS stale (reusing old data)\n";
     }
     
-    // Check if Lidar getData succeeded
+    // Check if Lidar get_data succeeded
     if (!is_input_valid<2>()) {  // Index 2 = LidarData
-        std::cerr << "Lidar getData failed (no data within tolerance)\n";
+        std::cerr << "Lidar get_data failed (no data within tolerance)\n";
         // Use fallback or skip Lidar fusion
     }
     
@@ -1926,7 +1926,7 @@ void process(
 | `get_input_metadata<Index>()` | Full metadata struct | Comprehensive input state |
 | `get_input_timestamp<Index>()` | uint64_t timestamp | Calculate data age |
 | `has_new_data<Index>()` | bool (true if fresh) | Detect sensor updates |
-| `is_input_valid<Index>()` | bool (true if getData succeeded) | Handle optional inputs |
+| `is_input_valid<Index>()` | bool (true if get_data succeeded) | Handle optional inputs |
 
 ### 7.7 Complete Multi-Input Example
 
@@ -2128,12 +2128,12 @@ protected:
 **HistoricalMailbox overhead:**
 - **Buffer size**: Default 100 messages per input (configurable)
 - **Memory**: `sizeof(TimsMessage<T>) * 100 * num_secondary_inputs`
-- **getData complexity**: O(log N) binary search in circular buffer
+- **get_data complexity**: O(log N) binary search in circular buffer
 - **Real-time safe**: No dynamic allocation after initialization
 
 **Best practices:**
 1. **Choose primary wisely**: Use fastest sensor as primary (lowest latency)
-2. **Minimize secondaries**: Each secondary input adds getData overhead
+2. **Minimize secondaries**: Each secondary input adds get_data overhead
 3. **Tune buffer size**: Match buffer to expected message rates
 4. **Monitor freshness**: Log stale data warnings for debugging
 5. **Handle failures**: Check `is_input_valid()` for optional inputs
@@ -2150,7 +2150,7 @@ protected:
 - Simple pipeline (A → B → C)
 - Same update rate throughout
 - Stateless processing (no fusion needed)
-- Lowest latency required (no getData overhead)
+- Lowest latency required (no get_data overhead)
 
 **Hybrid pattern:**
 ```cpp
@@ -2165,7 +2165,7 @@ class SlowFusion : public MyApp::Module<Output<FusedState>, Inputs<FilteredIMU, 
 
 1. **Inputs<T, U, V>** enables multi-input with automatic time synchronization
 2. **PrimaryInput<T>** designates which input drives execution (blocking receive)
-3. **Secondary inputs** use getData(timestamp, tolerance) for synchronization
+3. **Secondary inputs** use get_data(timestamp, tolerance) for synchronization
 4. **HistoricalMailbox** buffers recent messages for temporal queries
 5. **Metadata accessors** (`has_new_data<>()`, `is_input_valid<>()`) track freshness and validity
 6. **Tolerance tuning** balances data freshness vs synchronization success rate
@@ -2337,7 +2337,7 @@ struct InputMetadata {
     uint32_t sequence_number; // From TimsHeader (monotonically increasing)
     uint32_t message_id;      // From TimsHeader (message type ID)
     bool is_new_data;         // True if fresh, false if stale/reused
-    bool is_valid;            // True if getData succeeded, false if failed
+    bool is_valid;            // True if get_data succeeded, false if failed
 };
 ```
 
@@ -2358,7 +2358,7 @@ double now_s = now_ns / 1'000'000'000.0;
 // Duration types (type-safe)
 Duration ten_ms = Milliseconds(10);        // 10'000'000 nanoseconds
 Duration one_sec = Seconds(1);             // 1'000'000'000 nanoseconds
-Duration tolerance = Milliseconds(50);     // For getData sync_tolerance
+Duration tolerance = Milliseconds(50);     // For get_data sync_tolerance
 ```
 
 **Common operations:**

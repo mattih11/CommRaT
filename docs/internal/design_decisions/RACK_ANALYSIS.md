@@ -1,4 +1,4 @@
-# RACK getData Mechanism Analysis
+# RACK get_data Mechanism Analysis
 
 **Date**: February 6, 2026  
 **Purpose**: Understand RACK's historical data retrieval and apply lessons to CommRaT Phase 6  
@@ -47,7 +47,7 @@ RACK implements **historical data retrieval** through:
 │                                                        │
 │  moduleCommand(MSG_GET_DATA) {                        │
 │    timestamp = msg.recordingTime;                     │
-│    idx = getDataBufferIndex(timestamp);  ← Lookup    │
+│    idx = get_dataBufferIndex(timestamp);  ← Lookup    │
 │    sendDataReply(dataBuffer[idx]);                    │
 │  }                                                     │
 └────────────────────────────────────────────────────────┘
@@ -59,7 +59,7 @@ RACK implements **historical data retrieval** through:
 ┌────────────────────────────────────────────────────────┐
 │  RackDataProxy (Consumer)                              │
 │                                                        │
-│  getData(timestamp) {                                  │
+│  get_data(timestamp) {                                  │
 │    send: MSG_GET_DATA {recordingTime = timestamp}     │
 │    recv: MSG_DATA {data buffer}                       │
 │    return: 0 on success, error code otherwise         │
@@ -107,8 +107,8 @@ uint32_t dataBufferMaxEntries; // Ring buffer capacity (e.g., 20)
 ### 2. Timestamp Lookup Algorithm
 
 ```cpp
-// From getDataBufferIndex(rack_time_t time)
-int RackDataModule::getDataBufferIndex(rack_time_t time) {
+// From get_dataBufferIndex(rack_time_t time)
+int RackDataModule::get_dataBufferIndex(rack_time_t time) {
     if (time == 0) {
         // Return newest (current index)
         return index;
@@ -150,7 +150,7 @@ int RackDataModule::getDataBufferIndex(rack_time_t time) {
 - **Validates range**: Rejects timestamps outside buffer window
 - **O(N) complexity**: Linear search (N = buffer size, typically 20)
 
-### 3. Message Flow for getData
+### 3. Message Flow for get_data
 
 ```
 Consumer                     Producer
@@ -158,7 +158,7 @@ Consumer                     Producer
    │  MSG_GET_DATA              │
    │  {recordingTime = t}       │
    ├───────────────────────────>│
-   │                            │  getDataBufferIndex(t)
+   │                            │  get_dataBufferIndex(t)
    │                            │  → Find best match in ring buffer
    │                            │
    │       MSG_DATA             │
@@ -201,12 +201,12 @@ putDataBufferWorkSpace(data) {
 #### **Pull Mode (Historical Fetch)**
 ```cpp
 // Consumer pulls on-demand
-proxy.getData(timestamp);
+proxy.get_data(timestamp);
 
 // Producer behavior
 moduleCommand(MSG_GET_DATA) {
     timestamp = parse(msg);
-    idx = getDataBufferIndex(timestamp);
+    idx = get_dataBufferIndex(timestamp);
     sendDataReply(dataBuffer[idx]);
 }
 ```
@@ -242,24 +242,24 @@ Producer                     Consumer
 
 ### Proposed CommRaT (Phase 6)
 
-#### **Add GetDataRequest/Reply Messages**
+#### **Add get_dataRequest/Reply Messages**
 
 ```cpp
 // In messages.hpp
-struct GetDataRequest {
+struct get_dataRequest {
     uint64_t timestamp;          // Requested timestamp
     uint8_t source_system_id;    // Which producer
     uint8_t source_instance_id;
 };
 
-struct GetDataReply {
+struct get_dataReply {
     uint64_t timestamp;          // Actual timestamp of returned data
     int32_t error_code;          // 0 = success, -EINVAL = out of range
     // Followed by: actual data message
 };
 
-using GetDataRequestMsg = Message::Command<GetDataRequest>;
-using GetDataReplyMsg = Message::Reply<GetDataReply>;
+using get_dataRequestMsg = Message::Command<get_dataRequest>;
+using get_dataReplyMsg = Message::Reply<get_dataReply>;
 ```
 
 #### **Add Ring Buffer to Module Base**
@@ -365,20 +365,20 @@ protected:
     }
     
 private:
-    // New: handle GetDataRequest on WORK mailbox
-    void handle_get_data_request(const GetDataRequest& req) {
+    // New: handle get_dataRequest on WORK mailbox
+    void handle_get_data_request(const get_dataRequest& req) {
         auto result = output_ring_buffer_.get(req.timestamp);
         
         if (result) {
-            // Send GetDataReply + data
-            GetDataReply reply{
+            // Send get_dataReply + data
+            get_dataReply reply{
                 .timestamp = result->timestamp,
                 .error_code = 0
             };
             send_reply(reply, result->payload);
         } else {
             // Send error reply
-            GetDataReply reply{
+            get_dataReply reply{
                 .timestamp = 0,
                 .error_code = -ENODATA
             };
@@ -413,7 +413,7 @@ private:
             // 1. Receive PRIMARY (blocking push)
             auto imu = primary_mailbox_.receive();
             
-            // 2. Fetch SECONDARY (synchronous pull via GetDataRequest)
+            // 2. Fetch SECONDARY (synchronous pull via get_dataRequest)
             auto gps = fetch_historical(gps_source_, imu.timestamp);
             auto lidar = fetch_historical(lidar_source_, imu.timestamp);
             
@@ -425,9 +425,9 @@ private:
         }
     }
     
-    // Helper: send GetDataRequest, block for reply
+    // Helper: send get_dataRequest, block for reply
     std::optional<TimsMessage<T>> fetch_historical(Source source, uint64_t ts) {
-        GetDataRequest req{
+        get_dataRequest req{
             .timestamp = ts,
             .source_system_id = source.system_id,
             .source_instance_id = source.instance_id
@@ -437,7 +437,7 @@ private:
         work_mailbox_.send(req, source.work_mailbox_id);
         
         // Receive reply (blocking, 50ms timeout)
-        auto reply = work_mailbox_.receive_timed<GetDataReply>(50ms);
+        auto reply = work_mailbox_.receive_timed<get_dataReply>(50ms);
         
         if (reply && reply->error_code == 0) {
             // Reply contains data
@@ -457,8 +457,8 @@ private:
 | **Ring Buffer Location** | Producer only | Producer only |
 | **Buffer Size** | Configurable (default 20) | Configurable (default 100) |
 | **Lookup Algorithm** | Linear search O(N) | Linear search O(N) (same) |
-| **Request Message** | MSG_GET_DATA | GetDataRequest |
-| **Reply Message** | MSG_DATA | GetDataReply + data |
+| **Request Message** | MSG_GET_DATA | get_dataRequest |
+| **Reply Message** | MSG_DATA | get_dataReply + data |
 | **Mailbox Used** | Command mailbox | WORK mailbox |
 | **Timeout** | 100ms default | 50ms default |
 | **Continuous Push** | MSG_GET_CONT_DATA | SubscribeRequest (existing) |
@@ -473,19 +473,19 @@ private:
 **Files**: `include/commrat/messages.hpp`
 
 ```cpp
-struct GetDataRequest {
+struct get_dataRequest {
     uint64_t timestamp;
     uint8_t source_system_id;
     uint8_t source_instance_id;
 };
 
-struct GetDataReply {
+struct get_dataReply {
     uint64_t actual_timestamp;
     int32_t error_code;  // 0 = OK, -ENODATA, -EINVAL
 };
 
-using GetDataRequestMsg = Message::Command<GetDataRequest>;
-using GetDataReplyMsg = Message::Reply<GetDataReply>;
+using get_dataRequestMsg = Message::Command<get_dataRequest>;
+using get_dataReplyMsg = Message::Reply<get_dataReply>;
 ```
 
 ### 6.2: Implement OutputRingBuffer
@@ -597,7 +597,7 @@ std::optional<T> get(uint64_t timestamp, FetchMode mode = NEAREST);
 ### 4. Return Tolerance in Reply
 
 ```cpp
-struct GetDataReply {
+struct get_dataReply {
     uint64_t actual_timestamp;
     int32_t error_code;
     uint64_t time_difference;  // |actual - requested|
@@ -610,7 +610,7 @@ struct GetDataReply {
 
 ## Open Questions
 
-### Q1: Should getData block or timeout?
+### Q1: Should get_data block or timeout?
 
 **RACK**: Synchronous with timeout (100ms)  
 **CommRaT Options**:
@@ -642,7 +642,7 @@ struct GetDataReply {
 
 ## Real-World Example: scan2d_dyn_obj_recog
 
-**RACK module that uses BOTH continuous data AND getData:**
+**RACK module that uses BOTH continuous data AND get_data:**
 
 ```cpp
 // Module has TWO inputs:
@@ -655,7 +655,7 @@ int Scan2dDynObjRecog::moduleLoop(void) {
     scan2dIn = Scan2dData::parse(&msgInfo);
     
     // 2. FETCH SECONDARY INPUT at primary's timestamp
-    ret = objRecog->getData(&objRecogMsg.data, 
+    ret = objRecog->get_data(&objRecogMsg.data, 
                            sizeof(obj_recog_data_msg), 
                            scan2dIn->recordingTime);  // ← sync to scan2d time!
     
@@ -672,7 +672,7 @@ int Scan2dDynObjRecog::moduleLoop(void) {
 
 **Key observations:**
 - Primary input (scan2d): **Blocking receive** on dataMbx - pushed by producer
-- Secondary input (objRecog): **Synchronous getData** - pulled at primary's timestamp
+- Secondary input (objRecog): **Synchronous get_data** - pulled at primary's timestamp
 - Both inputs **time-aligned** via `scan2dIn->recordingTime`
 - Simple, clean, works perfectly
 
@@ -694,7 +694,7 @@ int Scan2dDynObjRecog::moduleOn(void) {
 
 **This validates:**
 ✅ Primary input: Continuous subscription (push)  
-✅ Secondary input: No subscription, just getData when needed  
+✅ Secondary input: No subscription, just get_data when needed  
 ✅ Synchronization: Use primary's timestamp for secondary fetch  
 ✅ Simple threading: Single receive loop on primary  
 
@@ -702,7 +702,7 @@ int Scan2dDynObjRecog::moduleOn(void) {
 
 ## Summary
 
-### RACK's getData = Producer-Side Ring Buffer + Request/Reply Protocol
+### RACK's get_data = Producer-Side Ring Buffer + Request/Reply Protocol
 
 **Producer Side:**
 1. Maintain fixed-size ring buffer of recent messages
@@ -717,7 +717,7 @@ int Scan2dDynObjRecog::moduleOn(void) {
 ### CommRaT Phase 6 Should:
 
 1. ✅ **Copy RACK's ring buffer design** - proven, simple, efficient
-2. ✅ **Add GetDataRequest/Reply messages** - similar to RACK protocol
+2. ✅ **Add get_dataRequest/Reply messages** - similar to RACK protocol
 3. ✅ **Integrate into Module base** - automatic for all producers
 4. ✅ **Use for multi-input sync** - primary push + secondary pull
 5. ✅ **Keep buffer producer-side** - consumer stays lightweight
@@ -725,7 +725,7 @@ int Scan2dDynObjRecog::moduleOn(void) {
 ### What We DON'T Need:
 
 **CommRaT Files to Modify (Phase 6):**
-- `include/commrat/messages.hpp` - Add GetDataRequest/Reply
+- `include/commrat/messages.hpp` - Add get_dataRequest/Reply
 - `include/commrat/ring_buffer.hpp` - NEW - OutputRingBuffer (wraps SeRTial's RingBuffer)
 - `include/commrat/registry_module.hpp` - Integrate ring buffer + multi-input
 
@@ -740,7 +740,7 @@ int Scan2dDynObjRecog::moduleOn(void) {
 ### Next Steps:
 
 1. **Phase 5 current priority**: Single-input modules with compile-time I/O specs
-2. **Phase 6 preparation**: Design GetDataRequest messages and OutputRingBuffer
+2. **Phase 6 preparation**: Design get_dataRequest messages and OutputRingBuffer
 3. **Phase 6 implementation**: Multi-input modules with RACK-style synchronization
 
 ---
@@ -748,12 +748,12 @@ int Scan2dDynObjRecog::moduleOn(void) {
 ## Code References
 
 **RACK Files Analyzed:**
-- `rack/main/common/rack_proxy.cpp` - getData() implementation
+- `rack/main/common/rack_proxy.cpp` - get_data() implementation
 - `rack/main/common/rack_data_module.cpp` - Ring buffer and lookup
 - `rack/main/common/rack_mailbox.cpp` - Message send/receive
 
 **CommRaT Files to Modify (Phase 6):**
-- `include/commrat/messages.hpp` - Add GetDataRequest/Reply
+- `include/commrat/messages.hpp` - Add get_dataRequest/Reply
 - `include/commrat/ring_buffer.hpp` - NEW - OutputRingBuffer implementation
 - `include/commrat/registry_module.hpp` - Integrate ring buffer + multi-input
 

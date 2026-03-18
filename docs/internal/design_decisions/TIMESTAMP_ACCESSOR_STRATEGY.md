@@ -41,8 +41,8 @@ struct InputMetadata {
     uint32_t message_id;             // Runtime type ID
     bool is_new_data;                // True if fresh, false if reused/stale
     
-    // For multi-input: indicates if getData succeeded
-    bool is_valid;                   // False if getData failed (out of tolerance)
+    // For multi-input: indicates if get_data succeeded
+    bool is_valid;                   // False if get_data failed (out of tolerance)
 };
 
 // Protected accessor methods in Module base class
@@ -109,7 +109,7 @@ protected:
         auto lidar_meta = get_input_metadata<2>();
         
         if (!gps_meta.is_valid) {
-            std::cerr << "GPS getData failed (out of tolerance)\n";
+            std::cerr << "GPS get_data failed (out of tolerance)\n";
             // Use stale GPS data or skip GPS fusion
         }
         
@@ -200,7 +200,7 @@ void multi_input_loop() {
             .type_info = typeid(PrimaryInputType)
         };
         
-        // Get secondary inputs via getData
+        // Get secondary inputs via get_data
         auto [secondary_tuple, sync_status] = gather_all_inputs(primary_result->timestamp);
         
         // CHANGE: Store secondary metadata with sync status
@@ -227,7 +227,7 @@ void update_secondary_metadata(const std::optional<ReceivedMessage<T>>& result, 
             .type_info = typeid(T)
         };
     } else {
-        // getData failed - mark as invalid
+        // get_data failed - mark as invalid
         input_metadata_[idx].is_valid = false;
         // Keep old timestamp/data for reference
     }
@@ -289,7 +289,7 @@ protected:
      * @brief Convenience: Check if input has new data
      * 
      * For continuous input: Always true
-     * For multi-input: True if getData returned fresh data within tolerance
+     * For multi-input: True if get_data returned fresh data within tolerance
      */
     template<std::size_t Index = 0>
     bool has_new_data() const {
@@ -297,10 +297,10 @@ protected:
     }
     
     /**
-     * @brief Convenience: Check if input getData succeeded
+     * @brief Convenience: Check if input get_data succeeded
      * 
      * For continuous input: Always true
-     * For multi-input secondary: False if getData failed (out of tolerance)
+     * For multi-input secondary: False if get_data failed (out of tolerance)
      */
     template<std::size_t Index = 0>
     bool is_input_valid() const {
@@ -418,14 +418,14 @@ protected:
 ### 3. is_new_data Flag
  **Continuous input**: Always `true` (fresh from mailbox)  
  **Multi-input primary**: Always `true` (triggers processing)  
- **Multi-input secondary**: Depends on getData tolerance check  
+ **Multi-input secondary**: Depends on get_data tolerance check  
    - `true` if timestamp within tolerance → fresh data  
    - `false` if reusing stale data from history  
 
 ### 4. is_valid Flag
 **Continuous input**: Always `true`  
 **Multi-input primary**: Always `true`  
-**Multi-input secondary**: `false` if getData failed  
+**Multi-input secondary**: `false` if get_data failed  
    - No data in history within tolerance  
    - Input not yet received  
    - History buffer empty  
@@ -441,7 +441,7 @@ FusedData process_multi_input(const IMUData& imu,
                                const GPSData& gps,
                                const LidarData& lidar) override {
     if (!is_input_valid<1>()) {
-        // GPS getData failed - use IMU + LiDAR only
+        // GPS get_data failed - use IMU + LiDAR only
         return fuse_without_gps(imu, lidar);
     }
     
@@ -449,10 +449,10 @@ FusedData process_multi_input(const IMUData& imu,
 }
 ```
 
-**Alternative**: Make getData optional at type level (Phase 7)
+**Alternative**: Make get_data optional at type level (Phase 7)
 ```cpp
 Inputs<IMUData, Optional<GPSData>, Optional<LidarData>>
-// getData won't block if optional input missing
+// get_data won't block if optional input missing
 ```
 
 ## Updated Test Implementation
@@ -523,7 +523,7 @@ protected:
         
         // Check secondary freshness (type-based is cleaner!)
         if (!is_input_valid<GPSData>()) {
-            std::cerr << "GPS getData failed\n";
+            std::cerr << "GPS get_data failed\n";
         } else if (!has_new_data<GPSData>()) {
             uint64_t age_ns = imu_meta.timestamp - gps_meta.timestamp;
             std::cout << "GPS stale (age: " << age_ns / 1'000'000 << " ms)\n";
@@ -598,7 +598,7 @@ protected:
 // Type-level optional
 Inputs<IMUData, Optional<GPSData>>
 
-// getData won't block if no GPS data available
+// get_data won't block if no GPS data available
 // is_input_valid<1>() returns false when missing
 ```
 
@@ -692,7 +692,7 @@ void continuous_loop() {
 ```cpp
 void multi_input_loop() {
     while (running_) {
-        // ... existing getData logic ...
+        // ... existing get_data logic ...
         
         if (primary_result) {
             // CHANGE 2: Store primary input timestamp

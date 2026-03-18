@@ -330,7 +330,7 @@ class MyModule : public Module<
 // Old RACK style:
 CameraProxy camera_proxy(&mailbox, 0, CAMERA, 0);
 CameraData_ data;
-camera_proxy.getData(data, timestamp);
+camera_proxy.get_data(data, timestamp);
 
 // New CommRaT style - no proxy needed!
 // Option 1: Direct mailbox access
@@ -709,7 +709,7 @@ class ExtendedModule : public Module<TempData, PeriodicInput,
 | **Type Safety** | void* buffers, manual pack | std::span<std::byte>, SeRTial auto |
 | **Command Dispatch** | msgInfo->getType() switch | Visitor pattern + if constexpr |
 | **Buffering** | Ring buffer with timestamps | Current data only (Phase 1) |
-| **Historical Queries** | getDataBufferIndex(time) | Not yet (Phase 5) |
+| **Historical Queries** | get_dataBufferIndex(time) | Not yet (Phase 5) |
 | **Proxy Layer** | RackDataProxy wrapper | Direct mailbox (no proxy) |
 | **Message Types** | int8_t MSG_* defines | std::span<std::byte> typed messages |
 

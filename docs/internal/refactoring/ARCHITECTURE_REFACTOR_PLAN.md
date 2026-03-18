@@ -46,7 +46,7 @@ subscription_messages.hpp: 86 lines
 **Phase 4**: Mailbox Layer Extracted
 - ✅ `mailbox/mailbox.hpp` - Base mailbox class
 - ✅ `mailbox/registry_mailbox.hpp` - Registry wrapper
-- ✅ `mailbox/historical_mailbox.hpp` - With getData support
+- ✅ `mailbox/historical_mailbox.hpp` - With get_data support
 - ✅ `mailbox/timestamped_ring_buffer.hpp` - Timestamped buffer
 
 **Phase 5**: registry_module.hpp Modularization

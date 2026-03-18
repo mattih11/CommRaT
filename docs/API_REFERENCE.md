@@ -45,7 +45,7 @@ using MyApp = commrat::CommRaT<
 **Provides:**
 - `MyApp::Module<OutputSpec, InputSpec, ...Commands>` - Module template
 - `MyApp::Mailbox<T>` - Mailbox template for type T
-- `MyApp::HistoricalMailbox<HistorySize>` - Buffered mailbox with getData()
+- `MyApp::HistoricalMailbox<HistorySize>` - Buffered mailbox with get_data()
 - `MyApp::Introspection` - Schema export helper
 - `MyApp::get_message_id<T>()` - Compile-time message ID lookup
 - `MyApp::is_registered<T>` - Check if type is in registry
@@ -206,7 +206,7 @@ template<typename... Ts>
 struct Inputs;
 ```
 - First type is primary (blocking receive)
-- Secondary inputs synchronized via `getData(primary_timestamp)`
+- Secondary inputs synchronized via `get_data(primary_timestamp)`
 - `process(const T1& in1, const T2& in2, ..., OutputType& output)` called when primary receives
 
 **Example:**
@@ -269,7 +269,7 @@ struct InputMetadata {
     uint32_t sequence_number;    // Message sequence number
     uint32_t message_id;         // Message type ID
     bool is_new_data;            // True if fresh, false if reused from history
-    bool is_valid;               // True if getData succeeded, false if failed
+    bool is_valid;               // True if get_data succeeded, false if failed
 };
 ```
 

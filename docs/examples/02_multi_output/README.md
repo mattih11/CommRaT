@@ -347,7 +347,7 @@ void process(TemperatureData& t, PressureData& p) override {  // ✅ Correct
 
 ## Next Steps
 
-- **Example 03**: Multi-input fusion with synchronized getData
+- **Example 03**: Multi-input fusion with synchronized get_data
 - **USER_GUIDE Section 6**: Deep dive into subscription protocol
 - Try adding a third output type (e.g., `WindData`)
 - Experiment with different update rates for each consumer
