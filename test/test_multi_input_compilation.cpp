@@ -57,20 +57,19 @@ using namespace commrat;
 // Test 1: Two inputs with explicit primary (first input)
 // ============================================================================
 
-class Test1_TwoInputsExplicitPrimary : public TestApp::Module<
+class Test1_TwoInputsExplicitPrimary : public TestApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData>,
-    PrimaryInput<IMUData>  // IMU is primary (first input)
+    Input<IMUData>, SyncedInput<GPSData>
 > {
 public:
-    using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>>::Module;
+    using TestApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
+    void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& output) override {
         // Should compile - primary is first input
         output = FusedData{
-            .position_x = static_cast<float>(gps.latitude),
-            .position_y = static_cast<float>(gps.longitude)
+            .position_x = static_cast<float>(gps->latitude),
+            .position_y = static_cast<float>(gps->longitude)
         };
     }
 };
@@ -79,19 +78,18 @@ protected:
 // Test 2: Two inputs with explicit primary (second input)
 // ============================================================================
 
-class Test2_TwoInputsSecondPrimary : public TestApp::Module<
+class Test2_TwoInputsSecondPrimary : public TestApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData>,
-    PrimaryInput<GPSData>  // GPS is primary (second input)
+    Input<IMUData>, SyncedInput<GPSData>
 > {
 public:
-    using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<GPSData>>::Module;
+    using TestApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
+    void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& output) override {
         // Should compile - primary is second input
         output = FusedData{
-            .position_x = static_cast<float>(gps.latitude),
+            .position_x = static_cast<float>(gps->latitude),
             .velocity_x = imu.accel_x
         };
     }
@@ -101,20 +99,19 @@ protected:
 // Test 3: Three inputs with explicit primary (middle input)
 // ============================================================================
 
-class Test3_ThreeInputsMiddlePrimary : public TestApp::Module<
+class Test3_ThreeInputsMiddlePrimary : public TestApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,
-    PrimaryInput<GPSData>  // GPS is primary (middle input)
+    Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>
 > {
 public:
-    using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>, PrimaryInput<GPSData>>::Module;
+    using TestApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, FusedData& output) override {
-        // Should compile - GPS drives rate, IMU and Lidar sync via getData
+    void process(const IMUData& imu, const Synced<GPSData>& gps, const Synced<LidarData>& lidar, FusedData& output) override {
+        // Should compile - GPS drives rate, IMU and Lidar sync via get_data
         output = FusedData{
-            .position_x = static_cast<float>(gps.latitude),
-            .position_z = lidar.distance,
+            .position_x = static_cast<float>(gps->latitude),
+            .position_z = lidar->distance,
             .velocity_x = imu.accel_x
         };
     }
@@ -124,16 +121,16 @@ protected:
 // Test 4: Two inputs with implicit primary (no PrimaryInput<> specified)
 // ============================================================================
 
-class Test4_TwoInputsImplicitPrimary : public TestApp::Module<
+class Test4_TwoInputsImplicitPrimary : public TestApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData>
+    Input<IMUData>, SyncedInput<GPSData>
     // No PrimaryInput - should default to first input (IMUData)
 > {
 public:
-    using TestApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>>::Module;
+    using TestApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
+    void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& output) override {
         // Should compile - first input (IMU) implicitly primary
         output = FusedData{
             .velocity_y = imu.accel_y
@@ -145,20 +142,19 @@ protected:
 // Test 5: Multi-input + Multi-output with explicit primary
 // ============================================================================
 
-class Test5_MultiInputMultiOutput : public TestApp::Module<
-    Outputs<FusedData, DiagnosticsData>,
-    Inputs<IMUData, GPSData, LidarData>,
-    PrimaryInput<IMUData>  // IMU drives rate
+class Test5_MultiInputMultiOutput : public TestApp::Module2<
+    Output<FusedData>, Output<DiagnosticsData>,
+    Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>
 > {
 public:
-    using TestApp::Module<Outputs<FusedData, DiagnosticsData>, Inputs<IMUData, GPSData, LidarData>, PrimaryInput<IMUData>>::Module;
+    using TestApp::Module2<Output<FusedData>, Output<DiagnosticsData>, Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, 
+    void process(const IMUData& imu, const Synced<GPSData>& gps, const Synced<LidarData>& lidar, 
                  FusedData& fused, DiagnosticsData& diag) override {
         // Should compile - multi-input + multi-output signature
-        fused.position_x = static_cast<float>(gps.latitude);
-        fused.position_z = lidar.distance;
+        fused.position_x = static_cast<float>(gps->latitude);
+        fused.position_z = lidar->distance;
         
         diag.sync_quality = 0.95f;
         diag.sync_failures = 0;

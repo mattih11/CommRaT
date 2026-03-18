@@ -5,11 +5,11 @@
  * Tests complete multi-input Module lifecycle:
  * - 3 producer modules: IMU (100Hz), GPS (10Hz), Lidar (20Hz)
  * - 1 fusion consumer: Inputs<IMU, GPS, Lidar> with PrimaryInput<IMU>
- * - Validates: subscription protocol, getData synchronization, process calling, publishing
+ * - Validates: subscription protocol, get_data synchronization, process calling, publishing
  * 
  * Expected behavior:
  * - IMU drives rate at 100Hz (primary input)
- * - GPS and Lidar sync via getData with tolerance
+ * - GPS and Lidar sync via get_data with tolerance
  * - Fusion module publishes at IMU rate (100Hz)
  * - All inputs synchronized within timestamp tolerance
  * 
@@ -19,7 +19,7 @@
  *   * PeriodicInput (IMU/GPS/Lidar): timestamp = Time::now()
  *   * Multi-input (Fusion): timestamp = primary_input.timestamp (IMU timestamp)
  * - 533 successful fusion outputs PROVES timestamp logic works correctly
- * - getData() synchronization relies on TimsHeader.timestamp - if timestamps
+ * - get_data() synchronization relies on TimsHeader.timestamp - if timestamps
  *   were wrong, fusion would fail to get synchronized inputs
  * 
  * Phase 6.10 Update - Automatic Timestamp Management:
@@ -100,9 +100,9 @@ void signal_handler(int signal) {
 // ============================================================================
 
 // IMU Module - Primary input source (100Hz)
-class IMUModule : public FusionApp::Module<Output<IMUData>, PeriodicInput> {
+class IMUModule : public FusionApp::Module2<Output<IMUData>, Period<10>> {
 public:
-    using FusionApp::Module<Output<IMUData>, PeriodicInput>::Module;
+    using FusionApp::Module2<Output<IMUData>, Period<10>>::Module2;
     
 protected:
     void process(IMUData& output) override {
@@ -135,9 +135,9 @@ protected:
 };
 
 // GPS Module - Secondary input (10Hz)
-class GPSModule : public FusionApp::Module<Output<GPSData>, PeriodicInput> {
+class GPSModule : public FusionApp::Module2<Output<GPSData>, Period<100>> {
 public:
-    using FusionApp::Module<Output<GPSData>, PeriodicInput>::Module;
+    using FusionApp::Module2<Output<GPSData>, Period<100>>::Module2;
     
 protected:
     void process(GPSData& output) override {
@@ -163,9 +163,9 @@ protected:
 };
 
 // Lidar Module - Secondary input (20Hz)
-class LidarModule : public FusionApp::Module<Output<LidarData>, PeriodicInput> {
+class LidarModule : public FusionApp::Module2<Output<LidarData>, Period<50>> {
 public:
-    using FusionApp::Module<Output<LidarData>, PeriodicInput>::Module;
+    using FusionApp::Module2<Output<LidarData>, Period<50>>::Module2;
     
 protected:
     void process(LidarData& output) override {
@@ -194,15 +194,15 @@ protected:
 // Fusion Consumer Module
 // ============================================================================
 
-class SensorFusionModule : public FusionApp::Module<
+class SensorFusionModule : public FusionApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>  // IMU (first) is automatically primary
+    Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>  // IMU (first) is automatically primary
 > {
 public:
-    using FusionApp::Module<Output<FusedData>, Inputs<IMUData, GPSData, LidarData>>::Module;
+    using FusionApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>>::Module2;
     
 protected:
-    void process(const IMUData& imu, const GPSData& gps, const LidarData& lidar, FusedData& output) override {
+    void process(const IMUData& imu, const Synced<GPSData>& gps, const Synced<LidarData>& lidar, FusedData& output) override {
         uint32_t count = fusion_count.fetch_add(1);
         
         // Integrate IMU acceleration to velocity
@@ -214,13 +214,13 @@ protected:
         // Fuse GPS position with Lidar distance
         // Phase 6.10: No manual timestamp - Module auto-sets to primary input (IMU) timestamp
         FusedData fused{
-            .position_x = static_cast<float>(gps.latitude * 111000.0),  // Rough meters
-            .position_y = static_cast<float>(gps.longitude * 111000.0 * std::cos(gps.latitude * M_PI / 180.0)),
-            .position_z = gps.altitude + lidar.distance,
+            .position_x = static_cast<float>(gps->latitude * 111000.0),  // Rough meters
+            .position_y = static_cast<float>(gps->longitude * 111000.0 * std::cos(gps->latitude * M_PI / 180.0)),
+            .position_z = gps->altitude + lidar->distance,
             .velocity_x = velocity_x_,
             .velocity_y = velocity_y_,
             .velocity_z = velocity_z_,
-            .fusion_quality = calculate_quality(imu, gps, lidar),
+            .fusion_quality = calculate_quality(imu, *gps, *lidar),
             .inputs_used = 0x7  // All 3 inputs used (0x1 | 0x2 | 0x4)
         };
         
@@ -257,8 +257,8 @@ int main() {
     std::cout << "=== Phase 6.9: 3-Input Sensor Fusion Test ===\n\n";
     std::cout << "Configuration:\n";
     std::cout << "  - IMU:   100Hz (primary input, drives fusion rate)\n";
-    std::cout << "  - GPS:   10Hz  (secondary, synced via getData)\n";
-    std::cout << "  - Lidar: 20Hz  (secondary, synced via getData)\n";
+    std::cout << "  - GPS:   10Hz  (secondary, synced via get_data)\n";
+    std::cout << "  - Lidar: 20Hz  (secondary, synced via get_data)\n";
     std::cout << "  - Fusion: Outputs at IMU rate (100Hz)\n\n";
     
     try {

@@ -36,9 +36,9 @@ using TestApp = CommRaT<
 // Test 1: Multi-Output with PeriodicInput
 // ============================================================================
 
-class MultiOutputPeriodicModule : public TestApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
+class MultiOutputPeriodicModule : public TestApp::Module2<Output<DataA>, Output<DataB>, Period<100>> {
 public:
-    using Module::Module;
+    using Module2::Module2;
     int process_call_count = 0;
     
     // Multi-output signature: void process(T1& out1, T2& out2)
@@ -86,9 +86,9 @@ void test_multi_output_periodic() {
 // Test 2: Multi-Output with Continuous Input
 // ============================================================================
 
-class MultiOutputContinuousModule : public TestApp::Module<Outputs<DataA, DataB>, Input<InputData>> {
+class MultiOutputContinuousModule : public TestApp::Module2<Output<DataA>, Output<DataB>, Input<InputData>> {
 public:
-    using Module::Module;
+    using Module2::Module2;
     int process_call_count = 0;
     
     // Multi-output continuous signature: void process_continuous(const Input&, T1& out1, T2& out2)
@@ -139,11 +139,11 @@ void test_multi_output_continuous() {
 void test_type_aliases() {
     std::cout << "\n[Test 3] Type Aliases for Multi-Output\n";
     
-    using M1 = TestApp::Module<Outputs<DataA, DataB>, PeriodicInput>;
+    using M1 = TestApp::Module2<Output<DataA>, Output<DataB>, Period<100>>;
     static_assert(std::is_same_v<M1::OutputData, void>,
                   "Multi-output OutputData should be void");
     
-    using M2 = TestApp::Module<Outputs<DataA, DataB>, Input<InputData>>;
+    using M2 = TestApp::Module2<Output<DataA>, Output<DataB>, Input<InputData>>;
     static_assert(std::is_same_v<M2::OutputData, void>,
                   "Multi-output continuous OutputData should be void");
     static_assert(std::is_same_v<M2::InputData, InputData>,
