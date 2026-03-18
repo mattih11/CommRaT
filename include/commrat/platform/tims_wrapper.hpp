@@ -118,12 +118,25 @@ public:
     // Modern C++ interface using std::span<std::byte>
     // Casting to void* happens here at the TiMS boundary
     ssize_t receive_raw_bytes(std::span<std::byte> buffer, Milliseconds timeout) {
-        return receive_raw(buffer.data(), buffer.size(), timeout);
+        return receive_raw(buffer.data(), buffer.size(), timeout, nullptr);
+    }
+    
+    // Receive with TIMS header metadata (src/dest addresses)
+    struct TimsMetadata {
+        uint32_t src{0};
+        uint32_t dest{0};
+        uint32_t seq_nr{0};
+        uint8_t priority{0};
+        uint8_t flags{0};
+    };
+    
+    ssize_t receive_raw_bytes(std::span<std::byte> buffer, Milliseconds timeout, TimsMetadata* metadata) {
+        return receive_raw(buffer.data(), buffer.size(), timeout, metadata);
     }
     
 private:
     TimsResult send_raw(const void* data, size_t size, uint32_t dest_mailbox_id);
-    ssize_t receive_raw(void* buffer, size_t buffer_size, Milliseconds timeout);
+    ssize_t receive_raw(void* buffer, size_t buffer_size, Milliseconds timeout, TimsMetadata* metadata = nullptr);
     
     TimsConfig config_;
     int tims_fd_; // TIMS file descriptor
