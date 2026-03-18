@@ -54,10 +54,10 @@ inline void signal_handler(int signal) {
  *     .instance_id = 1,
  *     .period = Milliseconds(100)
  * };
- * return module_main<SensorModule, MyApp>(config);
+ * return module_main<SensorModule>(config);
  * @endcode
  */
-template<typename ModuleType, typename Registry>
+template<typename ModuleType>
 int module_main(const ModuleConfig& config) {
     try {
         // Install signal handlers
@@ -110,7 +110,7 @@ int module_main(const ModuleConfig& config) {
  * @param argv Argument vector
  * @return Exit code (0=success, 1=error, 130=SIGINT)
  */
-template<typename ModuleType, typename Registry>
+template<typename ModuleType>
 int module_main(int argc, char** argv) {
     try {
         ModuleConfig config;
@@ -131,7 +131,7 @@ int module_main(int argc, char** argv) {
         config = rfl::json::load<ModuleConfig>(filename).value();
         
         // Call the main template function
-        return module_main<ModuleType, Registry>(config);
+        return module_main<ModuleType>(config);
         
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
@@ -152,18 +152,17 @@ int module_main(int argc, char** argv) {
  * 3. Help: ./module --help
  * 
  * @param ModuleType Module class to instantiate
- * @param Registry Message registry (CommRaT<...>)
  * 
  * Example:
  * @code
- * class SensorModule : public MyApp::Module<Output<Data>, PeriodicInput> {
- *     Data process() override { return Data{...}; }
+ * class SensorModule : public MyApp::Module<Output<Data>, Period<100>> {
+ *     Data process(Data& output) override { output = {...}; }
  * };
  * 
  * COMMRAT_MODULE_MAIN(SensorModule, MyApp)
  * @endcode
  */
-#define COMMRAT_MODULE_MAIN(ModuleType, Registry) \
+#define COMMRAT_MODULE_MAIN(ModuleType) \
     int main(int argc, char** argv) { \
-        return commrat::module_main<ModuleType, Registry>(argc, argv); \
+        return commrat::module_main<ModuleType>(argc, argv); \
     }

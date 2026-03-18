@@ -13,11 +13,14 @@
 namespace commrat {
 
 // TIMS message header (required by TIMS protocol)
+// Mirrors RACK's tims_msg_head structure
 struct TimsHeader {
     uint32_t msg_type;
     uint32_t msg_size;      // Will be set by serialization
     uint64_t timestamp;     // Will be set by send()
     uint32_t seq_number;    // Will be set by send()
+    uint32_t dest;          // Destination mailbox address
+    uint32_t src;           // Source mailbox address (for replies)
     uint32_t flags;
 };
 

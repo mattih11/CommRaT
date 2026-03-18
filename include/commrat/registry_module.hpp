@@ -3,7 +3,7 @@
 // Mailbox infrastructure
 #include "commrat/mailbox/registry_mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
-#include "commrat/mailbox/historical_mailbox.hpp"
+// #include "commrat/mailbox/historical_mailbox.hpp"  // OBSOLETE: Replaced by OutputBuffer
 
 // System messaging and platform
 #include "commrat/messaging/system/subscription_messages.hpp"
