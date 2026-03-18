@@ -35,16 +35,21 @@ template<
     typename... CommandTypes
 >
 struct MailboxSet {
-    // CMD mailbox receives user commands and sends outputs
+    // CMD mailbox configuration:
+    // - If no commands: TypedMailbox with just OutputType (send outputs only)
+    // - If has commands: TypedMailbox with CommandTypes + OutputType (receive commands, send outputs)
     using CmdMailbox = std::conditional_t<
         sizeof...(CommandTypes) == 0,
-        // No user commands: send-only mailbox for outputs
-        TypedMailbox<UserRegistry, SendOnlyTypes<OutputType>>,
-        // User commands: receive commands, send outputs
-        TypedMailbox<UserRegistry, ReceiveTypes<CommandTypes...>, SendOnlyTypes<OutputType>>
+        // No commands: just output type (only sends, buffer minimal)
+        TypedMailbox<UserRegistry, OutputType>,
+        // Has commands: all types (receive commands, send outputs, buffer=max(all))
+        TypedMailbox<UserRegistry, CommandTypes..., OutputType>
     >;
     
-    using WorkMailbox = RegistryMailbox<SystemRegistry>;
+    // WORK mailbox uses bare Mailbox for system messages
+    using WorkMailbox = Mailbox<SubscribeRequest, UnsubscribeRequest>;
+    
+    // PUBLISH mailbox for output data
     using PublishMailbox = TypedMailbox<UserRegistry, OutputType>;
     // DATA mailbox not needed here - inputs handled separately at module level
     

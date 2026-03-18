@@ -11,7 +11,7 @@ namespace commrat {
  * 
  * Manages input metadata storage and updates:
  * - update_input_metadata(): Populate from received TimsMessage
- * - mark_input_invalid(): Mark input as stale/invalid (getData failed)
+ * - mark_input_invalid(): Mark input as stale/invalid (get_data failed)
  * 
  * Used by loop executors and multi-input processors to maintain
  * accurate timestamp/freshness tracking for all inputs.
@@ -49,9 +49,9 @@ protected:
     }
     
     /**
-     * @brief Mark input metadata as invalid (getData failed)
+     * @brief Mark input metadata as invalid (get_data failed)
      * 
-     * Called when a secondary input's getData() fails in multi-input
+     * Called when a secondary input's get_data() fails in multi-input
      * synchronization. Marks the input as invalid and not fresh.
      * 
      * @param index Input index (0-based)

@@ -21,7 +21,7 @@ struct InputMetadataStorage {
     uint32_t sequence_number{0};     // Message sequence number (from TimsHeader)
     uint32_t message_id{0};          // Message type ID (from TimsHeader)
     bool is_new_data{false};         // True if fresh, false if stale/reused
-    bool is_valid{false};            // True if getData succeeded, false if failed
+    bool is_valid{false};            // True if get_data succeeded, false if failed
 };
 
 /**
@@ -38,7 +38,7 @@ struct InputMetadata {
     uint32_t sequence_number;    ///< Message sequence number
     uint32_t message_id;         ///< Message type ID
     bool is_new_data;            ///< True if freshly received, false if stale/reused
-    bool is_valid;               ///< True if getData succeeded, false if failed
+    bool is_valid;               ///< True if get_data succeeded, false if failed
     
     // Helper to get input type (for debugging/logging)
     static constexpr const char* type_name() { return typeid(T).name(); }

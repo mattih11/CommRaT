@@ -25,7 +25,10 @@ constexpr uint32_t INSTANCE_ID_MASK = 0x0000FF00;
 constexpr uint32_t MAILBOX_INDEX_MASK = 0x000000FF;
 
 // Mailbox index constants (RACK-style)
-constexpr uint8_t CMD_MBX_BASE = 0;  // CMD mailboxes start at index 0
+constexpr uint8_t CMD_MBX_BASE = 0;  // CMD mailboxes have index 0
+constexpr uint8_t WORK_MBX_BASE = 1;  // WORK mailboxes have index 1
+constexpr uint8_t PUBLISH_MBX_BASE = 2;  // PUBLISH mailboxes have index 2
+constexpr uint8_t DATA_MBX_BASE = 3;  // DATA mailboxes start at index 3
 
 // ============================================================================
 // Address Encoding/Decoding Functions
@@ -112,22 +115,37 @@ inline constexpr uint8_t extract_message_type_from_address(uint32_t base_addr) {
 // ============================================================================
 
 /**
+ * @brief Helper to get type_id for address calculation (avoids tuple_element on empty tuple)
+ */
+template<typename OutputData, typename OutputTypesTuple, typename UserRegistry>
+struct ComputeTypeId {
+    // Single output (OutputData is the type)
+    static constexpr uint32_t data_type_id = UserRegistry::template get_message_id<OutputData>();
+    static constexpr uint8_t value = static_cast<uint8_t>(data_type_id & 0xFF);
+};
+
+// Specialization for multi-output (OutputData=void, OutputTypesTuple has elements)
+template<typename FirstOutput, typename... RestOutputs, typename UserRegistry>
+struct ComputeTypeId<void, std::tuple<FirstOutput, RestOutputs...>, UserRegistry> {
+    // Multi-output: use first output type
+    static constexpr uint32_t data_type_id = UserRegistry::template get_message_id<FirstOutput>();
+    static constexpr uint8_t value = static_cast<uint8_t>(data_type_id & 0xFF);
+};
+
+// Specialization for no outputs (OutputData=void, OutputTypesTuple empty)
+template<typename UserRegistry>
+struct ComputeTypeId<void, std::tuple<>, UserRegistry> {
+    static constexpr uint8_t value = 0;  // Generic type_id
+};
+
+/**
  * @brief Calculate base mailbox address from output type, system_id, and instance_id
  * New format: [type_id:8][system_id:8][instance_id:8][mailbox_index:8]
  * Returns base address with mailbox_index=0
  */
 template<typename OutputData, typename OutputTypesTuple, typename UserRegistry>
 static constexpr uint32_t calculate_base_address(uint8_t system_id, uint8_t instance_id) {
-    // Get message ID for output data type from registry
-    // For multi-output, use first output type from the tuple
-    using BaseType = std::conditional_t<
-        std::is_void_v<OutputData>,
-        std::tuple_element_t<0, OutputTypesTuple>,
-        OutputData
-    >;
-    constexpr uint32_t data_type_id = UserRegistry::template get_message_id<BaseType>();
-    // Use lower 8 bits of message ID for type_id field
-    constexpr uint8_t type_id = static_cast<uint8_t>(data_type_id & 0xFF);
+    constexpr uint8_t type_id = ComputeTypeId<OutputData, OutputTypesTuple, UserRegistry>::value;
     return get_base_address(type_id, system_id, instance_id);
 }
 

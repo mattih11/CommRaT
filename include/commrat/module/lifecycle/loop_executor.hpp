@@ -166,7 +166,7 @@ public:
     /**
      * @brief Multi-input loop - synchronized multi-input processing
      * 
-     * Blocks on primary input, synchronizes secondary inputs via getData(),
+     * Blocks on primary input, synchronizes secondary inputs via get_data(),
      * processes all inputs together.
      * Phase 6.10: Uses primary input timestamp as synchronization point.
      * 

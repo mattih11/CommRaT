@@ -63,12 +63,18 @@ struct MakeMailboxSetTuple<UserRegistry, std::tuple<OutputTypes...>, CommandType
 template<typename UserRegistry, typename... Ts>
 struct MakeTypedCmdMailbox;
 
+// Helper to extract Mailbox type from Registry
+template<typename... MessageDefs>
+Mailbox<MessageDefs...> extract_mailbox_from_registry(MessageRegistry<MessageDefs...>*);
+
 template<typename UserRegistry, typename... Ts>
 struct MakeTypedCmdMailbox<UserRegistry, std::tuple<Ts...>> {
     using type = std::conditional_t<
         sizeof...(Ts) == 0,
-        RegistryMailbox<UserRegistry>,  // No types → regular mailbox
-        TypedMailbox<UserRegistry, Ts...>  // Has types → restrict
+        // No types → use bare Mailbox extracted from registry
+        decltype(extract_mailbox_from_registry(static_cast<UserRegistry*>(nullptr))),
+        // Has types → TypedMailbox with type restrictions
+        TypedMailbox<UserRegistry, Ts...>
     >;
 };
 
@@ -126,8 +132,10 @@ template<typename UserRegistry, typename... Ts>
 struct MakeTypedDataMailbox<UserRegistry, std::tuple<Ts...>> {
     using type = std::conditional_t<
         sizeof...(Ts) == 0,
-        RegistryMailbox<UserRegistry>,  // No inputs → regular mailbox
-        TypedMailbox<UserRegistry, Ts...>  // Has inputs → restrict to input types
+        // No inputs → use bare Mailbox from registry
+        decltype(extract_mailbox_from_registry(static_cast<UserRegistry*>(nullptr))),
+        // Has inputs → TypedMailbox with type restrictions
+        TypedMailbox<UserRegistry, Ts...>
     >;
 };
 
@@ -188,7 +196,7 @@ struct ModuleTypes {
     // CMD mailbox: Buffer sized for commands, can send commands + outputs
     // Uses SendOnly<...> to mark output types as send-only (no buffer impact)
     using CmdMailbox = typename MakeTypedCmdMailboxWithSend<UserRegistry, CommandTuple, OutputTypesTuple>::type;
-    using WorkMailbox = RegistryMailbox<SystemRegistry>;
+    using WorkMailbox = Mailbox<SubscribeRequest, UnsubscribeRequest>;
     using PublishMailbox = typename MakeTypedCmdMailbox<UserRegistry, OutputTypesTuple>::type;
     
     using DataTypesTuple = typename ExtractDataTypes<InputSpec>::type;
