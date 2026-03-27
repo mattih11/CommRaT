@@ -74,6 +74,9 @@ public:
         : system_id_(0)
         , instance_id_(0)
         , cmd_address_(0)
+        , publish_address_(0)
+        , cmd_mailbox_(std::nullopt)  // Explicitly initialize as empty
+        , publish_mailbox_(std::nullopt)  // Explicitly initialize as empty
         , buffer_(Milliseconds(50))  // Default tolerance
         , default_tolerance_(Milliseconds(50))
     {}
@@ -90,15 +93,19 @@ public:
         : system_id_(system_id)
         , instance_id_(instance_id)
         , cmd_address_(0)  // Set in initialize()
+        , publish_address_(0)  // Set in initialize()
+        , cmd_mailbox_(std::nullopt)  // Explicitly initialize as empty
+        , publish_mailbox_(std::nullopt)  // Explicitly initialize as empty
         , buffer_(default_tolerance)
         , default_tolerance_(default_tolerance)
     {}
     
     /**
-     * @brief Initialize output with proper CMD mailbox address
+     * @brief Initialize output (allocation phase - NOT real-time safe)
      * 
-     * Must be called before using the output. Creates CMD mailbox with address
-     * based on this output's type_id.
+     * Must be called before using the output. Creates CMD and PUBLISH mailboxes
+     * with addresses based on this output's type_id.
+     * Does NOT start mailboxes - call start() separately.
      * 
      * @param sys_id Module's system ID
      * @param inst_id Module's instance ID
@@ -115,7 +122,7 @@ public:
             sys_id, inst_id, CMD_MBX_BASE
         );
         
-        // Create CMD mailbox
+        // Create CMD mailbox (allocation only, no start)
         MailboxConfig cmd_config{
             .mailbox_id = cmd_address_,
             .message_slots = 10,  // Commands are infrequent
@@ -125,7 +132,6 @@ public:
         };
         
         cmd_mailbox_.emplace(cmd_config);
-        cmd_mailbox_->start();
         
         // Calculate PUBLISH mailbox address (WORK mailbox base)
         // This is for SENDING output data to subscribers
@@ -133,7 +139,7 @@ public:
             sys_id, inst_id, WORK_MBX_BASE
         );
         
-        // Create PUBLISH mailbox
+        // Create PUBLISH mailbox (allocation only, no start)
         MailboxConfig publish_config{
             .mailbox_id = publish_address_,
             .message_slots = 50,  // May send to multiple subscribers
@@ -143,7 +149,46 @@ public:
         };
         
         publish_mailbox_.emplace(publish_config);
-        publish_mailbox_->start();
+    }
+    
+    /**
+     * @brief Start mailboxes (activation phase - real-time safe)
+     * 
+     * Activates CMD and PUBLISH mailboxes. Must be called after initialize().
+     * Real-time safe: no allocations, only activates existing resources.
+     * 
+     * @throws std::runtime_error if mailboxes not initialized or TiMS start fails
+     */
+    void start() {
+        if (!cmd_mailbox_ || !publish_mailbox_) {
+            throw std::runtime_error("ModuleOutput not initialized - call initialize() first");
+        }
+        
+        auto cmd_result = cmd_mailbox_->start();
+        if (!cmd_result) {
+            throw std::runtime_error("Failed to start CMD mailbox: TiMS initialization failed");
+        }
+        
+        auto publish_result = publish_mailbox_->start();
+        if (!publish_result) {
+            cmd_mailbox_->stop();  // Cleanup on failure
+            throw std::runtime_error("Failed to start PUBLISH mailbox: TiMS initialization failed");
+        }
+    }
+    
+    /**
+     * @brief Stop mailboxes (deactivation phase - real-time safe)
+     * 
+     * Deactivates CMD and PUBLISH mailboxes without deallocating them.
+     * Real-time safe: no allocations or syscalls.
+     */
+    void stop() {
+        if (cmd_mailbox_) {
+            cmd_mailbox_->stop();
+        }
+        if (publish_mailbox_) {
+            publish_mailbox_->stop();
+        }
     }
     
     /**
@@ -455,8 +500,8 @@ private:
     InstanceId instance_id_;
     uint32_t cmd_address_;                                          // This output's command mailbox address
     uint32_t publish_address_;                                      // This output's publish mailbox address
-    std::optional<CmdMailbox> cmd_mailbox_;                         // Command mailbox for this output
-    std::optional<PublishMailbox> publish_mailbox_;                 // Publish mailbox for sending data
+    std::optional<CmdMailbox> cmd_mailbox_ = std::nullopt;          // Command mailbox for this output (default empty)
+    std::optional<PublishMailbox> publish_mailbox_ = std::nullopt;  // Publish mailbox for sending data (default empty)
     OutputBuffer<TimsMessage<T>, SLOTS> buffer_;                    // Timestamped data storage
     Milliseconds default_tolerance_;                                // Default tolerance for get_data
     uint32_t next_seq_number_ = 0;                                  // Sequence counter

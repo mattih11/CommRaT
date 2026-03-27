@@ -52,9 +52,9 @@ using TestRegistry = CommRaT<
 
 // Simple producer module
 template<typename OutputType>
-class ProducerModule : public TestRegistry::Module<Output<OutputType>, PeriodicInput> {
+class ProducerModule : public TestRegistry::Module2<Output<OutputType>, Period<100>> {
 public:
-    using Base = TestRegistry::Module<Output<OutputType>, PeriodicInput>;
+    using Base = TestRegistry::Module2<Output<OutputType>, Period<100>>;
     using Base::Base;  // Inherit constructors
     
 protected:
@@ -71,12 +71,13 @@ using ProducerB = ProducerModule<SensorB>;
 using ProducerC = ProducerModule<SensorC>;
 
 // Multi-output producer
-class MultiProducer : public TestRegistry::Module<
-    Outputs<SensorA, SensorB>,
-    PeriodicInput
+class MultiProducer : public TestRegistry::Module2<
+    Output<SensorA>, 
+    Output<SensorB>,
+    Period<100>
 > {
 public:
-    using Base = TestRegistry::Module<Outputs<SensorA, SensorB>, PeriodicInput>;
+    using Base = TestRegistry::Module2<Output<SensorA>, Output<SensorB>, Period<100>>;
     using Base::Base;  // Inherit constructors
     
 protected:
@@ -92,9 +93,9 @@ private:
 
 // Consumer modules (Input<T> with Output<T> for pass-through)
 template<typename InputType>
-class ConsumerModule : public TestRegistry::Module<Output<InputType>, Input<InputType>> {
+class ConsumerModule : public TestRegistry::Module2<Output<InputType>, Input<InputType>> {
 public:
-    using Base = TestRegistry::Module<Output<InputType>, Input<InputType>>;
+    using Base = TestRegistry::Module2<Output<InputType>, Input<InputType>>;
     using Base::Base;
     
     std::atomic<uint32_t> received_count_{0};

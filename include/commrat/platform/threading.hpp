@@ -76,9 +76,9 @@ struct ThreadConfig {
 class Thread {
 public:
     /**
-     * @brief Default constructor - no thread running
+     * @brief Default constructor - create thread slot with default config
      */
-    Thread() = default;
+    Thread() : config_{} {}  // Initialize with default ThreadConfig
     
     /**
      * @brief Create and start thread with function and default config
@@ -99,8 +99,8 @@ public:
     template<typename Func>
     Thread(const ThreadConfig& config, Func&& func)
         : config_(config), 
-          thread_([this, f = std::forward<Func>(func)]() mutable {
-              this->thread_function(std::move(f));
+          thread_([cfg = config, f = std::forward<Func>(func)]() mutable {
+              thread_function_static(cfg, std::move(f));
           }) {
     }
     
@@ -187,6 +187,26 @@ public:
 
 private:
     /**
+     * @brief Static thread entry point - applies config and runs user function
+     * Used when Thread object may be moved after construction
+     */
+    template<typename Func>
+    static void thread_function_static(ThreadConfig config, Func&& func) {
+        // Set thread name (Linux-specific)
+#ifdef __linux__
+        if (!config.name.empty()) {
+            pthread_setname_np(pthread_self(), config.name.c_str());
+        }
+#endif
+        
+        // Set priority and scheduling policy
+        apply_thread_config_static(config);
+        
+        // Run user function
+        func();
+    }
+    
+    /**
      * @brief Thread entry point - applies config and runs user function
      */
     template<typename Func>
@@ -239,6 +259,44 @@ private:
             cpu_set_t cpuset;
             CPU_ZERO(&cpuset);
             CPU_SET(config_.cpu_affinity, &cpuset);
+            pthread_setaffinity_np(thread_handle, sizeof(cpu_set_t), &cpuset);
+        }
+    }
+    
+    /**
+     * @brief Static version of apply_thread_config for when Thread may be moved
+     */
+    static void apply_thread_config_static(const ThreadConfig& config) {
+        pthread_t thread_handle = pthread_self();
+        
+        // Set scheduling policy and priority
+        if (config.policy != SchedulingPolicy::NORMAL || 
+            config.priority != ThreadPriority::NORMAL) {
+            
+            int policy = SCHED_OTHER;
+            switch (config.policy) {
+                case SchedulingPolicy::FIFO:
+                    policy = SCHED_FIFO;
+                    break;
+                case SchedulingPolicy::ROUND_ROBIN:
+                    policy = SCHED_RR;
+                    break;
+                default:
+                    policy = SCHED_OTHER;
+            }
+            
+            struct sched_param param;
+            param.sched_priority = static_cast<int>(config.priority);
+            
+            // Note: Requires CAP_SYS_NICE capability or root for SCHED_FIFO/RR
+            pthread_setschedparam(thread_handle, policy, &param);
+        }
+        
+        // Set CPU affinity
+        if (config.cpu_affinity >= 0) {
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(config.cpu_affinity, &cpuset);
             pthread_setaffinity_np(thread_handle, sizeof(cpu_set_t), &cpuset);
         }
     }

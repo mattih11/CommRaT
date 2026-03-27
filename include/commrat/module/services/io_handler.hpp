@@ -187,6 +187,10 @@ protected:
      */
     template<typename ModuleConfig, typename WorkMailbox>
     void initialize_io(const ModuleConfig& config, WorkMailbox& work_mailbox) {
+        // CRITICAL: Emplace IOTuple BEFORE accessing get_output()/get_input()!
+        // get_output() dereferences io_instances_, so it MUST be initialized first.
+        io_instances_.emplace();
+        
         initialize_outputs(std::make_index_sequence<num_outputs>{}, config);
         initialize_inputs(std::make_index_sequence<num_inputs>{}, config, work_mailbox);
     }
@@ -225,6 +229,40 @@ protected:
     }
     
     /**
+     * @brief Start all outputs (real-time safe activation)
+     */
+    template<size_t... OutputIndices>
+    void start_outputs(std::index_sequence<OutputIndices...>) {
+        (start_output<OutputIndices>(), ...);
+    }
+    
+    /**
+     * @brief Start single output at index (real-time safe)
+     */
+    template<size_t OutputIndex>
+    void start_output() {
+        auto& output = get_output<OutputIndex>();
+        output.start();
+    }
+    
+    /**
+     * @brief Stop all outputs (real-time safe deactivation)
+     */
+    template<size_t... OutputIndices>
+    void stop_outputs(std::index_sequence<OutputIndices...>) {
+        (stop_output<OutputIndices>(), ...);
+    }
+    
+    /**
+     * @brief Stop single output at index (real-time safe)
+     */
+    template<size_t OutputIndex>
+    void stop_output() {
+        auto& output = get_output<OutputIndex>();
+        output.stop();
+    }
+    
+    /**
      * @brief Initialize all inputs
      */
     template<size_t... InputIndices, typename ModuleConfig, typename WorkMailbox>
@@ -253,10 +291,10 @@ protected:
             src_inst_id = sources[InputIndex].instance_id;
         }
         
-        // Initialize input with work_mailbox and source addresses
-        // TODO: Inputs are constructed directly in tuple, not post-initialized
-        // This will be implemented when tuple construction is working
-        // input.initialize(work_mailbox, src_sys_id, src_inst_id);
+        // TODO: Initialize input with work_mailbox and source addresses
+        // Inputs still have nullptr mailbox pointers from default construction
+        // This needs to be fixed by creating DATA mailboxes and calling initialize()
+        // input.initialize(work_mailbox, data_mbx, src_sys_id, src_inst_id);
     }
     
     // ========================================================================

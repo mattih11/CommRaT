@@ -22,7 +22,7 @@ struct MediumData {
 };
 
 struct LargeData {
-    std::array<uint8_t, 2000> buffer;  // 2000 bytes payload
+    std::array<uint8_t, 3000> buffer;  // 3000 bytes payload
 };
 
 // Create registry with all types
@@ -49,11 +49,21 @@ int main() {
     std::cout << "  LargeData:  " << large_size << " bytes\n";
     std::cout << "\n";
     
-    // Test max_message_size (should be largest)
+    // Test max_message_size (should account for GetDataReplyPayload overhead)
+    // GetDataReplyPayload<T> = T + bool + uint64_t + int64_t = T + ~24 bytes
+    constexpr size_t getdata_reply_size = sertial::Message<commrat::TimsMessage<
+        commrat::GetDataReplyPayload<LargeData>>>::max_buffer_size;
+    
     constexpr size_t registry_max = TestRegistry::max_message_size;
-    std::cout << "Registry::max_message_size: " << registry_max << " bytes\n";
-    assert(registry_max == large_size);
-    std::cout << "✓ Correct: matches LargeData size\n\n";
+    std::cout << "Registry::max_message_size:        " << registry_max << " bytes\n";
+    std::cout << "LargeData alone:                   " << large_size << " bytes\n";
+    std::cout << "GetDataReplyPayload<LargeData>:    " << getdata_reply_size << " bytes\n";
+    std::cout << "Difference (GetData overhead):     " << (getdata_reply_size - large_size) << " bytes\n";
+    
+    // Registry auto-creates GetData messages for all Data types
+    // So max_message_size should be GetDataReplyPayload<LargeData>, not just LargeData
+    assert(registry_max == getdata_reply_size);
+    std::cout << "✓ Correct: matches GetDataReplyPayload<LargeData> size (auto-generated)\n\n";
     
     // Test max_size_for_types with command subset
     constexpr size_t cmd_max = TestRegistry::max_size_for_types<TinyCmd, SmallCmd>();

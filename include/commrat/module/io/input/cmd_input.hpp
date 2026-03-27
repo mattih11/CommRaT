@@ -55,6 +55,36 @@ public:
     static constexpr uint8_t type_id = static_cast<uint8_t>(output_message_id & 0xFF);
     
     /**
+     * @brief Default constructor (for tuple initialization)
+     * 
+     * Creates uninitialized input. Must call initialize() or use parametrized constructor.
+     */
+    CmdInput()
+        : work_mbx_(nullptr)
+        , producer_system_id_(0)
+        , producer_instance_id_(0)
+        , producer_cmd_address_(0)
+        , cmd_timeout_(Milliseconds(100))
+    {}
+    
+    /**
+     * @brief Initialize input with mailbox and producer address
+     * 
+     * Call this after default construction to set up the input.
+     */
+    void initialize(MailboxFor<Registry>& work_mbx,
+                    uint8_t producer_system_id,
+                    uint8_t producer_instance_id,
+                    Milliseconds cmd_timeout = Milliseconds(100)) {
+        work_mbx_ = &work_mbx;
+        producer_system_id_ = producer_system_id;
+        producer_instance_id_ = producer_instance_id;
+        producer_cmd_address_ = encode_address(type_id, producer_system_id, 
+                                               producer_instance_id, 0);  // CMD mailbox index = 0
+        cmd_timeout_ = cmd_timeout;
+    }
+    
+    /**
      * @brief Construct command input
      * @param work_mbx Shared mailbox for receiving replies
      * @param producer_system_id Producer's system ID
@@ -65,7 +95,7 @@ public:
              uint8_t producer_system_id,
              uint8_t producer_instance_id,
              Milliseconds cmd_timeout = Milliseconds(100))
-        : work_mbx_(work_mbx)
+        : work_mbx_(&work_mbx)
         , producer_system_id_(producer_system_id)
         , producer_instance_id_(producer_instance_id)
         , producer_cmd_address_(encode_address(type_id, producer_system_id, 
@@ -102,7 +132,7 @@ public:
         TimsMessage<CmdType> cmd_copy = command;
         
         // 1. Send command to producer's CMD mailbox
-        auto send_result = work_mbx_.send(cmd_copy, producer_cmd_address_);
+        auto send_result = work_mbx_->send(cmd_copy, producer_cmd_address_);
         if (!send_result) {
             return false;
         }
@@ -111,7 +141,7 @@ public:
         Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
         while (Time::now() < deadline) {
             TimsMessage<ReplyType> received;
-            bool got_msg = work_mbx_.receive(
+            bool got_msg = work_mbx_->receive(
                 received,
                 Milliseconds(std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::nanoseconds(deadline - Time::now())
@@ -140,7 +170,7 @@ public:
     }
     
 protected:
-    MailboxFor<Registry>& work_mbx_;        ///< Shared mailbox for RPC replies
+    MailboxFor<Registry>* work_mbx_;        ///< Shared mailbox for RPC replies (pointer allows default construction)
     uint8_t producer_system_id_;         ///< Producer's system ID
     uint8_t producer_instance_id_;       ///< Producer's instance ID
     uint32_t producer_cmd_address_;      ///< Producer's CMD mailbox address
