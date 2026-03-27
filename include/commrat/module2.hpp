@@ -175,7 +175,7 @@ private:
     std::atomic<bool> should_stop_{false};
     
     // Mailbox infrastructure (CMD mailboxes owned by ModuleOutput, DATA by ModuleInput)
-    std::optional<WorkMailbox> work_mailbox_;  // No dedicated thread - sends from main/data thread
+    std::optional<WorkMailbox> work_mailbox_ = std::nullopt;  // No dedicated thread - sends from main/data thread (default empty)
     
 
 public:
@@ -336,6 +336,9 @@ public:
         // Unsubscribe all inputs from their producers (delegates to IOService)
         this->unsubscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
         
+        // Stop outputs (CMD and PUBLISH mailboxes)
+        this->stop_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
+        
         // Join data thread
         if (data_thread_.joinable()) {
             data_thread_.join();
@@ -355,25 +358,32 @@ private:
     // ========================================================================
     
     /**
-     * @brief Create WORK mailbox for subscription protocol replies
+     * @brief Create WORK mailbox (allocation phase - NOT real-time safe)
      * 
      * WORK mailbox address: [type_id][system_id][instance_id][16]
      * Receives: SubscribeReply, UnsubscribeReply
+     * Does NOT start mailbox - call start_work_mailbox() separately.
      */
     void create_work_mailbox() {
         // Get module's system_id and instance_id
         // For SimpleOutputConfig: config_.system_id() (no index)
         // For MultiOutputConfig: config_.system_id(0) (first output)
         // For NoOutputConfig: config_.system_id() (module-level)
-        uint8_t sys_id = config_.system_id();
-        uint8_t inst_id = config_.instance_id();
+        uint8_t sys_id, inst_id;
+        if (config_.has_multi_output_config()) {
+            sys_id = config_.system_id(0);
+            inst_id = config_.instance_id(0);
+        } else {
+            sys_id = config_.system_id();
+            inst_id = config_.instance_id();
+        }
         
         // Calculate WORK mailbox address (index 16)
         uint32_t work_addr = get_mailbox_address<void, std::tuple<>, Registry>(
             sys_id, inst_id, WORK_MBX_BASE
         );
         
-        // Create WorkMailbox for subscription protocol replies
+        // Create WorkMailbox (allocation only, no start)
         MailboxConfig work_config{
             .mailbox_id = work_addr,
             .message_slots = config_.cmd_message_slots.value(),  // Extract from rfl::DefaultVal
@@ -383,7 +393,25 @@ private:
         };
         
         work_mailbox_.emplace(work_config);
-        work_mailbox_->start();
+    }
+    
+    /**
+     * @brief Start WORK mailbox (activation phase - real-time safe)
+     * 
+     * Activates WORK mailbox. Must be called after create_work_mailbox().
+     * Real-time safe: no allocations, only activates existing resources.
+     * 
+     * @throws std::runtime_error if mailbox not created or TiMS start fails
+     */
+    void start_work_mailbox() {
+        if (!work_mailbox_) {
+            throw std::runtime_error("WORK mailbox not created - call create_work_mailbox() first");
+        }
+        
+        auto work_result = work_mailbox_->start();
+        if (!work_result) {
+            throw std::runtime_error("Failed to start WORK mailbox: TiMS initialization failed");
+        }
     }
     
     // ========================================================================

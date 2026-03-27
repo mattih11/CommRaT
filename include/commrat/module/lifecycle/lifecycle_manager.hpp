@@ -42,8 +42,11 @@ public:
         
         module.on_init();
         
-        // Start mailboxes (always use MailboxSets, even for single output)
-        module.template start_all_mailbox_sets(std::make_index_sequence<module.num_output_types>{});
+        // Start WORK mailbox (subscription protocol replies)
+        module.start_work_mailbox();
+        
+        // Start outputs (CMD and PUBLISH mailboxes)
+        module.template start_outputs(std::make_index_sequence<module.num_outputs>{});
         
         // Only start data mailbox for single ContinuousInput modules
         if (module.data_mailbox_) {

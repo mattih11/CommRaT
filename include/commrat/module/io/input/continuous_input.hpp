@@ -35,6 +35,43 @@ public:
     using DataMessage = Message::Data<OutputType>;
     
     /**
+     * @brief Default constructor (for tuple initialization)
+     * 
+     * Creates uninitialized input. Must call initialize() before use.
+     */
+    ContinuousInput()
+        : CmdInput<Registry, OutputType>()
+        , data_mbx_(nullptr)
+        , requested_period_(Milliseconds::zero())
+        , poll_timeout_(Milliseconds(100))
+        , subscribed_(false)
+        , actual_period_(Milliseconds::zero())
+    {}
+    
+    /**
+     * @brief Initialize input with mailboxes and producer address
+     * 
+     * Call this after default construction to set up the input.
+     */
+    void initialize(MailboxFor<Registry>& work_mbx,
+                    MailboxFor<Registry>& data_mbx,
+                    uint8_t producer_system_id,
+                    uint8_t producer_instance_id,
+                    Milliseconds requested_period = Milliseconds::zero(),
+                    Milliseconds poll_timeout = Milliseconds(100),
+                    Milliseconds cmd_timeout = Milliseconds(1000)) {
+        // Initialize base class
+        CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
+        
+        // Initialize our members
+        data_mbx_ = &data_mbx;
+        requested_period_ = requested_period;
+        poll_timeout_ = poll_timeout;
+        subscribed_ = false;
+        actual_period_ = Milliseconds::zero();
+    }
+    
+    /**
      * @brief Construct continuous input
      * @param work_mbx Shared mailbox for subscription protocol (SubscribeReply)
      * @param data_mbx Dedicated mailbox for receiving data stream
@@ -52,7 +89,7 @@ public:
                     Milliseconds poll_timeout = Milliseconds(100),
                     Milliseconds cmd_timeout = Milliseconds(1000))
         : CmdInput<Registry, OutputType>(work_mbx, producer_system_id, producer_instance_id, cmd_timeout)
-        , data_mbx_(data_mbx)
+        , data_mbx_(&data_mbx)
         , requested_period_(requested_period)
         , poll_timeout_(poll_timeout)
         , subscribed_(false)
@@ -78,11 +115,11 @@ public:
                 .timestamp = Time::now(),
                 .seq_number = 0,
                 .dest = 0,  // Will be set by subscribe()
-                .src = data_mbx_.mailbox_id(),  // Producer sends data here
+                .src = data_mbx_->mailbox_id(),  // Producer sends data here
                 .flags = 0
             },
             .payload = {
-                .subscriber_addr = data_mbx_.mailbox_id(),
+                .subscriber_addr = data_mbx_->mailbox_id(),
                 .requested_period_ms = std::chrono::duration_cast<Milliseconds>(requested_period_).count()
             }
         };
@@ -122,10 +159,10 @@ public:
                 .msg_type = Registry::template get_message_id<UnsubscribeRequestPayload>(),
                 .timestamp = Time::now(),
                 .seq_number = 0,
-                .src = data_mbx_.mailbox_id(),
+                .src = data_mbx_->mailbox_id(),
             },
             .payload = {
-                .subscriber_addr = data_mbx_.mailbox_id()
+                .subscriber_addr = data_mbx_->mailbox_id()
             }
         };
         
@@ -150,7 +187,7 @@ public:
      */
     bool poll_data() {
         // Mailbox receives DIRECTLY into our storage (zero-copy!)
-        if (!data_mbx_.receive(last_message_, poll_timeout_)) {
+        if (!data_mbx_->receive(last_message_, poll_timeout_)) {
             has_data_ = false;
             return false;
         }
@@ -233,7 +270,7 @@ public:
      * @deprecated Use zero-copy API: poll_data() then get_payload()
      */
     bool poll_data(TimsMessage<OutputType>& msg) {
-        if (!data_mbx_.receive(msg, poll_timeout_)) {
+        if (!data_mbx_->receive(msg, poll_timeout_)) {
             return false;
         }
         // Also update internal storage for consistency
@@ -253,7 +290,7 @@ public:
     Milliseconds get_actual_period() const { return actual_period_; }
     
 private:
-    MailboxFor<Registry>& data_mbx_;       ///< Dedicated mailbox for data stream
+    MailboxFor<Registry>* data_mbx_;       ///< Dedicated mailbox for data stream (pointer allows default construction)
     Milliseconds requested_period_;         ///< Requested update period
     Milliseconds poll_timeout_;             ///< Timeout for poll_data()
     bool subscribed_;                   ///< Currently subscribed?

@@ -43,6 +43,40 @@ public:
     using DataMessage = Message::Data<OutputType>;
     
     /**
+     * @brief Default constructor (for tuple initialization)
+     * 
+     * Creates uninitialized input. Must call initialize() before use.
+     */
+    SyncedInputImpl()
+        : CmdInput<Registry, OutputType>()
+        , tolerance_(Milliseconds(50))
+        , interpolation_(InterpolationMode::NEAREST)
+        , last_get_succeeded_(false)
+        , last_get_was_fresh_(false)
+    {}
+    
+    /**
+     * @brief Initialize input with mailbox and producer address
+     * 
+     * Call this after default construction to set up the input.
+     */
+    void initialize(MailboxFor<Registry>& work_mbx,
+                    uint8_t producer_system_id,
+                    uint8_t producer_instance_id,
+                    Milliseconds tolerance = Milliseconds(50),
+                    InterpolationMode interpolation = InterpolationMode::NEAREST,
+                    Milliseconds cmd_timeout = Milliseconds(100)) {
+        // Initialize base class
+        CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
+        
+        // Initialize our members
+        tolerance_ = tolerance;
+        interpolation_ = interpolation;
+        last_get_succeeded_ = false;
+        last_get_was_fresh_ = false;
+    }
+    
+    /**
      * @brief Construct synchronized input
      * @param work_mbx Shared mailbox for get_data replies
      * @param producer_system_id Producer's system ID
