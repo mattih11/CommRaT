@@ -2,7 +2,15 @@
 
 **Branch**: `feature/mailbox-cleanup`  
 **Date**: February 20, 2026  
-**Status**: Implementation Phase - I/O Classes Complete
+**Status**: COMPLETE (April 1, 2026) - All mailbox ownership, addressing, and lifecycle bugs resolved. 93% test pass rate.
+
+**Summary of completed work:**
+- ContinuousInput: owns `TypedMailbox<Registry, T>` (two-phase init/start via `std::optional`)
+- SyncedInput: no data mailbox (RPC only via work_mbx), stores `last_message_` for zero-copy
+- WORK mailbox: uses primary output type_id in address (`[type:8][sys:8][inst:8][idx:8]`)
+- Mailbox indices: CMD=0, WORK=1, PUBLISH=2, DATA=3+ (previously PUBLISH used index 1, colliding with WORK)
+- `data_loop`: skips `process()` when primary input times out (prevents zero-timestamp assertions)
+- `initialize_input`: handles MultiOutputConfig via `has_multi_output_config()` indexed accessor
 
 ## Inspiration
 

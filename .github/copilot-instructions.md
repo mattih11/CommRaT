@@ -4,7 +4,7 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Phase 1.5 COMPLETE (Producer-side GetData request handling)  
+**Current Status**: Phase 2.0 COMPLETE (Full mailbox lifecycle, input ownership, 93% test pass rate)  
 **Next**: Subscription protocol integration (Subscribe/Unsubscribe handlers in ModuleOutput)
 
 ### Core Philosophy
@@ -773,10 +773,13 @@ void process(const T& input) {
 - **GetData message auto-registration** (UserDefined::GetData/GetNextData subprefixes, same local_id as data message)
 - **Consumer-side get_data** (SyncedInput with get_data() and get_next_data() RPCs)
 - **Producer-side get_data handling** (ModuleOutput CMD mailbox handlers for GetDataRequest/GetNextDataRequest)
+- **Mailbox ownership and lifecycle** (ContinuousInput owns TypedMailbox<Registry, T>, two-phase init/start)
+- **Mailbox addressing correctness** (WORK uses primary output type_id, PUBLISH=2, DATA=3+)
+- **Input-driven skip logic** (data_loop skips process() when primary input times out, prevents zero timestamps)
+- **Multi-output module support** (initialize_input handles MultiOutputConfig, instance_id indexed access)
 
 ### In Progress
 - **Subscription protocol producer/consumer implementation** (Subscribe/Unsubscribe handlers in ModuleOutput)
-- TypedMailbox/WorkMailbox template fixes
 
 ### Planned
 - Input buffering (RingBuffer for historical data)
