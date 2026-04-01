@@ -2,11 +2,27 @@
 
 This document tracks known issues, limitations, and areas requiring investigation in CommRaT.
 
-**Last Updated**: February 11, 2026
+**Last Updated**: April 1, 2026
 
 ---
 
 ## Active Issues
+
+### 0. TiMS Router Resource Limit Under Stress
+
+**Status**: Known Limitation  
+**Priority**: Low
+
+The TiMS router (tims_router_tcp) has a connection/mailbox limit. Creating 10+ concurrent modules in a single process causes the router to drop connections, resulting in:
+```
+Tims: recv head ERROR, (Connection reset by peer)
+Failed to start PUBLISH mailbox: TiMS initialization failed
+```
+
+**Affected**: `test_address_collisions` Test 8 (stress test with 10 instances)  
+**Not affected**: Normal usage with ~5-6 concurrent modules  
+**Workaround**: Restart tims_router_tcp between stress tests, or reduce concurrent module count.  
+**Root cause**: TiMS router connection table finite; not a CommRaT code issue.
 
 ### 1. Type-Based Metadata Access Limited to 2 Types
 
