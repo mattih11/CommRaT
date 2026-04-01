@@ -133,10 +133,10 @@ public:
         
         cmd_mailbox_.emplace(cmd_config);
         
-        // Calculate PUBLISH mailbox address (WORK mailbox base)
+        // Calculate PUBLISH mailbox address (PUBLISH mailbox base)
         // This is for SENDING output data to subscribers
         publish_address_ = get_mailbox_address<T, std::tuple<>, CommratApp>(
-            sys_id, inst_id, WORK_MBX_BASE
+            sys_id, inst_id, PUBLISH_MBX_BASE
         );
         
         // Create PUBLISH mailbox (allocation only, no start)

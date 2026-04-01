@@ -2,8 +2,10 @@
 
 #include "cmd_input.hpp"
 #include "commrat/mailbox/mailbox.hpp"
+#include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/platform/timestamp.hpp"
+#include <optional>
 
 namespace commrat {
 
@@ -33,6 +35,7 @@ class ContinuousInput : public CmdInput<Registry, OutputType> {
 public:
     // Type introspection (matches ModuleOutput and SyncedInput interface)
     using DataMessage = Message::Data<OutputType>;
+    using DataMailbox = TypedMailbox<Registry, OutputType>;
     
     /**
      * @brief Default constructor (for tuple initialization)
@@ -41,7 +44,7 @@ public:
      */
     ContinuousInput()
         : CmdInput<Registry, OutputType>()
-        , data_mbx_(nullptr)
+        , data_mbx_(std::nullopt)
         , requested_period_(Milliseconds::zero())
         , poll_timeout_(Milliseconds(100))
         , subscribed_(false)
@@ -52,9 +55,19 @@ public:
      * @brief Initialize input with mailboxes and producer address
      * 
      * Call this after default construction to set up the input.
+     * Creates DATA mailbox for receiving continuous stream.
+     * Does NOT start mailbox - call start() separately.
+     * 
+     * @param work_mbx Shared work mailbox (for subscription protocol)
+     * @param data_mbx_config Configuration for DATA mailbox (address, buffer sizes)
+     * @param producer_system_id Producer's system ID
+     * @param producer_instance_id Producer's instance ID
+     * @param requested_period Desired update period (0 = as fast as possible)
+     * @param poll_timeout How long to wait for new data
+     * @param cmd_timeout Timeout for subscription commands
      */
-    void initialize(MailboxFor<Registry>& work_mbx,
-                    MailboxFor<Registry>& data_mbx,
+    void initialize(typename Registry::System::WorkMailbox& work_mbx,
+                    const MailboxConfig& data_mbx_config,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
                     Milliseconds requested_period = Milliseconds::zero(),
@@ -63,12 +76,42 @@ public:
         // Initialize base class
         CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
         
+        // Create DATA mailbox for receiving stream (allocation only, no start)
+        data_mbx_.emplace(data_mbx_config);
+        
         // Initialize our members
-        data_mbx_ = &data_mbx;
         requested_period_ = requested_period;
         poll_timeout_ = poll_timeout;
         subscribed_ = false;
         actual_period_ = Milliseconds::zero();
+    }
+    
+    /**
+     * @brief Start DATA mailbox (activation phase - real-time safe)
+     * 
+     * Activates DATA mailbox. Must be called after initialize().
+     * Real-time safe: no allocations, only activates existing resources.
+     * 
+     * @throws std::runtime_error if mailbox not initialized or TiMS start fails
+     */
+    void start() {
+        if (!data_mbx_) {
+            throw std::runtime_error("ContinuousInput not initialized - call initialize() first");
+        }
+        
+        auto result = data_mbx_->start();
+        if (!result) {
+            throw std::runtime_error("Failed to start DATA mailbox: TiMS initialization failed");
+        }
+    }
+    
+    /**
+     * @brief Stop DATA mailbox (deactivation phase - real-time safe)
+     */
+    void stop() {
+        if (data_mbx_) {
+            data_mbx_->stop();
+        }
     }
     
     /**
@@ -290,13 +333,13 @@ public:
     Milliseconds get_actual_period() const { return actual_period_; }
     
 private:
-    MailboxFor<Registry>* data_mbx_;       ///< Dedicated mailbox for data stream (pointer allows default construction)
-    Milliseconds requested_period_;         ///< Requested update period
-    Milliseconds poll_timeout_;             ///< Timeout for poll_data()
-    bool subscribed_;                   ///< Currently subscribed?
-    Milliseconds actual_period_;            ///< Actual period from producer
-    TimsMessage<OutputType> last_message_{}; ///< Last received message (zero-copy storage)
-    bool has_data_{false};              ///< True if last_message_ valid
+    std::optional<DataMailbox> data_mbx_;       ///< Owned DATA mailbox for receiving stream (optional for two-phase init)
+    Milliseconds requested_period_;             ///< Requested update period
+    Milliseconds poll_timeout_;                 ///< Timeout for poll_data()
+    bool subscribed_;                           ///< Currently subscribed?
+    Milliseconds actual_period_;                ///< Actual period from producer
+    TimsMessage<OutputType> last_message_{};    ///< Last received message (zero-copy storage)
+    bool has_data_{false};                      ///< True if last_message_ valid
 };
 
 } // namespace commrat

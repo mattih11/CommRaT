@@ -72,7 +72,7 @@ public:
      * 
      * Call this after default construction to set up the input.
      */
-    void initialize(MailboxFor<Registry>& work_mbx,
+    void initialize(typename Registry::System::WorkMailbox& work_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
                     Milliseconds cmd_timeout = Milliseconds(100)) {
@@ -170,11 +170,11 @@ public:
     }
     
 protected:
-    MailboxFor<Registry>* work_mbx_;        ///< Shared mailbox for RPC replies (pointer allows default construction)
-    uint8_t producer_system_id_;         ///< Producer's system ID
-    uint8_t producer_instance_id_;       ///< Producer's instance ID
-    uint32_t producer_cmd_address_;      ///< Producer's CMD mailbox address
-    Milliseconds cmd_timeout_;               ///< Default timeout for commands
+    typename Registry::System::WorkMailbox* work_mbx_;  ///< Shared work mailbox for RPC (pointer for default construction, non-owning)
+    uint8_t producer_system_id_;                        ///< Producer's system ID
+    uint8_t producer_instance_id_;                      ///< Producer's instance ID
+    uint32_t producer_cmd_address_;                     ///< Producer's CMD mailbox address
+    Milliseconds cmd_timeout_;                          ///< Default timeout for commands
 };
 
 } // namespace commrat

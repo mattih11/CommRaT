@@ -297,13 +297,23 @@ public:
      * @brief Start module execution
      * 
      * Starts subscriptions and launches threads:
+     * - Start all mailboxes (WORK, outputs, inputs)
      * - Subscribe inputs to their producers
      * - Launch N command threads (one per output)
      * - Launch data thread (runs process() loop)
      * 
-     * Note: Mailboxes already created in constructor
+     * Note: Mailboxes created in constructor, activated here
      */
     void start() {
+        // Start WORK mailbox (enables subscription protocol)
+        start_work_mailbox();
+        
+        // Start all output mailboxes (CMD + PUBLISH per output)
+        this->start_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
+        
+        // Start all input mailboxes (DATA for ContinuousInput only)
+        this->start_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+        
         // Subscribe all inputs to their producers (delegates to IOService)
         this->subscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
         
@@ -378,8 +388,15 @@ private:
             inst_id = config_.instance_id();
         }
         
-        // Calculate WORK mailbox address (index 16)
-        uint32_t work_addr = get_mailbox_address<void, std::tuple<>, Registry>(
+        // Calculate WORK mailbox address using primary output type_id
+        // This ensures modules with different output types at the same [sys][inst]
+        // get unique WORK mailbox addresses (matching their CMD/PUBLISH mailboxes)
+        using PrimaryOutputType = std::conditional_t<
+            IO::Meta::has_outputs,
+            std::tuple_element_t<0, typename IO::Meta::OutputTypes>,
+            void
+        >;
+        uint32_t work_addr = get_mailbox_address<PrimaryOutputType, std::tuple<>, Registry>(
             sys_id, inst_id, WORK_MBX_BASE
         );
         
@@ -512,8 +529,10 @@ private:
             }
             
             // Step 1: Fetch input data (if input-driven, delegates to IOService)
+            // Skip process() if primary input had no new data (poll timeout)
             if constexpr (IO::Meta::is_input_driven) {
-                this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+                bool got_data = this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+                if (!got_data) continue;
             }
             
             // Step 2: Call user's process() with unpacked inputs and outputs

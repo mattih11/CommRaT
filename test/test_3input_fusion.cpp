@@ -212,6 +212,11 @@ protected:
         velocity_z_ += (imu.accel_z - 9.8f) * dt;  // Remove gravity
         
         // Fuse GPS position with Lidar distance
+        // Guard: synced inputs may not be valid yet on first few iterations
+        if (!gps.is_valid() || !lidar.is_valid()) {
+            output = FusedData{};
+            return;
+        }
         // Phase 6.10: No manual timestamp - Module auto-sets to primary input (IMU) timestamp
         FusedData fused{
             .position_x = static_cast<float>(gps->latitude * 111000.0),  // Rough meters
