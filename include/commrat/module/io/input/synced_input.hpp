@@ -60,7 +60,7 @@ public:
      * 
      * Call this after default construction to set up the input.
      */
-    void initialize(MailboxFor<Registry>& work_mbx,
+    void initialize(typename Registry::System::WorkMailbox& work_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
                     Milliseconds tolerance = Milliseconds(50),

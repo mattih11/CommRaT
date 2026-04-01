@@ -13,6 +13,8 @@
 
 #include "commrat/module/io/io_spec.hpp"
 #include "commrat/module/io/output_infrastructure.hpp"
+#include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/traits/type_extraction.hpp"
 // input_infrastructure.hpp contains legacy class - thin wrapper now in output_infrastructure.hpp
 #include "commrat/platform/timestamp.hpp"
 #include <tuple>
@@ -156,10 +158,13 @@ protected:
     
     /**
      * @brief Fetch data for all inputs (continuous poll, synced get_data)
+     * @return true if primary input (index 0) received new data, true if no inputs
      */
     template<size_t... InputIndices>
-    void fetch_inputs(std::index_sequence<InputIndices...>) {
-        (fetch_single_input<InputIndices>(), ...);
+    bool fetch_inputs(std::index_sequence<InputIndices...>) {
+        if constexpr (sizeof...(InputIndices) == 0) return true;
+        std::array<bool, sizeof...(InputIndices)> results{fetch_single_input<InputIndices>()...};
+        return results[0];  // Primary input is always index 0
     }
     
     /**
@@ -276,6 +281,7 @@ protected:
     template<size_t InputIndex, typename ModuleConfig, typename WorkMailbox>
     void initialize_input(const ModuleConfig& config, WorkMailbox& work_mailbox) {
         auto& input = get_input<InputIndex>();
+        using InputType = std::decay_t<decltype(input)>;
         
         // Get source addresses from config
         uint8_t src_sys_id, src_inst_id;
@@ -291,10 +297,79 @@ protected:
             src_inst_id = sources[InputIndex].instance_id;
         }
         
-        // TODO: Initialize input with work_mailbox and source addresses
-        // Inputs still have nullptr mailbox pointers from default construction
-        // This needs to be fixed by creating DATA mailboxes and calling initialize()
-        // input.initialize(work_mailbox, data_mbx, src_sys_id, src_inst_id);
+        // Handle initialization based on input type
+        if constexpr (is_continuous_input_v<InputType>) {
+            // ContinuousInput: Create DATA mailbox for streaming
+            using DataType = typename InputType::DataMessage::Payload;
+            
+            // Calculate DATA mailbox address for consumer (this module)
+            // DATA mailboxes start at index 3 (after CMD=0, WORK=1, PUBLISH=2)
+            // Use output 0's address for multi-output modules
+            uint8_t self_sys_id = config.has_multi_output_config() ? config.system_id(0) : config.system_id();
+            uint8_t self_inst_id = config.has_multi_output_config() ? config.instance_id(0) : config.instance_id();
+            uint32_t data_addr = get_mailbox_address<DataType, std::tuple<>, Registry>(
+                self_sys_id,
+                self_inst_id,
+                DATA_MBX_BASE + static_cast<uint8_t>(InputIndex)
+            );
+            
+            // Create DATA mailbox config
+            MailboxConfig data_config{
+                .mailbox_id = data_addr,
+                .message_slots = 10,  // Data stream buffer
+                .max_message_size = get_data_mailbox_size<DataType>(),
+                .send_priority = 50,
+                .realtime = true
+            };
+            
+            // Initialize ContinuousInput with DATA mailbox
+            input.initialize(
+                work_mailbox,
+                data_config,
+                src_sys_id,
+                src_inst_id,
+                Milliseconds::zero(),   // Requested period
+                Milliseconds(100),      // Poll timeout
+                Milliseconds(1000)      // Command timeout
+            );
+        } else {
+            // SyncedInput: NO DATA mailbox, only work_mbx reference
+            input.initialize(
+                work_mailbox,
+                src_sys_id,
+                src_inst_id,
+                config.sync_tolerance(),
+                InterpolationMode::NEAREST,
+                Milliseconds(1000)      // Command timeout
+            );
+        }
+    }
+    
+    // ========================================================================
+    // Input Lifecycle (Start/Stop)
+    // ========================================================================
+    
+    /**
+     * @brief Start all input mailboxes (only ContinuousInput has mailboxes)
+     */
+    template<size_t... InputIndices>
+    void start_inputs(std::index_sequence<InputIndices...>) {
+        (start_input<InputIndices>(), ...);
+    }
+    
+    /**
+     * @brief Start single input at index (no-op for SyncedInput)
+     */
+    template<size_t InputIndex>
+    void start_input() {
+        auto& input = get_input<InputIndex>();
+        using InputType = std::decay_t<decltype(input)>;
+        
+        // Only ContinuousInput has mailboxes to start
+        if constexpr (is_continuous_input_v<InputType>) {
+            input.start();
+        }
+        // SyncedInput has no mailboxes - no-op
     }
     
     // ========================================================================
@@ -353,17 +428,19 @@ private:
      * @brief Fetch single input's data
      */
     template<size_t InputIndex>
-    void fetch_single_input() {
+    bool fetch_single_input() {
         auto& input = get_input<InputIndex>();
         
         using InputWrapper = std::decay_t<decltype(input)>;
         
         if constexpr (is_continuous_input_v<InputWrapper>) {
             // ContinuousInput: poll_data() receives into input's buffer
-            input.poll_data();
+            // Returns true if new data received, false on timeout
+            return input.poll_data();
         } else {
             // SyncedInput: get_data() will be called with primary timestamp
             // No action here - handled in call_process
+            return true;
         }
     }
     
