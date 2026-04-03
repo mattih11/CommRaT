@@ -105,7 +105,11 @@ struct MessageDefinition {
     
     // Extract subprefix value based on prefix type
     static constexpr uint8_t subprefix = []() constexpr {
-        if constexpr (Prefix_ == MessagePrefix::System) {
+        // uint8_t passthrough: used internally by AutoAssignIDsProcess when re-creating
+        // MessageDefinition with First::subprefix (which is already uint8_t)
+        if constexpr (std::is_same_v<decltype(SubPrefix_), uint8_t>) {
+            return SubPrefix_;
+        } else if constexpr (Prefix_ == MessagePrefix::System) {
             if constexpr (std::is_same_v<decltype(SubPrefix_), SystemSubPrefix>) {
                 return static_cast<uint8_t>(SubPrefix_);
             } else {
