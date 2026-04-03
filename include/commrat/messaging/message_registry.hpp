@@ -165,6 +165,22 @@ public:
 // ============================================================================
 
 /**
+ * @brief Safely extract ReplyPayload from a MessageDefinition, defaulting to void.
+ *
+ * DataWithCommands and other non-MessageDefinition types lack ReplyPayload,
+ * so this helper avoids a hard compile error when they pass through AutoAssignIDsProcess.
+ */
+template<typename T, typename = void>
+struct GetReplyPayload {
+    using type = void;
+};
+
+template<typename T>
+struct GetReplyPayload<T, std::void_t<typename T::ReplyPayload>> {
+    using type = typename T::ReplyPayload;
+};
+
+/**
  * @brief Helper to assign auto-incremented IDs to messages marked with needs_auto_id
  * 
  * Forward processing: assigns ID to First, then recursively processes Rest with First in context.
@@ -210,13 +226,16 @@ private:
     };
     
     // Assign ID to current message
+    // Preserve ReplyPayload so request/reply pairing survives auto-ID assignment.
+    // Use GetReplyPayload<> to safely default to void for types without it (e.g. DataWithCommands).
     using CurrentProcessed = std::conditional_t<
         First::needs_auto_id,
         MessageDefinition<
             typename First::Payload,
             First::prefix,
             First::subprefix,
-            HighestID<First>::value + 1
+            HighestID<First>::value + 1,
+            typename GetReplyPayload<First>::type  // preserves reply type; void if not present
         >,
         First
     >;

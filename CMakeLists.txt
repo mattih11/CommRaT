@@ -103,11 +103,6 @@ target_include_directories(module_main_multiformat PRIVATE /usr/local/include/ra
 enable_testing()
 
 # Test applications
-add_executable(test_io_spec test/test_io_spec.cpp)
-target_link_libraries(test_io_spec PRIVATE commrat)
-target_include_directories(test_io_spec PRIVATE /usr/local/include/rack)
-add_test(NAME test_io_spec COMMAND test_io_spec)
-
 add_executable(test_process_signature test/test_process_signature.cpp)
 target_link_libraries(test_process_signature PRIVATE commrat)
 target_include_directories(test_process_signature PRIVATE /usr/local/include/rack)
@@ -118,10 +113,35 @@ target_link_libraries(test_multi_output PRIVATE commrat)
 target_include_directories(test_multi_output PRIVATE /usr/local/include/rack)
 add_test(NAME test_multi_output COMMAND test_multi_output)
 
-add_executable(test_primary_input test/test_primary_input.cpp)
-target_link_libraries(test_primary_input PRIVATE commrat)
-target_include_directories(test_primary_input PRIVATE /usr/local/include/rack)
-add_test(NAME test_primary_input COMMAND test_primary_input)
+add_executable(test_auto_id_validation test/test_auto_id_validation.cpp)
+target_link_libraries(test_auto_id_validation PRIVATE commrat)
+target_include_directories(test_auto_id_validation PRIVATE /usr/local/include/rack)
+add_test(NAME test_auto_id_validation COMMAND test_auto_id_validation)
+
+add_executable(test_synced_wrapper test/test_synced_wrapper.cpp)
+target_link_libraries(test_synced_wrapper PRIVATE commrat)
+target_include_directories(test_synced_wrapper PRIVATE /usr/local/include/rack)
+add_test(NAME test_synced_wrapper COMMAND test_synced_wrapper)
+
+add_executable(test_workmailbox test/test_workmailbox.cpp)
+target_link_libraries(test_workmailbox PRIVATE commrat)
+target_include_directories(test_workmailbox PRIVATE /usr/local/include/rack)
+add_test(NAME test_workmailbox COMMAND test_workmailbox)
+
+add_executable(test_system_messages test/test_system_messages.cpp)
+target_link_libraries(test_system_messages PRIVATE commrat)
+target_include_directories(test_system_messages PRIVATE /usr/local/include/rack)
+add_test(NAME test_system_messages COMMAND test_system_messages)
+
+add_executable(test_registry_utils test/test_registry_utils.cpp)
+target_link_libraries(test_registry_utils PRIVATE commrat)
+target_include_directories(test_registry_utils PRIVATE /usr/local/include/rack)
+add_test(NAME test_registry_utils COMMAND test_registry_utils)
+
+# add_executable(test_config_generator test/test_config_generator.cpp)
+# target_link_libraries(test_config_generator PRIVATE commrat)
+# target_include_directories(test_config_generator PRIVATE /usr/local/include/rack)
+# add_test(NAME test_config_generator COMMAND test_config_generator)
 
 add_executable(test_timestamped_ring_buffer test/test_timestamped_ring_buffer.cpp)
 target_link_libraries(test_timestamped_ring_buffer PRIVATE commrat)

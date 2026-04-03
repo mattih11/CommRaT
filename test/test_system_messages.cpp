@@ -44,33 +44,37 @@ int main() {
         std::cout << "  UnsubscribeRequest: PASS\n";
     }
     
-    // Test 3: GetDataRequest has reply
+    // Test 3: GetDataRequest has reply (template, must be instantiated with a type)
     {
-        static_assert(GetDataRequest::has_reply, "GetDataRequest should have reply");
-        static_assert(GetDataRequest::is_request, "GetDataRequest should be marked as request");
-        static_assert(!GetDataRequest::is_reply, "GetDataRequest should not be marked as reply");
+        using GDReq  = GetDataRequest<float, 0x0001>;
+        using GDReply = GetDataReply<float, 0x0001>;
+        static_assert(GDReq::has_reply, "GetDataRequest should have reply");
+        static_assert(GDReq::is_request, "GetDataRequest should be marked as request");
+        static_assert(!GDReq::is_reply, "GetDataRequest should not be marked as reply");
         
-        constexpr int16_t request_id = static_cast<int16_t>(GetDataRequest::local_id);
-        constexpr int16_t reply_id = static_cast<int16_t>(GetDataReply::local_id);
+        constexpr int16_t request_id = static_cast<int16_t>(GDReq::local_id);
+        constexpr int16_t reply_id = static_cast<int16_t>(GDReply::local_id);
         static_assert(reply_id == -request_id, "Reply ID should be negative of request ID");
         
-        std::cout << "  GetDataRequest ID: 0x" << std::hex << GetDataRequest::local_id << std::dec << "\n";
-        std::cout << "  GetDataReply ID:   0x" << std::hex << GetDataReply::local_id << std::dec << "\n";
+        std::cout << "  GetDataRequest ID: 0x" << std::hex << GDReq::local_id << std::dec << "\n";
+        std::cout << "  GetDataReply ID:   0x" << std::hex << GDReply::local_id << std::dec << "\n";
         std::cout << "  GetDataRequest: PASS\n";
     }
     
-    // Test 4: GetNextDataRequest has reply
+    // Test 4: GetNextDataRequest has reply (template, must be instantiated with a type)
     {
-        static_assert(GetNextDataRequest::has_reply, "GetNextDataRequest should have reply");
-        static_assert(GetNextDataRequest::is_request, "GetNextDataRequest should be marked as request");
-        static_assert(!GetNextDataRequest::is_reply, "GetNextDataRequest should not be marked as reply");
+        using GNDReq  = GetNextDataRequest<float, 0x0001>;
+        using GNDReply = GetNextDataReply<float, 0x0001>;
+        static_assert(GNDReq::has_reply, "GetNextDataRequest should have reply");
+        static_assert(GNDReq::is_request, "GetNextDataRequest should be marked as request");
+        static_assert(!GNDReq::is_reply, "GetNextDataRequest should not be marked as reply");
         
-        constexpr int16_t request_id = static_cast<int16_t>(GetNextDataRequest::local_id);
-        constexpr int16_t reply_id = static_cast<int16_t>(GetNextDataReply::local_id);
+        constexpr int16_t request_id = static_cast<int16_t>(GNDReq::local_id);
+        constexpr int16_t reply_id = static_cast<int16_t>(GNDReply::local_id);
         static_assert(reply_id == -request_id, "Reply ID should be negative of request ID");
         
-        std::cout << "  GetNextDataRequest ID: 0x" << std::hex << GetNextDataRequest::local_id << std::dec << "\n";
-        std::cout << "  GetNextDataReply ID:   0x" << std::hex << GetNextDataReply::local_id << std::dec << "\n";
+        std::cout << "  GetNextDataRequest ID: 0x" << std::hex << GNDReq::local_id << std::dec << "\n";
+        std::cout << "  GetNextDataReply ID:   0x" << std::hex << GNDReply::local_id << std::dec << "\n";
         std::cout << "  GetNextDataRequest: PASS\n";
     }
     
@@ -81,19 +85,26 @@ int main() {
         // Note: is_reply detection has edge case with ID=0x0001 becoming 0xFFFF (AUTO_ID marker)
         // The important part is that has_reply=false and is_request=false
         
-        static_assert(!GetDataReply::has_reply, "Reply messages should not have replies themselves");
-        static_assert(!GetDataReply::is_request, "Reply messages should not be marked as request");
+        using GDReply = GetDataReply<float, 0x0001>;
+        static_assert(!GDReply::has_reply, "Reply messages should not have replies themselves");
+        static_assert(!GDReply::is_request, "Reply messages should not be marked as request");
         
         std::cout << "  Reply message flags: PASS\n";
     }
     
-    // Test 6: All messages use System::Subscription subprefix
+    // Test 6: Messages use correct prefix/subprefix
     {
+        // Subscribe/Unsubscribe use System::Subscription
         static_assert(SubscribeRequest::prefix == MessagePrefix::System);
         static_assert(SubscribeRequest::subprefix == static_cast<uint8_t>(SystemSubPrefix::Subscription));
         
-        static_assert(GetDataRequest::prefix == MessagePrefix::System);
-        static_assert(GetDataRequest::subprefix == static_cast<uint8_t>(SystemSubPrefix::Subscription));
+        // GetDataRequest/GetNextDataRequest use UserDefined::GetData / UserDefined::GetNextData
+        using GDReq  = GetDataRequest<float, 0x0001>;
+        using GNDReq = GetNextDataRequest<float, 0x0001>;
+        static_assert(GDReq::prefix == MessagePrefix::UserDefined);
+        static_assert(GDReq::subprefix == static_cast<uint8_t>(UserSubPrefix::GetData));
+        static_assert(GNDReq::prefix == MessagePrefix::UserDefined);
+        static_assert(GNDReq::subprefix == static_cast<uint8_t>(UserSubPrefix::GetNextData));
         
         std::cout << "  Message prefixes: PASS\n";
     }

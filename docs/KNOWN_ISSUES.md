@@ -2,7 +2,7 @@
 
 This document tracks known issues, limitations, and areas requiring investigation in CommRaT.
 
-**Last Updated**: April 1, 2026
+**Last Updated**: April 3, 2026
 
 ---
 
@@ -33,16 +33,16 @@ Failed to start PUBLISH mailbox: TiMS initialization failed
 
 **Workaround**: Use index-based access `get_input_metadata<0>()` for 3+ inputs.
 
-**Files**: `include/commrat/module/metadata/input_metadata_accessors.hpp`
+**Note**: `get_input_metadata<T>()` type-based helpers were in the removed metadata/ infrastructure; use index-based access `get_input_metadata<0>()` instead.
 
-### 2. Command Dispatch Needs Improvement
+### 2. Command Dispatch Not Yet Implemented
 
-**Status**: Known Limitation  
+**Status**: Feature Gap  
 **Priority**: Medium
 
-Current variadic command handling with overloaded `on_command()` functions works but is not elegant. Better dispatch mechanism needed.
+Subscription protocol and command dispatch are not yet wired up in `ModuleOutput`. CMD mailbox handler infrastructure exists but Subscribe/Unsubscribe handlers are not registered. The `example_commands` test times out as a result.
 
-**Workaround**: Use `on_command(const CmdType&) override` for each command type.
+**Next**: Implement Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`.
 
 ### 3. No Command Reply Mechanism
 
@@ -118,6 +118,23 @@ uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
 
 **Resolution**: Use pass-through pattern `Output<T>` returning input type instead of `Output<void>`. Example 01 demonstrates correct pattern.
 
+### 3. AutoAssignIDs Dropped Command Subprefix and Reply Type (RESOLVED)
+
+**Status**: Resolved (April 3, 2026)  
+**Affected**: All `Message::Command<>` types in registries with auto-assigned IDs
+
+**Root Cause**: Two bugs in `message_registry.hpp`:
+1. `MessageDefinition::subprefix` lambda had no `uint8_t` passthrough case. When `AutoAssignIDsProcess` re-instantiated a message with `First::subprefix` (already `uint8_t`), the `else` branch returned `UserSubPrefix::Data = 0`, silently reclassifying all Command messages as Data.
+2. `CurrentProcessed` in `AutoAssignIDsProcess` only passed 4 template args to `MessageDefinition`, dropping `ReplyPayload`. Command messages lost their reply type, so `ExpandReplies` generated no reply messages.
+
+**Symptoms**: `registry::command_messages_t<MyApp>` returned 0 messages; `registry::data_messages_t<MyApp>` returned extra entries.
+
+**Fix** (`include/commrat/messaging/message_id.hpp`):
+Added `uint8_t` direct-passthrough at top of subprefix lambda.
+
+**Fix** (`include/commrat/messaging/message_registry.hpp`):
+Added `GetReplyPayload<First>` helper to safely extract reply type (defaulting to void when absent), passed it as 5th arg to `MessageDefinition` in `CurrentProcessed`.
+
 ---
 
 ## Documentation Gaps
@@ -137,38 +154,14 @@ USER_GUIDE.md Sections 9-12 not yet written:
 
 ### 2. Advanced Examples Missing
 
-**Status**: Incomplete  
+**Status**: Partially complete  
 **Priority**: Low
 
-Examples not yet created:
-- Loop mode example (maximum throughput)
-- Command handling example
+Examples now created: loop_mode_example.cpp, command_example.cpp, multi_output_runtime.cpp, multi_output_sensor_fusion.cpp.
+
+Still missing:
 - Error recovery example
 - Performance profiling example
-
----
-
-## Design Limitations
-
-### 1. Type-Based Metadata Access Limited to 2 Types
-
-**Status**: By Design (Current Implementation)  
-**Priority**: Low
-
-`get_input_metadata<T>()` type-based access only works for the first 2 input types due to tuple unpacking implementation limits.
-
-**Workaround**: Use index-based access `get_input_metadata<0>()` for 3+ inputs.
-
-**Files**: `include/commrat/module/metadata/input_metadata_accessors.hpp`
-
-### 2. Command Dispatch Needs Improvement
-
-**Status**: Known Limitation  
-**Priority**: Medium
-
-Current variadic command handling with overloaded `on_command()` functions works but is not elegant. Better dispatch mechanism needed.
-
-**Workaround**: Use `on_command(const CmdType&) override` for each command type.
 
 ---
 
