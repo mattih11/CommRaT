@@ -2,7 +2,7 @@
 
 This document tracks known issues, limitations, and areas requiring investigation in CommRaT.
 
-**Last Updated**: April 3, 2026
+**Last Updated**: April 7, 2026
 
 ---
 
@@ -29,40 +29,27 @@ Failed to start PUBLISH mailbox: TiMS initialization failed
 **Status**: By Design (Current Implementation)  
 **Priority**: Low
 
-`get_input_metadata<T>()` type-based access only works for the first 2 input types due to tuple unpacking implementation limits.
+Index-based metadata access `get_input_metadata<0>()` is the supported API. Type-based access was removed with the old metadata/ infrastructure.
 
-**Workaround**: Use index-based access `get_input_metadata<0>()` for 3+ inputs.
-
-**Note**: `get_input_metadata<T>()` type-based helpers were in the removed metadata/ infrastructure; use index-based access `get_input_metadata<0>()` instead.
-
-### 2. Command Dispatch Not Yet Implemented
+### 2. Subscription Protocol Not Yet Wired
 
 **Status**: Feature Gap  
 **Priority**: Medium
 
-Subscription protocol and command dispatch are not yet wired up in `ModuleOutput`. CMD mailbox handler infrastructure exists but Subscribe/Unsubscribe handlers are not registered. The `example_commands` test times out as a result.
+Subscription protocol handlers (Subscribe/Unsubscribe) exist in `ModuleOutput` but are not yet registered in `command_loop_impl`. The `example_commands` test times out as a result.
 
-**Next**: Implement Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`.
+**Next**: Wire Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`.
 
-### 3. No Command Reply Mechanism
+### 3. No User Command Reply Mechanism
 
 **Status**: Feature Gap  
 **Priority**: Medium
 
-Commands are currently one-way (fire-and-forget). No built-in support for request/reply patterns like GetStatus or SetParameter commands.
+System request/reply messages (Subscribe, GetData) have reply types auto-generated. User commands are currently fire-and-forget. Reply routing infrastructure exists but is not yet integrated for user-defined commands.
 
-**Proposed Solutions** (see `docs/internal/phase_history/ARCHITECTURE_ANALYSIS.md` Phase 6):
-- **Pattern 1**: One-way commands (current, works as-is)
-- **Pattern 2**: Reply via output parameter: `void on_command(const GetStatusCmd&, StatusReply&)`
-- **Pattern 3**: Reply via return value: `StatusReply on_command(const GetStatusCmd&)`
+**Proposed**: `void on_command(const GetStatusCmd&, StatusReply&)` pattern (reply type from `DataWithCommands`).
 
-**Implementation Needs**:
-- Reply routing infrastructure in command handler
-- Blocking wait for reply on sender side
-- Timeout mechanism (recommended: 1-second default)
-- Concept detection: `has_reply<CmdT, ReplyT>`, `returns_reply<CmdT>`
-
-**Workaround**: Use regular output messages for replies (manual correlation via sequence numbers).
+**Workaround**: Use regular output messages for replies.
 
 ---
 
@@ -99,7 +86,7 @@ uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
 ```
 
 **Verification**:
-- Example 03 now shows successful fusion: `[Fusion] #100 | GPS: ✓fresh age=17.7405ms`
+- Example 03 now shows successful fusion: `[Fusion] #100 | GPS: fresh age=17.7ms`
 - Sync ages well within 100ms tolerance: 17ms, 36ms, 66ms, 87ms, 7ms, 27ms
 - Monitor receives continuous stream of fused outputs
 - Phase 6.9 Multi-Input Synchronization feature **now fully functional**
@@ -111,8 +98,6 @@ uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
 - Testing with realistic data rates is crucial to catch magnitude errors
 
 ---
-
-## Resolved Issues
 
 ### 2. Output<void> Pattern (RESOLVED)
 

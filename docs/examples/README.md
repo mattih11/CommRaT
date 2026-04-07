@@ -1,29 +1,18 @@
 # CommRaT Examples
 
-**Status**: Under Development
-**See**: [../IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
+Fully documented example programs demonstrating CommRaT features.
 
-## Overview
+## Examples
 
-This directory will contain fully documented example programs demonstrating CommRaT features.
+| Directory | Topic | Key Concepts |
+|-----------|-------|--------------|
+| `01_hello_commrat/` | Simplest system | Module2, Output, Period, Input |
+| `02_multi_output/` | Multiple output streams | Multiple Output<T>, type filtering |
+| `03_multi_input_fusion/` | Sensor fusion (IMU+GPS) | Input, SyncedInput, Synced<T> |
 
-## Current Status
+Each directory contains a README, source code, and CMakeLists.txt.
 
-Examples exist in project root `examples/` directory. Documentation is being added.
+## See Also
 
-## Planned Structure
-
-```
-01_hello_commrat/          - Simplest possible example
-02_periodic_producer/      - Timer-based message generation
-03_continuous_consumer/    - Message processing pipeline
-04_multi_output/           - Multiple output streams
-05_multi_input_fusion/     - Sensor fusion (IMU+GPS+Lidar)
-06_command_handling/       - Command pattern
-07_timestamp_metadata/     - Accessing input metadata
-```
-
-Each directory will contain:
-- `README.md` - What it demonstrates, how to build/run
-- Source code with extensive comments
-- Expected output documentation
+- Working examples in `../../examples/` (integrated into CTest)
+- [GETTING_STARTED.md](../GETTING_STARTED.md) for first-time setup
