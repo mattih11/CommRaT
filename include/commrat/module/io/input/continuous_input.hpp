@@ -269,14 +269,14 @@ public:
      * @brief Get sequence number from header (convenience)
      */
     uint32_t get_sequence_number() const {
-        return last_message_.header.sequence_number;
+        return last_message_.header.seq_number;
     }
     
     /**
-     * @brief Get message ID from header (convenience)
+     * @brief Get message type from header (convenience)
      */
-    uint32_t get_message_id() const {
-        return last_message_.header.message_id;
+    uint32_t get_message_type() const {
+        return last_message_.header.msg_type;
     }
     
     /**
@@ -303,23 +303,6 @@ public:
      */
     bool is_fresh() const {
         return has_data_;  // Continuous input is fresh if valid
-    }
-    
-    /**
-     * @brief Legacy poll_data interface (copies message) - DEPRECATED
-     * 
-     * Use poll_data() + get_payload() for zero-copy instead.
-     * 
-     * @deprecated Use zero-copy API: poll_data() then get_payload()
-     */
-    bool poll_data(TimsMessage<OutputType>& msg) {
-        if (!data_mbx_->receive(msg, poll_timeout_)) {
-            return false;
-        }
-        // Also update internal storage for consistency
-        last_message_ = msg;
-        has_data_ = true;
-        return true;
     }
     
     /**

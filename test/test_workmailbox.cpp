@@ -30,7 +30,7 @@ int main() {
     std::cout << "Registry Contents:\n";
     std::cout << "  Total messages:        " << MyApp::size() << "\n";
     std::cout << "  Subscription messages: " << registry::subscription_message_count<MyApp>() << "\n";
-    std::cout << "  System prefix count:   " << registry::tuple_size_v<
+    std::cout << "  System prefix count:   " << std::tuple_size_v<
         registry::filter_by_prefix_t<MessagePrefix::System, MyApp>
     > << "\n\n";
     

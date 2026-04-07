@@ -562,7 +562,7 @@ public:
         message.header.msg_type = get_message_id<T>();
         
         // Use SeRTial's serialization
-        auto result = serialize_message(message);
+        auto result = serialize(message);
         
         // Update header with actual serialized size
         message.header.msg_size = static_cast<uint32_t>(result.size);

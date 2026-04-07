@@ -86,14 +86,10 @@ void TimsWrapper::shutdown() {
 
 TimsResult TimsWrapper::send_raw(const void* data, size_t size, uint32_t dest_mailbox_id) {
     if (!is_initialized_ || tims_fd_ < 0) {
-        std::cerr << "[TiMS] send_raw: NOT INITIALIZED (is_initialized=" << is_initialized_ 
-                  << ", tims_fd=" << tims_fd_ << ")\n";
         return TimsResult::ERROR_NOT_INITIALIZED;
     }
     
     if (!data || size == 0 || size > config_.max_msg_size) {
-        std::cerr << "[TiMS] send_raw: INVALID MESSAGE (data=" << data 
-                  << ", size=" << size << ", max=" << config_.max_msg_size << ")\n";
         return TimsResult::ERROR_INVALID_MESSAGE;
     }
     

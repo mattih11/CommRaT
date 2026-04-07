@@ -231,44 +231,6 @@ private:
 };
 
 /**
- * @brief Timestamp comparison and arithmetic operators
- * 
- * NOTE: These operators are NOT NEEDED since Timestamp is just uint64_t.
- * They are commented out to avoid C++ compilation errors (operator overloading
- * for primitive types is not allowed). Use normal uint64_t operators directly.
- */
-
-/*
-inline constexpr bool operator<(Timestamp lhs, Timestamp rhs) noexcept {
-    return lhs < rhs;
-}
-
-inline constexpr bool operator<=(Timestamp lhs, Timestamp rhs) noexcept {
-    return lhs <= rhs;
-}
-
-inline constexpr bool operator>(Timestamp lhs, Timestamp rhs) noexcept {
-    return lhs > rhs;
-}
-
-inline constexpr bool operator>=(Timestamp lhs, Timestamp rhs) noexcept {
-    return lhs >= rhs;
-}
-
-inline constexpr Timestamp operator+(Timestamp ts, uint64_t ns) noexcept {
-    return ts + ns;
-}
-
-inline constexpr Timestamp operator-(Timestamp ts, uint64_t ns) noexcept {
-    return ts - ns;
-}
-
-inline constexpr Timestamp operator-(Timestamp t1, Timestamp t2) noexcept {
-    return t1 - t2;
-}
-*/
-
-/**
  * @brief Convenience literals for time durations
  * 
  * Usage:

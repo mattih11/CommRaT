@@ -2,8 +2,8 @@
 
 #include "../messages.hpp"
 #include "timestamp.hpp"
+#include <sertial/containers/fixed_string.hpp>
 #include <memory>
-#include <string>
 #include <functional>
 #include <optional>
 #include <atomic>
@@ -16,9 +16,9 @@
 
 namespace commrat {
 
-// TiMS configuration
+// TiMS configuration (no heap allocation)
 struct TimsConfig {
-    std::string mailbox_name;
+    sertial::fixed_string<32> mailbox_name;  // Stack-allocated, real-time safe
     uint32_t mailbox_id;
     size_t max_msg_size;
     uint32_t priority;
@@ -71,7 +71,7 @@ public:
         }
         
         // Serialize the message using SeRTial (returns Result with std::byte buffer)
-        auto result = serialize_message(message);
+        auto result = serialize(message);
         
         // Convert std::byte span to void* for TIMS
         auto view = result.view();
@@ -94,7 +94,7 @@ public:
         ssize_t received_size = receive_raw(buffer.data(), buffer.size(), timeout);
         
         if (received_size > 0) {
-            auto result = deserialize_message<T>(buffer.data(), static_cast<size_t>(received_size));
+            auto result = deserialize<T>(buffer.data(), static_cast<size_t>(received_size));
             if (result) {
                 return *result;  // DeserializeResult has operator*
             }
@@ -108,7 +108,7 @@ public:
     
     // Get mailbox info
     uint32_t get_mailbox_id() const { return config_.mailbox_id; }
-    const std::string& get_mailbox_name() const { return config_.mailbox_name; }
+    std::string_view get_mailbox_name() const { return config_.mailbox_name; }
     bool is_initialized() const { return is_initialized_; }
     
     // Statistics
