@@ -13,25 +13,16 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 
 ## Features
 
-- **Timestamp Metadata Accessors**: Access input timestamps, sequence numbers, freshness/validity flags
-- **Multi-Input Synchronization**: Fuse multiple sensor streams with time-aligned get_data
-- **Multi-Output Modules**: Produce multiple message types simultaneously with type-specific delivery
-- **Ultra-Clean User Interface**: Define messages ONCE, use payload types everywhere
-- **Payload-Only API**: CommRaT<Messages...> template with Module<OutputSpec, InputSpec> base class
-- **Auto-Subscription**: Input<PayloadT> automatically handles subscription protocol with type filtering
-- **Variadic Commands**: Module<..., Cmd1, Cmd2, Cmd3> with type-safe on_command() handlers
-- **System Messages Auto-Included**: CombinedRegistry automatically adds subscription protocol messages
 - **Compile-Time Message IDs**: 0xPSMM format (Prefix, SubPrefix, Message ID) with auto-increment
-- **Modern C++20**: Full template metaprogramming with concepts, `std::span`, and type safety
-- **Zero-Allocation Serialization**: Stack-allocated `std::byte` buffers via SeRTial with compile-time size computation
-- **Compile-Time Type Safety**: Templated message types with static validation and collision detection
-- **Module Framework**: RAII-based Module<> with PeriodicInput/LoopInput/Input<T> modes
-- **Message Registry**: Compile-time type registry for zero-overhead message dispatch
-- **Runtime Visitor Pattern**: Efficient runtime dispatch without virtual functions (receive_any)
-- **SeRTial Integration**: Automatic serialization using `fixed_vector`, `fixed_string`, and `buffer_type`
-- **TiMS IPC Backend**: Socket-based real-time messaging from RACK (casting at C API boundary only)
-- **RT-Capable**: No dynamic allocation in message paths, deterministic behavior
-- **Clean Interfaces**: `std::span<std::byte>` throughout, pointer+size only at TiMS boundary
+- **Zero-Allocation Serialization**: Stack-allocated `std::byte` buffers via SeRTial
+- **Module2 Framework**: `Module2<Output<T>, Input<T>, Period<D>>` with zero-copy workspace API
+- **Multi-Output**: Produce multiple message types with type-specific delivery
+- **Multi-Input Synchronization**: `Input<T>` (primary) + `SyncedInput<T>` (secondary) with `Synced<T>` wrapper
+- **Auto-Subscription**: `Input<T>` handles subscription protocol automatically
+- **3-Mailbox Architecture**: CMD (per-output), WORK (send-only), DATA (per-input) with blocking receives
+- **RT-Safe**: No dynamic allocation in hot paths, deterministic behavior
+- **SeRTial Integration**: `fixed_vector`, `fixed_string`, compile-time size computation
+- **TiMS IPC Backend**: Socket-based real-time messaging from RACK
 
 ## Documentation
 
@@ -70,7 +61,6 @@ sudo make install
 
 struct TemperatureData {
     float temperature_celsius;
-    uint64_t timestamp_ms;
 };
 
 struct StatusData {
@@ -88,9 +78,9 @@ using MyApp = commrat::CommRaT<
 **Step 2: Create Modules**
 ```cpp
 // Producer: publishes temperature every 500ms
-class SensorModule : public MyApp::Module<
+class SensorModule : public MyApp::Module2<
     commrat::Output<TemperatureData>,
-    commrat::PeriodicInput
+    commrat::Period<commrat::Milliseconds(500)>
 > {
 protected:
     void process(TemperatureData& output) override {
@@ -99,32 +89,29 @@ protected:
 };
 
 // Consumer: processes incoming temperature data
-class MonitorModule : public MyApp::Module<
+class MonitorModule : public MyApp::Module2<
     commrat::Output<StatusData>,
     commrat::Input<TemperatureData>
 > {
 protected:
     void process(const TemperatureData& input, StatusData& output) override {
-        std::cout << "Temperature: " << input.temperature_celsius << "°C\n";
+        std::cout << "Temperature: " << input.temperature_celsius << " C\n";
         output = calculate_status(input);
     }
 };
 
 // Multi-Output Producer: generates multiple message types simultaneously
-struct RawData { /* ... */ };
-struct FilteredData { /* ... */ };
-struct Diagnostics { /* ... */ };
-
-class SensorFusion : public MyApp::Module<
-    commrat::Outputs<RawData, FilteredData, Diagnostics>,
-    commrat::PeriodicInput
+class SensorFusion : public MyApp::Module2<
+    commrat::Output<RawData>,
+    commrat::Output<FilteredData>,
+    commrat::Output<Diagnostics>,
+    commrat::Period<commrat::Milliseconds(100)>
 > {
 protected:
     void process(RawData& raw, FilteredData& filtered, Diagnostics& diag) override {
         raw = read_sensors();
         filtered = apply_filter(raw);
         diag = compute_diagnostics(raw, filtered);
-        // Each subscriber receives ONLY their type (type-specific filtering)
     }
 };
 ```
@@ -132,15 +119,15 @@ protected:
 **Step 3: Run**
 ```cpp
 int main() {
-    
-    commrat::ModuleConfig sensor_config{
+    // Config for timer-driven producer
+    commrat::SimpleOutputConfig sensor_config{
         .name = "Sensor",
         .system_id = 10,
-        .instance_id = 1,
-        .period = commrat::Milliseconds(500)
+        .instance_id = 1
     };
     
-    commrat::ModuleConfig monitor_config{
+    // Config for input-driven consumer (source = sensor)
+    commrat::SimpleOutputConfig monitor_config{
         .name = "Monitor",
         .system_id = 20,
         .instance_id = 1,
@@ -154,7 +141,7 @@ int main() {
     sensor.start();
     monitor.start();  // Auto-subscribes to sensor
     
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    commrat::Time::sleep(commrat::Seconds(10));
     
     monitor.stop();
     sensor.stop();
@@ -204,13 +191,12 @@ Documentation will be generated in `docs/api/html/index.html`. Open in your brow
 
 ## Architecture Highlights
 
-- **MailboxSet per Output**: Each output type gets 3 mailboxes (CMD/WORK/PUBLISH) + shared DATA for inputs
+- **3-Mailbox System**: CMD (per-output, blocking receive), WORK (per-module, send-only), DATA (per-input)
 - **Blocking Receives**: 0% CPU when idle, immediate response when active
 - **Compile-Time IDs**: Message IDs calculated at compile time with collision detection
 - **Auto-Subscription**: `Input<T>` automatically handles subscription protocol
 - **Type-Safe Dispatch**: Visitor pattern for runtime dispatch without virtual functions
 - **Real-Time Safe**: No dynamic allocation in hot paths, deterministic behavior
-- **Multi-Output Scalable**: N output types = 3N mailboxes for independent subscription
 
 **[Read Full Architecture Documentation →](docs/README.md)**
 

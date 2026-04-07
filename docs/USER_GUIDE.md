@@ -1,6 +1,6 @@
 # CommRaT User Guide
 
-**CommRaT** (Communication Runtime) is a C++20 real-time messaging framework that provides type-safe, compile-time validated message passing for deterministic systems. Built on top of TiMS (TIMS Interprocess Message System), it enables you to build robust distributed applications with guaranteed real-time performance.
+CommRaT (Communication Runtime) is a C++20 real-time messaging framework providing type-safe, compile-time validated message passing. Built on TiMS, it enables deterministic distributed applications with zero runtime overhead.
 
 ## Table of Contents
 
@@ -23,2600 +23,987 @@
 
 ### What is CommRaT?
 
-CommRaT is a messaging framework designed for **real-time embedded systems** where deterministic behavior, low latency, and type safety are critical. Unlike traditional publish-subscribe systems (ROS, DDS, MQTT), CommRaT provides:
+CommRaT is a messaging framework for real-time embedded systems where deterministic behavior, low latency, and type safety are critical.
 
-- **Compile-time validation**: Message types, IDs, and registries validated at compile time
-- **Zero runtime overhead**: No dynamic allocation, no runtime type checking
-- **Deterministic execution**: Bounded execution time, no blocking I/O in hot paths
-- **Real-time safe**: Lock-free where possible, priority inheritance mutexes
-- **Type safety**: C++20 concepts enforce correct API usage
+**Key properties:**
 
-### Key Features
-
-**1. Compile-Time Message Registry**
-```cpp
-// Define your application with all message types
-using MyApp = CommRaT<
-    Message::Data<TemperatureData>,
-    Message::Data<FilteredData>,
-    Message::Command<ResetCmd>
->;
-// Registry validates uniqueness, calculates IDs, generates serialization
-```
-
-**2. MailboxSet Architecture**
-
-CommRaT uses a **MailboxSet per output type** design:
-
-**Each output type gets 3 mailboxes:**
-- **CMD Mailbox** (base+0): Commands for this output type
-- **WORK Mailbox** (base+16): Subscription protocol for this output type
-- **PUBLISH Mailbox** (base+32): Publishes this output type to subscribers
-
-**Plus a shared DATA mailbox for all inputs:**
-- **DATA Mailbox** (base+48): Receives input data (shared across output types)
-
-**Single-Output Module Example:**
-```cpp
-class Sensor : public Module<Output<TempData>, PeriodicInput>
-```
-Has 1 MailboxSet = 3 mailboxes (CMD, WORK, PUBLISH)
-Total: 3 mailboxes
-
-**Multi-Output Module Example:**
-```cpp  
-class Fusion : public Module<Outputs<Raw, Filtered, Diag>, Input<SensorData>>
-```
-Has 3 MailboxSets × 3 = 9 mailboxes + 1 DATA = 10 total mailboxes
-- Each output type (Raw, Filtered, Diag) has its own CMD, WORK, PUBLISH
-- All share one DATA mailbox for receiving SensorData
-- Subscribers choose which output type to subscribe to
-
-This design allows **independent subscription per output type** - a subscriber can request only FilteredData without receiving Raw or Diag.
-
-**3. Blocking Receives with Zero CPU Usage**
-```cpp
-// No polling, no timeouts, 0% CPU when idle
-void command_loop() {
-    while (running_) {
-        cmd_mailbox_.receive_any([this](auto&& msg) {
-            handle_command(msg);
-        });  // Blocks until message arrives
-    }
-}
-```
-
-**4. Multi-Input Sensor Fusion**
-```cpp
-class SensorFusion : public MyApp::Module<
-    Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,  // Multiple inputs
-    PrimaryInput<IMUData>                  // Primary drives execution
-> {
-protected:
-    void process(
-        const IMUData& imu,      // Received (blocking)
-        const GPSData& gps,      // Fetched via get_data
-        const LidarData& lidar,  // Fetched via get_data
-        FusedData& output        // Output written here
-    ) override {
-        output = fuse_sensors(imu, gps, lidar);
-    }
-};
-```
+- **Compile-time validation** -- Message types, IDs, and registries checked at compile time
+- **Zero runtime overhead** -- No dynamic allocation, no runtime type checking
+- **Deterministic execution** -- Bounded execution time, blocking receives with 0% CPU idle
+- **Type safety** -- C++20 concepts enforce correct API usage
+- **Zero-copy where possible** -- Direct memory access, output workspace pattern
 
 ### When to Use CommRaT
 
-**CommRaT is ideal for:**
-- Real-time control systems (robotics, autonomous vehicles)
-- Sensor fusion and data processing pipelines
-- Embedded systems with hard timing constraints
-- Applications requiring deterministic message delivery
-- Systems where type safety prevents catastrophic errors
+**Ideal for:** Real-time control systems, sensor fusion, embedded systems with hard timing constraints, deterministic message delivery.
 
-**CommRaT may NOT be ideal for:**
-- Web services or microservices (use gRPC, REST)
-- Data analytics pipelines (use Kafka, RabbitMQ)
-- Systems without real-time requirements (use ROS 2, ZeroMQ)
-- Applications requiring dynamic discovery (CommRaT uses static configuration)
-
-### Comparison with Other Frameworks
-
-| Feature | CommRaT | ROS 2 | DDS | ZeroMQ |
-|---------|---------|-------|-----|--------|
-| **Real-time guarantees** | Yes (compile-time) | Partial | Yes | No |
-| **Zero dynamic allocation** | Yes | No | No | No |
-| **Compile-time validation** | Yes | No | No | No |
-| **Type safety** | Strong (C++20 concepts) | Moderate | Weak | None |
-| **Learning curve** | Moderate | Steep | Steep | Easy |
-| **Deployment complexity** | Low (static config) | High (discovery) | High | Moderate |
-| **Performance** | High (zero-copy) | Moderate | High | Moderate |
+**Not ideal for:** Web services (use gRPC), data analytics (use Kafka), systems without RT requirements (use ROS 2).
 
 ### Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Application                          │
-│  using MyApp = CommRaT<MessageA, MessageB, CommandC>;      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-   ┌────▼─────┐         ┌────▼─────┐         ┌────▼─────┐
-   │ Producer │         │ Consumer │         │  Filter  │
-   │  Module  │         │  Module  │         │  Module  │
-   └──────────┘         └──────────┘         └──────────┘
-        │                     ▲                     ▲
-        │ Publish             │ Subscribe           │
-        │                     │                     │
-   ┌────▼─────────────────────┴─────────────────────┴─────┐
-   │              TiMS (Message Passing Layer)            │
-   │  - 3 mailboxes per module (CMD/WORK/DATA)           │
-   │  - Blocking receives (0% CPU idle)                   │
-   │  - Zero-copy when possible                           │
-   └──────────────────────────────────────────────────────┘
+Application: using MyApp = CommRaT<Message::Data<A>, Message::Data<B>, ...>;
+
+   Producer Module          Consumer Module         Filter Module
+   [Module2<...>]           [Module2<...>]          [Module2<...>]
+        |                        ^                       ^
+        | Publish                | Subscribe             |
+        v________________________|_______________________|
+                    TiMS (Message Passing Layer)
+          3 mailboxes per module (CMD / WORK / DATA)
 ```
-
-### What You'll Learn
-
-This guide will take you from **zero to productive** with CommRaT:
-
-1. **Sections 1-3**: Understand core concepts and create your first working system
-2. **Sections 4-6**: Master different module types and message flow patterns
-3. **Sections 7-9**: Learn advanced features (multi-input, timestamps, commands)
-4. **Sections 10-12**: Deploy, optimize, and troubleshoot real systems
-
-By the end, you'll be able to design and implement real-time messaging systems with confidence.
 
 ---
 
 ## 2. Core Concepts
 
-Understanding CommRaT requires familiarity with five fundamental concepts: **Messages**, **Modules**, **Mailboxes**, **Registries**, and the **Subscription Protocol**.
-
 ### 2.1 Messages
 
-Messages are the **data structures** you send between modules. Every message is a plain C++ struct (POD type) with no virtual functions, pointers, or dynamic allocation.
+Messages are plain C++ structs (POD types) with no virtual functions, pointers, or dynamic allocation:
 
-**Basic Message Structure:**
 ```cpp
-// User-defined data structure
 struct TemperatureData {
-    uint64_t timestamp;       // Nanoseconds since epoch
-    uint32_t sensor_id;       // Which sensor produced this
-    float temperature_c;      // Temperature in Celsius
-    float confidence;         // Confidence level (0.0-1.0)
+    uint32_t sensor_id;
+    float temperature_c;
+    float confidence;
 };
 ```
 
-**Message Wrapper:**
-CommRaT automatically wraps your data in a `TimsMessage<T>` that includes metadata:
+CommRaT wraps payloads in `TimsMessage<T>` automatically:
 
 ```cpp
 template<typename T>
 struct TimsMessage {
-    TimsHeader header;  // timestamp, sequence_number, message_id
+    TimsHeader header;  // timestamp, sequence_number, msg_type
     T payload;          // Your data
 };
 ```
 
-**Key Properties:**
-- **Serializable**: Must be compatible with SeRTial serialization (POD types work automatically)
-- **Fixed-size or bounded**: No `std::string`, `std::vector` (use `sertial::fixed_vector<T, N>` instead)
-- **Real-time safe**: No heap allocations when copying or serializing
+**Rules:** No `std::string`, no `std::vector` in payloads. Use `std::array` or `sertial::fixed_vector<T, N>` for bounded collections.
 
 ### 2.2 Application Definition
 
-The `CommRaT<...>` template defines your entire application's message types:
+`CommRaT<...>` defines your application and validates all message types at compile time:
 
 ```cpp
 using MyApp = CommRaT<
-    Message::Data<TemperatureData>,    // Data message
-    Message::Data<FilteredData>,       // Another data message
-    Message::Command<ResetCmd>         // Command message
+    Message::Data<TemperatureData>,
+    Message::Data<FilteredData>,
+    Message::Command<ResetCmd>
 >;
 ```
 
-**What This Does:**
-1. **Validates uniqueness**: Compile error if duplicate message types
-2. **Assigns message IDs**: Each type gets unique 32-bit ID
-3. **Generates serialization**: Automatic serialization/deserialization
-4. **Creates type registry**: Compile-time lookup of types by ID
-
-**Message ID Format:**
-```
-[prefix:8][subprefix:8][local_id:16]
- └─ 0x01 = UserDefined
-          └─ 0x00 = Data
-                   └─ Auto-assigned unique ID
-```
+This validates uniqueness, assigns message IDs, and generates serialization code -- all at compile time.
 
 ### 2.3 Modules
 
-A **Module** is a processing unit that receives messages, processes them, and optionally produces output. Every module runs in its own thread(s) and has its own mailboxes.
+A Module is a processing unit with its own thread(s) and mailboxes. Use `Module2<IOSpecs...>`:
 
-**Module Signature:**
 ```cpp
-class MyModule : public MyApp::Module<
-    OutputSpec,    // What this module produces
-    InputSpec,     // What this module consumes
-    ...Commands    // What commands it handles
-> {
-protected:
-    // Override process() to implement logic
-};
-```
-
-**Module Anatomy:**
-```cpp
-class TemperatureSensor : public MyApp::Module<
-    Output<TemperatureData>,  // Produces temperature readings
-    PeriodicInput             // Generates data every config_.period
-> {
+class Sensor : public MyApp::Module2<Output<TemperatureData>, Period<100>> {
 protected:
     void process(TemperatureData& output) override {
-        // Called every 10ms (if config_.period = 10ms)
-        float temp = read_sensor();  // Your hardware interface
-        output = TemperatureData{
-            .timestamp = Time::now(),
-            .sensor_id = sensor_id_,
-            .temperature_c = temp,
-            .confidence = 0.95
-        };
+        output.sensor_id = 1;
+        output.temperature_c = read_sensor();
+        output.confidence = 0.95f;
     }
-    
-private:
-    uint32_t sensor_id_;
 };
 ```
 
-**Module Lifecycle:**
-1. **Construction**: Module initialized, mailboxes created
-2. **start()**: Spawns threads (command_loop, work_loop, data_thread)
-3. **Running**: Processes messages, publishes outputs
-4. **stop()**: Signals threads to exit
-5. **Destruction**: Threads joined, mailboxes cleaned up
+**Module lifecycle:** Construction -> `start()` (spawns threads) -> Running -> `stop()` (joins threads) -> Destruction.
 
 ### 2.4 Three-Mailbox Architecture
 
-Each module has **three separate mailboxes** to prevent interference:
+Each module has three mailboxes with distinct roles:
 
 ```
-Module Address Space:
-┌─────────────────────────────────────────┐
-│ Base Address = [type_id:16][sys:8][inst:8] │
-├─────────────────────────────────────────┤
-│ CMD  Mailbox (base + 0)                 │  ← User commands
-│  - Commands from other modules          │
-│  - Control messages                     │
-├─────────────────────────────────────────┤
-│ WORK Mailbox (base + 16)                │  ← Subscription protocol
-│  - SubscribeRequest from consumers      │
-│  - SubscribeReply confirmations         │
-│  - UnsubscribeRequest on shutdown       │
-├─────────────────────────────────────────┤
-│ DATA Mailbox (base + 32)                │  ← High-frequency data
-│  - ContinuousInput messages             │
-│  - Published data from producers        │
-└─────────────────────────────────────────┘
+Base Address = [type_id:16][sys:8][inst:8]
+
+CMD  mailbox: base + 0    Per-output: Commands, subscribe/unsubscribe (blocking receive thread)
+WORK mailbox: base + 16   Per-module: Send-only (publish to subscribers, subscribe to producers)
+DATA mailbox: base + 32   Per-input: Data stream receive (blocking receive)
 ```
 
-**Why Three Mailboxes?**
-- **Separation of concerns**: Commands don't interfere with data streams
-- **Priority handling**: Can prioritize WORK over DATA
-- **Blocking receives**: Each mailbox can block independently (0% CPU when idle)
+**Why three mailboxes:**
+- Separation of concerns -- commands don't interfere with data streams
+- Each mailbox blocks independently (0% CPU when idle)
+- Real-time predictability -- data unaffected by control traffic
 
-### 2.5 Message Registry
+### 2.5 Threading Model
 
-The `MessageRegistry<...>` (internal to `CommRaT<...>`) is a **compile-time map** from message types to IDs:
+For a module with N outputs and M inputs:
+- **1 data_thread** -- runs `process()` based on execution mode (timer, input-driven, or loop)
+- **N command_threads** -- one per output, blocking receive on CMD mailbox
+- **No WORK thread** -- WORK mailbox is send-only
 
-```cpp
-// Compile-time operations (zero runtime cost)
-constexpr uint32_t msg_id = MyApp::get_message_id<TemperatureData>();
+Total: N + 1 threads per module.
 
-// Type-safe serialization (picks correct serializer at compile time)
-auto serialized = MyApp::serialize(temp_data);
-
-// Type-safe deserialization (validates type at compile time)
-auto result = MyApp::deserialize<TemperatureData>(buffer);
-```
-
-**Registry Features:**
-- **Compile-time validation**: All types checked at compile time
-- **Unique ID assignment**: Guaranteed no collisions
-- **Type safety**: Can't deserialize wrong type
-- **Zero overhead**: No runtime type lookups
-
-### 2.6 Subscription Protocol
-
-CommRaT uses an **explicit subscription protocol** (not automatic discovery like ROS):
-
-**Step 1: Consumer Sends SubscribeRequest**
-```cpp
-// Consumer (FilterModule) wants TemperatureData from Producer (SensorModule)
-SubscribeRequest req{
-    .subscriber_base_address = my_base_address,
-    .message_type_id = MyApp::get_message_id<TemperatureData>()
-};
-work_mailbox_.send(req, producer_work_mailbox);
-```
-
-**Step 2: Producer Adds Subscriber**
-```cpp
-// Producer receives SubscribeRequest on WORK mailbox
-void handle_subscribe_request(const SubscribeRequest& req) {
-    subscribers_.push_back(req.subscriber_base_address + 48);  // DATA mailbox
-    
-    // Send acknowledgment
-    SubscribeReply reply{ .success = true };
-    work_mailbox_.send(reply, req.subscriber_base_address + 16);  // WORK mailbox
-}
-```
-
-**Step 3: Producer Publishes to Subscribers**
-```cpp
-// Every time process() generates output
-void publish(const TemperatureData& data) {
-    for (uint32_t subscriber_data_mbx : subscribers_) {
-        publish_mailbox_.send(data, subscriber_data_mbx);  // Send from PUBLISH mailbox
-    }
-}
-```
-
-**Step 4: Consumer Receives on DATA Mailbox (base+48)**
-```cpp
-// Consumer's data_thread blocked on receive
-void continuous_loop() {
-    while (running_) {
-        data_mailbox_.receive_any([this](auto&& msg) {
-            process(msg.message);
-        });  // Blocks until message arrives on DATA mailbox
-    }
-}
-```
-
-### 2.7 Compile-Time Guarantees
-
-CommRaT validates many properties at **compile time**, catching errors before runtime:
+### 2.6 Compile-Time Guarantees
 
 ```cpp
 // COMPILE ERROR: Type not in registry
 MyApp::serialize(UnregisteredType{});
-// error: no matching function for template 'serialize'
-
-// COMPILE ERROR: Wrong output type
-class BadModule : public MyApp::Module<Output<WrongType>, PeriodicInput> {
-    void process(TemperatureData& output) override { ... }  // Mismatch!
-};
-// error: type constraint violation
 
 // COMPILE ERROR: Duplicate message types
-using BadApp = CommRaT<
-    Message::Data<TemperatureData>,
-    Message::Data<TemperatureData>  // Duplicate!
->;
+using BadApp = CommRaT<Message::Data<Foo>, Message::Data<Foo>>;
 // static_assert failure: Duplicate message type detected
 ```
-
-### 2.8 Real-Time Safety
-
-CommRaT enforces real-time safety through **design constraints**:
-
-**FORBIDDEN in process() functions:**
-```cpp
-void process(TemperatureData& output) override {
-    // ERROR: Dynamic allocation
-    std::vector<float> readings;  // May allocate
-    readings.push_back(temp);     // May reallocate
-    
-    // ERROR: Blocking I/O
-    std::cout << "Temperature: " << temp << "\n";  // Blocks
-    
-    // ERROR: Unbounded execution
-    while (sensor_ready()) { /* ... */ }  // Non-deterministic
-    
-    // ERROR: Locks that may block
-    std::lock_guard<std::mutex> lock(mtx_);  // May wait
-}
-```
-
-**ALLOWED in process() functions:**
-```cpp
-void process(TemperatureData& output) override {
-    // VALID: Fixed-size stack allocation
-    std::array<float, 10> readings;
-    sertial::fixed_vector<float, 100> buffer;  // Bounded capacity
-    
-    // VALID: Compile-time operations
-    constexpr int scale = 100;
-    
-    // VALID: Lock-free operations
-    uint64_t count = counter_.fetch_add(1, std::memory_order_relaxed);
-    
-    // VALID: Deterministic computation
-    float filtered = alpha_ * temp + (1 - alpha_) * prev_temp_;
-    
-    output = TemperatureData{ /* ... */ };
-}
-```
-
-### Key Takeaways
-
-1. **Messages** are plain POD structs, wrapped in `TimsMessage<T>` with metadata
-2. **CommRaT<...>** defines your application and validates all message types at compile time
-3. **Modules** are processing units with 3 mailboxes (CMD/WORK/DATA)
-4. **Subscription** is explicit: Consumer requests, producer acknowledges, then publishes
-5. **Compile-time validation** catches type errors before runtime
-6. **Real-time safety** requires no dynamic allocation, no blocking I/O in process()
 
 ---
 
 ## 3. Your First Module
 
-Let's build a complete working system: a temperature sensor that publishes data, and a monitor that receives and displays it. This tutorial will take about **10 minutes** and requires only basic C++ knowledge.
+A minimal working system: a temperature sensor publishing data, and a filter receiving it. See GETTING_STARTED.md for full project setup.
 
-### 3.1 Project Setup
-
-**Step 1: Create project directory**
-```bash
-mkdir my_first_commrat
-cd my_first_commrat
-```
-
-**Step 2: Create CMakeLists.txt**
-```cmake
-cmake_minimum_required(VERSION 3.20)
-project(MyFirstCommRaT CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Find CommRaT (adjust path to your installation)
-find_package(CommRaT REQUIRED)
-
-add_executable(temperature_system
-    temperature_system.cpp
-)
-
-target_link_libraries(temperature_system
-    CommRaT::commrat
-    tims
-    pthread
-)
-```
-
-### 3.2 Define Your Message
-
-Create `temperature_system.cpp`:
+### 3.1 Define Messages and Application
 
 ```cpp
 #include <commrat/commrat.hpp>
-#include <iostream>
-#include <csignal>
-#include <atomic>
 
-// Signal handler for clean shutdown
-std::atomic<bool> shutdown_requested{false};
-void signal_handler(int signal) {
-    if (signal == SIGINT || signal == SIGTERM) {
-        shutdown_requested.store(true);
-    }
-}
-
-// Step 1: Define your data structure (plain POD type)
-struct TemperatureReading {
-    uint64_t timestamp;       // When this reading was taken (ns)
-    uint32_t sensor_id;       // Which sensor (1, 2, 3, ...)
-    float temperature_c;      // Temperature in Celsius
-    float humidity_percent;   // Relative humidity (0-100%)
+struct TemperatureData {
+    uint32_t sensor_id;
+    float temperature_c;
+    float humidity_percent;
 };
 
-// Step 2: Define your application with all message types
 using TempApp = commrat::CommRaT<
-    commrat::Message::Data<TemperatureReading>  // Register our message type
+    commrat::Message::Data<TemperatureData>
 >;
-
-// Application is now ready! TempApp provides:
-//   - TempApp::Module<...> for creating modules
-//   - TempApp::serialize/deserialize for messages
-//   - TempApp::get_message_id<T>() for type IDs
 ```
 
-**What just happened?**
-- You defined a **plain C++ struct** with your sensor data
-- You created a **CommRaT application** that knows about your message type
-- The compiler **validated** your types and **assigned a unique ID** to TemperatureReading
-- All serialization code was **generated automatically**
-
-### 3.3 Create a Producer Module
-
-A producer generates data periodically:
+### 3.2 Create a Producer (Timer-Driven)
 
 ```cpp
-// Step 3: Create a producer module
-class TemperatureSensor : public TempApp::Module<
-    commrat::Output<TemperatureReading>,  // This module outputs TemperatureReading
-    commrat::PeriodicInput                // Runs periodically (no input data)
+class TemperatureSensor : public TempApp::Module2<
+    commrat::Output<TemperatureData>,
+    commrat::Period<100>  // 100ms period = 10Hz
 > {
 public:
-    TemperatureSensor(const commrat::ModuleConfig& config, uint32_t sensor_id)
-        : Module(config)
-        , sensor_id_(sensor_id)
-    {
-        std::cout << "[Sensor] Initialized sensor_id=" << sensor_id_ << "\n";
-    }
+    explicit TemperatureSensor(const commrat::ModuleConfig& config)
+        : TempApp::Module2<commrat::Output<TemperatureData>, commrat::Period<100>>(config) {}
 
 protected:
-    // This function is called every config_.period (e.g., every 100ms)
-    void process(TemperatureReading& output) override {
-        // Simulate sensor reading
-        float temp = 20.0f + (rand() % 100) / 10.0f;  // 20-30°C
-        float humidity = 40.0f + (rand() % 200) / 10.0f;  // 40-60%
-        
-        output = TemperatureReading{
-            .timestamp = commrat::Time::now(),
-            .sensor_id = sensor_id_,
-            .temperature_c = temp,
-            .humidity_percent = humidity
-        };
-        
-        std::cout << "[Sensor] Generated: " << temp << "°C, "
-                  << humidity << "% humidity\n";
+    void process(TemperatureData& output) override {
+        output.sensor_id = 1;
+        output.temperature_c = 20.0f + (rand() % 100) / 10.0f;
+        output.humidity_percent = 50.0f;
     }
-
-private:
-    uint32_t sensor_id_;
 };
 ```
 
-**Key points:**
-- Inherits from `TempApp::Module<Output<...>, PeriodicInput>`
-- Overrides `process(OutputData& output)` which is called automatically every `config_.period`
-- Writes to output parameter - **no explicit publish call needed**
-- Must use `override` keyword (process is virtual)
-
-### 3.4 Create a Consumer Module
-
-A consumer receives and processes data:
+### 3.3 Create a Consumer (Input-Driven)
 
 ```cpp
-// Step 4: Create a consumer module
-class TemperatureMonitor : public TempApp::Module<
-    commrat::Output<TemperatureReading>,     // Pass through output
-    commrat::Input<TemperatureReading>        // Receives TemperatureReading
+class TemperatureFilter : public TempApp::Module2<
+    commrat::Output<TemperatureData>,
+    commrat::Input<TemperatureData>
 > {
 public:
-    TemperatureMonitor(const commrat::ModuleConfig& config)
-        : Module(config)
-        , count_(0)
-    {
-        std::cout << "[Monitor] Initialized\n";
-    }
+    explicit TemperatureFilter(const commrat::ModuleConfig& config)
+        : TempApp::Module2<commrat::Output<TemperatureData>,
+          commrat::Input<TemperatureData>>(config) {}
 
 protected:
-    // Called for each received TemperatureReading
-    void process(const TemperatureReading& input, TemperatureReading& output) override {
-        count_++;
-        
-        std::cout << "[Monitor] #" << count_ 
-                  << " Sensor " << reading.sensor_id
-                  << ": " << reading.temperature_c << "°C, "
-                  << reading.humidity_percent << "% humidity\n";
-        
-        // Check for alerts
-        if (reading.temperature_c > 28.0f) {
-            std::cout << "  WARNING: High temperature!\n";
-        }
-        
-        return reading;  // Pass through
+    void process(const TemperatureData& input, TemperatureData& output) override {
+        filtered_ = 0.7f * filtered_ + 0.3f * input.temperature_c;
+        output.sensor_id = input.sensor_id;
+        output.temperature_c = filtered_;
+        output.humidity_percent = input.humidity_percent;
     }
 
 private:
-    uint32_t count_;
+    float filtered_ = 20.0f;
 };
 ```
 
-**Key points:**
-- Inherits from `TempApp::Module<Output<TemperatureReading>, Input<TemperatureReading>>`
-- Overrides `process_continuous(const TemperatureReading&)` 
-- Called automatically for **each received message**
-- Blocks efficiently (0% CPU when no messages)
-
-### 3.5 Wire It Together
-
-Now create the main function to configure and run both modules:
+### 3.4 Wire It Together
 
 ```cpp
 int main() {
-    // Register signal handlers
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
-    
-    std::cout << "=== CommRaT Temperature System ===\n\n";
-    
-    // Step 5: Configure the sensor (producer)
+    // Producer config
     commrat::ModuleConfig sensor_config{
         .name = "TempSensor",
-        .system_id = 10,           // Unique system ID
-        .instance_id = 1,          // Instance within system
-        .period = commrat::Milliseconds(100) // Generate reading every 100ms (10Hz)
+        .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
+        .period = std::chrono::milliseconds(100)
     };
-    
-    // Step 6: Configure the monitor (consumer)
-    commrat::ModuleConfig monitor_config{
-        .name = "TempMonitor",
-        .system_id = 20,           // Different system ID
-        .instance_id = 1,
-        .source_system_id = 10,    // Subscribe to system 10 (sensor)
-        .source_instance_id = 1    // Instance 1
+
+    // Consumer config (subscribes to producer via source IDs)
+    commrat::ModuleConfig filter_config{
+        .name = "TempFilter",
+        .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+        .inputs = commrat::SingleInputConfig{
+            .source_system_id = 10,
+            .source_instance_id = 1
+        }
     };
-    
-    // Step 7: Create and start both modules
-    TemperatureSensor sensor(sensor_config, 1);
-    TemperatureMonitor monitor(monitor_config);
-    
-    sensor.start();   // Spawns threads, begins generating
-    
-    // Give producer time to initialize
+
+    TemperatureSensor sensor(sensor_config);
+    TemperatureFilter filter(filter_config);
+
+    sensor.start();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    
-    monitor.start();  // Spawns threads, subscribes to sensor
-    
-    // Run until signal or timeout
-    std::cout << "\nRunning... (Press Ctrl+C to stop)\n\n";
-    int seconds = 0;
-    while (!shutdown_requested.load() && seconds < 5) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        seconds++;
-    }
-    
-    // Step 8: Clean shutdown
-    std::cout << "\nShutting down...\n";
-    monitor.stop();
+    filter.start();
+
+    // Run for 5 seconds
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    // Stop in reverse order
+    filter.stop();
     sensor.stop();
-    
-    std::cout << "Done!\n";
     return 0;
 }
 ```
 
-### 3.6 Build and Run
-
-**Build:**
-```bash
-mkdir build && cd build
-cmake ..
-make
-```
-
-**Run:**
-```bash
-./temperature_system
-```
-
-**Expected Output:**
-```
-=== CommRaT Temperature System ===
-
-[Sensor] Initialized sensor_id=1
-[Monitor] Initialized
-
-Running for 5 seconds...
-
-[Sensor] Generated: 23.4°C, 52.1% humidity
-[Monitor] #1 Sensor 1: 23.4°C, 52.1% humidity
-[Sensor] Generated: 27.8°C, 48.3% humidity
-[Monitor] #2 Sensor 1: 27.8°C, 48.3% humidity
-[Sensor] Generated: 29.1°C, 55.7% humidity
-[Monitor] #3 Sensor 1: 29.1°C, 55.7% humidity
-  WARNING: High temperature!
-[Sensor] Generated: 21.5°C, 43.9% humidity
-[Monitor] #4 Sensor 1: 21.5°C, 43.9% humidity
-...
-
-Shutting down...
-Done!
-```
-
-### 3.7 What Happened Under the Hood
-
-Let's trace the message flow:
-
-**1. Initialization (0-10ms):**
-```
-main()
-      → TemperatureSensor constructor
-          → Creates 3 mailboxes (CMD, WORK, DATA)
-          → Base address: [TemperatureReading_ID:16][10:8][1:8]
-      → TemperatureMonitor constructor
-          → Creates 3 mailboxes (CMD, WORK, DATA)
-```
-
-**2. Module Start (10-20ms):**
-```
-sensor.start()
-    → Spawns command_loop() thread (handles commands)
-    → Spawns work_loop() thread (handles subscriptions)
-    → Spawns data_thread_ (calls process() every 100ms)
-
-monitor.start()
-    → Spawns command_loop() thread
-    → Spawns work_loop() thread
-    → Spawns data_thread_ (calls continuous_loop)
-    → Sends SubscribeRequest to sensor's WORK mailbox
-```
-
-**3. Subscription (20-30ms):**
-```
-Sensor's work_loop receives SubscribeRequest
-    → Adds monitor's DATA mailbox (base+48) to subscribers_ list
-    → Sends SubscribeReply to monitor's WORK mailbox (base+16)
-
-Monitor's work_loop receives SubscribeReply
-    → Subscription confirmed
-    → Begins blocking on DATA mailbox (base+48)
-```
-
-**4. Data Flow (every 100ms):**
-```
-Sensor's data_thread (timer fires every 100ms)
-    → Calls process()
-    → User code generates TemperatureReading
-    → Module automatically publishes to all subscribers
-        → Serializes TemperatureReading
-        → Sends from PUBLISH mailbox (base+32) to monitor's DATA mailbox (base+48)
-
-Monitor's continuous_loop (blocked on receive)
-    → Receives message on DATA mailbox (base+48)
-    → Deserializes TemperatureReading
-    → Calls process_continuous(reading)
-    → User code displays data
-    → Blocks again waiting for next message
-```
-
-**5. Shutdown (5000ms):**
-```
-main() calls sensor.stop()
-    → Sets running_ = false
-    → Threads detect flag and exit
-    → Joins all threads
-
-main() calls monitor.stop()
-    → Sends UnsubscribeRequest to sensor
-    → Exits threads
-```
-
-### 3.8 Common First-Time Mistakes
-
-**Mistake 1: Forgetting `override` keyword**
-```cpp
-// ERROR: Won't compile
-void process(TemperatureReading& output) {  // Missing override
-    output = reading;
-}
-```
-**Fix:** Always use `override` for process methods (they're virtual).
-
-**Mistake 2: Wrong output type**
-```cpp
-// ERROR: Module says Output<TemperatureReading> but returns wrong type
-class BadSensor : public TempApp::Module<Output<TemperatureReading>, PeriodicInput> {
-    void process(OtherData& output) override {  // Type mismatch!
-        output = OtherData{};
-    }
-};
-```
-**Fix:** Return type must match `Output<T>` specification.
-
-**Mistake 3: Mismatched system IDs**
-```cpp
-ModuleConfig monitor_config{
-    .system_id = 20,
-    .source_system_id = 99,  // ERROR: Sensor is system 10, not 99!
-    .source_instance_id = 1
-};
-```
-**Fix:** `source_system_id` must match producer's `system_id`.
-
-**Mistake 4: Blocking in process()**
-```cpp
-void process(TemperatureReading& output) override {
-    std::this_thread::sleep_for(std::chrono::seconds(1));  // ERROR: Blocks!
-    output = reading;
-}
-```
-**Fix:** Never block in process() - use CommRaT's timing primitives or configure `period`.
-
-### 3.9 Extending Your System
-
-**Add another sensor:**
-```cpp
-ModuleConfig sensor2_config{
-    .name = "TempSensor2",
-    .system_id = 11,       // Different system ID
-    .instance_id = 1,
-    .period = Milliseconds(100)
-};
-TemperatureSensor sensor2(sensor2_config, 2);  // sensor_id=2
-sensor2.start();
-```
-
-**Monitor both sensors:**
-```cpp
-// Monitor can subscribe to multiple producers by starting multiple instances
-ModuleConfig monitor2_config{
-    .name = "TempMonitor2",
-    .system_id = 21,
-    .source_system_id = 11,  // Subscribe to sensor2
-    .source_instance_id = 1
-};
-TemperatureMonitor monitor2(monitor2_config);
-monitor2.start();
-```
-
-**Add a filter module:**
-```cpp
-class TemperatureFilter : public TempApp::Module<
-    Output<TemperatureReading>,      // Outputs filtered data
-    Input<TemperatureReading>        // Inputs raw data
-> {
-    void process(const TemperatureReading& raw, TemperatureReading& output) override {
-        // Apply exponential moving average
-        filtered_temp_ = 0.7f * filtered_temp_ + 0.3f * raw.temperature_c;
-        
-        output = TemperatureReading{
-            .timestamp = Time::now(),
-            .sensor_id = raw.sensor_id,
-            .temperature_c = filtered_temp_,
-            .humidity_percent = raw.humidity_percent
-        };
-    }
-    
-private:
-    float filtered_temp_ = 20.0f;
-};
-```
-
-### Key Takeaways
-
-1. **Messages** are plain POD structs - define your data structure naturally
-2. **CommRaT<...>** registers all types and generates serialization automatically
-3. **Producer modules** use `PeriodicInput` and override `process(OutputData& output)`
-4. **Consumer modules** use `Input<T>` and override `process(const InputData& input, OutputData& output)`
-5. **Configuration** uses system_id/instance_id for addressing and source IDs for subscription
-6. **Subscription** happens automatically in `start()` based on configuration
-7. **Shutdown** is clean - just call `stop()` on all modules
-
-**Next:** Section 4 explores all module types (Periodic, Continuous, Loop) and processing modes.
+**What happens:** `sensor.start()` spawns threads and begins generating data every 100ms. `filter.start()` automatically subscribes to the sensor and blocks on its DATA mailbox. Each received message triggers `process()`.
 
 ---
 
 ## 4. Module Types and Processing Modes
 
-CommRaT modules come in different flavors based on **how they process data**. Understanding these patterns helps you choose the right architecture for your application.
+### 4.1 Overview
 
-### 4.1 The Three Processing Modes
+The I/O specs determine the execution mode automatically:
 
-Every module has an **InputSpec** that determines its processing behavior:
+| I/O Specs | Mode | When process() Called | Use Case |
+|-----------|------|---------------------|----------|
+| `Output<T>, Period<N>` | Timer-driven | Every N milliseconds | Sensor reading, heartbeat |
+| `Output<T>, Input<U>` | Input-driven | Each received message | Filtering, transformation |
+| `Output<T>` (no Period, no Input) | Loop | As fast as possible | High-speed generation |
+| `Output<T1>, Output<T2>, Period<N>` | Timer, multi-output | Every N milliseconds | Multi-sensor producer |
+| `Output<T>, Input<U>, SyncedInput<V>` | Input-driven, multi-input | Primary input arrives | Sensor fusion |
 
-| InputSpec | When process() Called | Use Case | Example |
-|-----------|----------------------|----------|---------|
-| **PeriodicInput** | Timer fires (every `period`) | Data generation, periodic sampling | Sensor reading, heartbeat |
-| **Input<T>** | Message received | Data transformation, filtering | Signal processing, fusion |
-| **LoopInput** | As fast as possible | Maximum throughput | High-speed data forwarding |
+### 4.2 Timer-Driven (Period)
 
-### 4.2 PeriodicInput: Timer-Driven Processing
+Generates data at fixed intervals. No input needed.
 
-**When to use:** Generate data at fixed intervals, periodic tasks.
-
-**Signature:**
 ```cpp
-class MyModule : public MyApp::Module<Output<OutputType>, PeriodicInput> {
+class Sensor : public MyApp::Module2<Output<SensorData>, Period<Milliseconds(10)>> {
 protected:
-    void process(OutputType& output) override {
-        // Called every config_.period (e.g., 100ms)
-        output = OutputType{ /* ... */ };
+    void process(SensorData& output) override {
+        output = read_sensor();  // Called every 10ms
     }
 };
 ```
 
-**Configuration:**
+- Deterministic timing (CommRaT scheduler)
+- 0% CPU between periods
+- Timestamp: `TimsHeader.timestamp = Time::now()`
+
+### 4.3 Input-Driven
+
+Reacts to incoming messages. Blocks efficiently until data arrives.
+
 ```cpp
-ModuleConfig config{
-    .name = "PeriodicModule",
-    .system_id = 10,
-    .instance_id = 1,
-    .period = Milliseconds(100)  // REQUIRED for PeriodicInput
+class Filter : public MyApp::Module2<Output<FilteredData>, Input<RawData>> {
+protected:
+    void process(const RawData& input, FilteredData& output) override {
+        output.value = apply_filter(input);  // Called per received message
+    }
 };
 ```
 
-**Example: Heartbeat Generator**
+- 0% CPU when idle
+- Every published message triggers `process()`
+- Timestamp: `TimsHeader.timestamp = input.header.timestamp` (propagated)
+
+### 4.4 Loop Mode
+
+Runs as fast as possible. No timing constraints. Omit both `Period` and `Input` specs.
+
 ```cpp
-struct HeartbeatMsg {
-    uint64_t timestamp;
-    uint32_t sequence_number;
-    uint32_t process_id;
-};
-
-class Heartbeat : public MyApp::Module<Output<HeartbeatMsg>, PeriodicInput> {
-public:
-    Heartbeat(const ModuleConfig& config)
-        : Module(config), seq_(0) {}
-
+class FastCounter : public MyApp::Module2<Output<CounterData>> {
 protected:
-    void process(HeartbeatMsg& output) override {
-        output = HeartbeatMsg{
-            .timestamp = Time::now(),
-            .sequence_number = seq_++,
-            .process_id = getpid()
-        };
+    void process(CounterData& output) override {
+        output.value = counter_++;  // Runs continuously
     }
 
 private:
-    uint32_t seq_;
-};
-
-// Usage
-ModuleConfig config{
-    .period = Seconds(1)  // Heartbeat every second
-};
-Heartbeat hb(config);
-hb.start();
-```
-
-**Characteristics:**
-- **Deterministic timing**: Process runs at exact intervals (handled by CommRaT's scheduler)
-- **No blocking**: If process() takes longer than period, warning logged
-- **CPU efficient**: Thread sleeps between periods (0% CPU when idle)
-- **Timestamp assignment**: `TimsHeader.timestamp = Time::now()` at generation moment
-
-### 4.3 Input<T>: Event-Driven Processing
-
-**When to use:** React to incoming messages, transform data.
-
-**Signature:**
-```cpp
-class MyModule : public MyApp::Module<OutputSpec, Input<InputType>> {
-protected:
-    OutputType process_continuous(const InputType& input) override {
-        // Called for EACH received message
-        return OutputType{ /* transform input */ };
-    }
+    uint64_t counter_ = 0;
 };
 ```
 
-**Configuration:**
+- 100% CPU on one core
+- Use sparingly -- can starve other processes
+
+### 4.5 Multi-Output
+
+Separate `Output<T>` for each output type. Each gets its own CMD mailbox.
+
 ```cpp
-ModuleConfig config{
-    .name = "ContinuousModule",
-    .system_id = 20,
-    .instance_id = 1,
-    .source_system_id = 10,     // Producer's system ID
-    .source_instance_id = 1,    // Producer's instance ID
-    .period = Duration(0)       // Ignored for Input<T>
-};
-```
-
-**Example: Temperature Filter**
-```cpp
-struct RawTemperature {
-    uint64_t timestamp;
-    float value_c;
-};
-
-struct FilteredTemperature {
-    uint64_t timestamp;
-    float value_c;
-    float confidence;
-};
-
-class TemperatureFilter : public MyApp::Module<
-    Output<FilteredTemperature>,
-    Input<RawTemperature>
+class MultiSensor : public MyApp::Module2<
+    Output<TemperatureData>,
+    Output<PressureData>,
+    Period<100>
 > {
-public:
-    TemperatureFilter(const ModuleConfig& config)
-        : Module(config), alpha_(0.3f), prev_temp_(20.0f) {}
-
 protected:
-    void process(const RawTemperature& raw, FilteredTemperature& output) override {
-        // Exponential moving average
-        float filtered = alpha_ * raw.value_c + (1 - alpha_) * prev_temp_;
-        prev_temp_ = filtered;
-        
-        // Calculate confidence based on rate of change
-        float confidence = 1.0f - std::min(std::abs(filtered - raw.value_c) / 10.0f, 1.0f);
-        
-        output = FilteredTemperature{
-            .timestamp = Time::now(),
-            .value_c = filtered,
-            .confidence = confidence
-        };
-    }
-
-private:
-    float alpha_;
-    float prev_temp_;
-};
-```
-
-**Characteristics:**
-- **Event-driven**: Executes only when data arrives (0% CPU when no messages)
-- **Blocking receive**: Thread blocks efficiently until message available
-- **Guaranteed delivery**: Every published message triggers process
-- **Timestamp propagation**: Output timestamp = input.header.timestamp (exact propagation)
-- **Order preserved**: Messages processed in arrival order
-
-### 4.4 LoopInput: Maximum Throughput Processing
-
-**When to use:** Process data as fast as possible, no timing constraints.
-
-**Signature:**
-```cpp
-class MyModule : public MyApp::Module<Output<OutputType>, LoopInput> {
-protected:
-    void process(OutputType& output) override {
-        // Called repeatedly as fast as possible
-        output = OutputType{ /* ... */ };
+    void process(TemperatureData& temp, PressureData& pressure) override {
+        temp.temperature_c = read_temp();
+        pressure.pressure_pa = read_pressure();
     }
 };
 ```
 
-**Configuration:**
+Subscribers choose which output type to receive. Each output can have independent subscribers.
+
+### 4.6 Multi-Input with Synced
+
+First `Input<T>` is primary (drives execution). `SyncedInput<T>` types are secondary (synchronized via `get_data`).
+
 ```cpp
-ModuleConfig config{
-    .name = "LoopModule",
-    .system_id = 30,
-    .instance_id = 1,
-    .period = Duration(0)  // Ignored for LoopInput
-};
-```
-
-**Example: Data Generator**
-```cpp
-struct DataPacket {
-    uint64_t timestamp;
-    uint64_t packet_id;
-    std::array<float, 100> samples;
-};
-
-class HighSpeedGenerator : public MyApp::Module<Output<DataPacket>, LoopInput> {
-public:
-    HighSpeedGenerator(const ModuleConfig& config)
-        : Module(config), packet_id_(0) {}
-
+class Fusion : public MyApp::Module2<
+    Output<FusedData>,
+    Input<IMUData>,              // Primary -- blocking receive
+    SyncedInput<GPSData>         // Secondary -- get_data synchronized
+> {
 protected:
-    void process(DataPacket& output) override {
-        DataPacket packet{
-            .timestamp = Time::now(),
-            .packet_id = packet_id_++
-        };
-        
-        // Generate synthetic waveform
-        for (size_t i = 0; i < 100; ++i) {
-            packet.samples[i] = std::sin(2 * M_PI * i / 100.0);
+    void process(const IMUData& imu, const Synced<GPSData>& gps,
+                 FusedData& output) override {
+        if (gps) {
+            output = fuse_sensors(imu, gps.value());  // Fresh GPS
+        } else if (gps.is_valid()) {
+            output = fuse_sensors(imu, gps.stale());   // Stale GPS
+        } else {
+            output = dead_reckoning(imu);               // No GPS
         }
-        
-        output = packet;
-    }
-
-private:
-    uint64_t packet_id_;
-};
-```
-
-**Characteristics:**
-- **Maximum throughput**: No artificial delays
-- **High CPU usage**: Runs continuously (100% CPU on one core)
-- **Non-deterministic timing**: Rate depends on processing speed
-- **Use with caution**: Can starve other processes
-
-**WARNING:** LoopInput should be used sparingly. Most applications should use PeriodicInput or Input<T> for predictable behavior and efficient CPU usage.
-
-### 4.5 Output Specifications
-
-Modules can produce zero, one, or multiple outputs:
-
-#### No Output (Monitor/Sink)
-```cpp
-class DataLogger : public MyApp::Module<Output<void>, Input<SensorData>> {
-protected:
-    void process(const SensorData& data) override {
-        log_to_file(data);
-        // No return value - this is a sink
     }
 };
 ```
 
-#### Single Output (Most Common)
-```cpp
-class Filter : public MyApp::Module<Output<FilteredData>, Input<RawData>> {
-protected:
-    void process(const RawData& raw, FilteredData& output) override {
-        return apply_filter(raw);
-    }
-};
-```
+See Section 7 for full `Synced<T>` API.
 
-#### Multiple Outputs (Phase 5.3+)
-```cpp
-class SignalSplitter : public MyApp::Module<
-    Outputs<DataA, DataB>,     // Multiple outputs
-    Input<CombinedData>
-> {
-protected:
-    void process(const CombinedData& input, DataA& out1, DataB& out2) override {
-        // Fill both outputs by reference
-        out1 = extract_channel_a(input);
-        out2 = extract_channel_b(input);
-    }
-};
-```
-
-### 4.6 InputSpec vs ProcessingMode: Understanding the Difference
-
-**Common confusion:** "What's the difference between InputSpec and ProcessingMode?"
-
-**InputSpec** (compile-time): Specifies **what data comes in**
-- `PeriodicInput` - No input data (self-generating)
-- `Input<T>` - One input type
-- `Inputs<T, U, V>` - Multiple input types
-
-**ProcessingMode** (runtime): Specifies **when to process**
-- `Periodic` - Timer-driven (for PeriodicInput)
-- `Continuous` - Event-driven (for Input<T>)
-- `Loop` - As-fast-as-possible (for LoopInput)
-
-The InputSpec **determines** the ProcessingMode automatically:
-
-```cpp
-// InputSpec → ProcessingMode mapping
-PeriodicInput → ProcessingMode::Periodic
-Input<T>      → ProcessingMode::Continuous
-LoopInput     → ProcessingMode::Loop
-```
-
-**You don't specify ProcessingMode directly** - it's inferred from InputSpec.
-
-### 4.7 Combining Inputs and Outputs
-
-Valid combinations:
-
-```cpp
-// Generator: No input, has output
-class Generator : public MyApp::Module<Output<Data>, PeriodicInput>;
-
-// Transformer: Input → Output
-class Transformer : public MyApp::Module<Output<DataB>, Input<DataA>>;
-
-// Sink: Input → No output
-class Sink : public MyApp::Module<Output<void>, Input<Data>>;
-
-// Multi-output transformer
-class Splitter : public MyApp::Module<Outputs<DataA, DataB>, Input<Combined>>;
-
-// Multi-input fusion (Phase 6.9+)
-class Fusion : public MyApp::Module<Output<Fused>, Inputs<DataA, DataB, DataC>>;
-```
-
-### 4.8 Choosing the Right Module Type
-
-**Decision tree:**
+### 4.7 Choosing the Right Mode
 
 ```
-Does your module generate data from scratch?
-├─ YES → Use PeriodicInput
-│         └─ Set .period to desired rate
-│
-└─ NO → Does it receive messages?
-        ├─ YES → Need maximum throughput?
-        │        ├─ NO → Use Input<T>
-        │        │       └─ Subscribe with source_system_id
-        │        │
-        │        └─ YES → Use LoopInput (rarely needed)
-        │                └─ Monitor CPU usage carefully
-        │
-        └─ NO → Invalid (module must do something)
+Generate data from scratch?
+  YES -> Period<N> (timer-driven)
+  NO  -> Receive messages?
+           YES -> Need multi-source sync?
+                    YES -> Input<T> + SyncedInput<U>
+                    NO  -> Input<T>
+           NO  -> Output<T> alone (loop mode, use sparingly)
 ```
-
-**Examples by use case:**
-
-| Use Case | Module Type | Rationale |
-|----------|-------------|-----------|
-| Read sensor every 10ms | PeriodicInput | Fixed sampling rate |
-| Filter incoming data | Input<T> | React to each message |
-| Log messages to disk | Input<T> | Process each message |
-| Generate test patterns | PeriodicInput | Controlled generation rate |
-| Fuse IMU + GPS | Inputs<IMU, GPS> | Multiple synchronized inputs |
-| Stress test system | LoopInput | Maximum load generation |
-
-### 4.9 Performance Characteristics
-
-**PeriodicInput:**
-- **Latency**: Fixed (= period)
-- **Throughput**: 1 / period messages/sec
-- **CPU Usage**: Low (sleeps between periods)
-- **Jitter**: Low (timer-driven)
-
-**Input<T>:****
-- **Latency**: Minimal (processes immediately on arrival)
-- **Throughput**: Depends on publisher rate
-- **CPU Usage**: 0% when idle, scales with message rate
-- **Jitter**: Minimal (event-driven)
-
-**LoopInput:**
-- **Latency**: Minimal (no delays)
-- **Throughput**: Maximum (limited by CPU)
-- **CPU Usage**: 100% (continuous loop)
-- **Jitter**: High (depends on system load)
-
-### 4.10 Real-World Example: Sensor Fusion Pipeline
-
-Let's combine multiple module types in a realistic system:
-
-```cpp
-// 1. Periodic sensor reading (PeriodicInput)
-class IMUSensor : public MyApp::Module<Output<IMUData>, PeriodicInput> {
-protected:
-    void process(IMUData& output) override {
-        output = read_imu_hardware();  // Every 10ms
-    }
-};
-
-// 2. Event-driven filtering (ContinuousInput)
-class IMUFilter : public MyApp::Module<Output<FilteredIMU>, Input<IMUData>> {
-protected:
-    void process(const IMUData& raw, FilteredIMU& output) override {
-        output = kalman_filter_.update(raw);
-    }
-private:
-    KalmanFilter kalman_filter_;
-};
-
-// 3. Multi-input fusion (ContinuousInput with multiple inputs)
-class PoseFusion : public MyApp::Module<
-    Output<PoseEstimate>,
-    Inputs<FilteredIMU, GPSData>,
-    PrimaryInput<FilteredIMU>  // IMU drives execution
-> {
-protected:
-    void process(
-        const FilteredIMU& imu,
-        const GPSData& gps,
-        PoseEstimate& output
-    ) override {
-        output = fuse_sensors(imu, gps);
-    }
-};
-
-// 4. Sink for logging (ContinuousInput, no output)
-class PoseLogger : public MyApp::Module<Output<void>, Input<PoseEstimate>> {
-protected:
-    void process(const PoseEstimate& pose) override {
-        write_to_log(pose);
-    }
-};
-```
-
-**Pipeline:**
-```
-IMUSensor (10ms) → IMUFilter → PoseFusion ← GPSData
-                                    ↓
-                               PoseLogger
-```
-
-### Key Takeaways
-
-1. **PeriodicInput**: Timer-driven, for data generation at fixed rates
-2. **Input<T>**: Event-driven, for message processing and transformation
-3. **LoopInput**: Maximum throughput, use sparingly (high CPU usage)
-4. **InputSpec determines ProcessingMode** automatically - you don't specify both
-5. **Combine module types** to build complex pipelines
-6. **Choose based on requirements**: Timing constraints → Periodic, React to events → Continuous
-
-**Next:** Section 5 dives deep into I/O specifications for advanced patterns.
 
 ---
 
 ## 5. I/O Specifications
 
-CommRaT modules are defined by their **input and output specifications**. These determine what data a module produces, consumes, and how it interacts with other modules.
+### 5.1 Reference Table
 
-### 5.1 Output Specifications
+| Spec | Purpose | Template Parameter |
+|------|---------|--------------------|
+| `Output<T>` | Declares an output type | Payload struct type |
+| `Input<T>` | Primary input (blocking receive) | Input payload type |
+| `SyncedInput<T>` | Secondary input (get_data sync) | Input payload type |
+| `Period<N>` | Timer interval | Duration value (ms) or `Milliseconds(N)` |
 
-- **Output<T>**: Module produces a single message type T.
-- **Outputs<T, U, ...>**: Module produces multiple message types (multi-output).
-- **Output<void>**: Module produces no output (sink/monitor).
+### 5.2 Output Specs
 
-**Examples:**
+One or more `Output<T>` specs per module. Each output gets its own CMD mailbox and subscriber list.
+
 ```cpp
-class Producer : public MyApp::Module<Output<DataA>, PeriodicInput> { ... };
-class Splitter : public MyApp::Module<Outputs<DataA, DataB>, Input<CombinedData>> { ... };
-class Logger : public MyApp::Module<Output<void>, Input<DataA>> { ... };
+// Single output
+Module2<Output<DataA>, Period<100>>
+
+// Multiple outputs -- each is separate
+Module2<Output<DataA>, Output<DataB>, Period<100>>
 ```
 
-### 5.2 Input Specifications
+There is no `Output<void>`. Every module must produce at least one output.
 
-- **PeriodicInput**: No input, generates data periodically.
-- **Input<T>**: Receives a single message type T (continuous input).
-- **Inputs<T, U, ...>**: Receives multiple message types (multi-input fusion).
-- **LoopInput**: No input, runs as fast as possible.
+### 5.3 Input Specs
 
-**Examples:**
 ```cpp
-class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> { ... };
-class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> { ... };
-class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>> { ... };
-class StressTest : public MyApp::Module<Output<Data>, LoopInput> { ... };
+// No input (timer-driven or loop)
+Module2<Output<T>, Period<100>>        // Timer
+Module2<Output<T>>                     // Loop
+
+// Single input
+Module2<Output<U>, Input<T>>           // Input-driven
+
+// Multi-input (primary + synced secondaries)
+Module2<Output<U>, Input<T>, SyncedInput<V>, SyncedInput<W>>
 ```
 
-### 5.3 Combining Inputs and Outputs
+The first `Input<T>` is automatically the primary input. All `SyncedInput<T>` types use `get_data()` synchronized to the primary input's timestamp.
 
-You can combine input and output specs for advanced patterns:
-- **Generator**: Output<T>, PeriodicInput
-- **Transformer**: Output<T>, Input<U>
-- **Sink**: Output<void>, Input<T>
-- **Multi-output**: Outputs<T, U>, Input<V>
-- **Multi-input fusion**: Output<T>, Inputs<U, V, W>
+### 5.4 Period Spec
 
-**Example: Multi-output producer**
 ```cpp
-class MultiProducer : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
-protected:
-    void process(DataA& outA, DataB& outB) override {
-        outA = generate_a();
-        outB = generate_b();
-    }
-};
+Period<100>                  // 100ms (integer literal)
+Period<Milliseconds(100)>    // Explicit duration type
+Period<Seconds(1)>           // 1 second
 ```
 
-**Example: Multi-input fusion**
+### 5.5 Process Signatures
+
+The `process()` signature is determined by the I/O specs:
+
+| I/O Specs | Process Signature |
+|-----------|-------------------|
+| `Output<T>, Period<N>` | `void process(T& output)` |
+| `Output<T>` (loop) | `void process(T& output)` |
+| `Output<U>, Input<T>` | `void process(const T& input, U& output)` |
+| `Output<A>, Output<B>, Period<N>` | `void process(A& out1, B& out2)` |
+| `Output<U>, Input<T>, SyncedInput<V>` | `void process(const T& in, const Synced<V>& synced, U& out)` |
+
+Inputs always come first (const refs), then synced inputs (const Synced refs), then outputs (mutable refs).
+
+### 5.6 I/O Metadata Access
+
+Inside `process()`, access metadata for inputs:
+
 ```cpp
-class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>> {
-protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-        return fuse(imu, gps);
-    }
-};
+uint64_t ts = get_input_timestamp<0>();   // Index-based
+bool fresh = has_new_data<1>();           // Is synced input fresh?
+bool valid = is_input_valid<1>();         // Did get_data succeed?
 ```
 
-### 5.4 Input Metadata and Accessors
+### 5.7 Structured I/O Access
 
-For each input, CommRaT provides metadata accessors:
-- `get_input_metadata<Index>()` - Get metadata for input at index
-- `get_input_metadata<Type>()` - Get metadata for input of unique type
-- `get_input_timestamp<Index>()` - Get timestamp for input
-- `has_new_data<Index>()` - Check freshness
-- `is_input_valid<Index>()` - Check validity
+Named access to inputs and outputs via `inputs()` and `outputs()`:
 
-**Example:**
 ```cpp
-uint64_t imu_ts = get_input_timestamp<IMUData>();
-bool gps_fresh = has_new_data<1>();
+auto ins = inputs();    // rfl::NamedTuple with auto-generated field names
+auto outs = outputs();  // e.g., outs.temperature_data, ins.imu_data
 ```
-
-### 5.5 Real-Time Safety in I/O Specs
-
-- All input/output specs are validated at compile time
-- No dynamic allocation in hot paths
-- Type mismatches are compile errors
-- Multi-output and multi-input patterns are deterministic
-
-### Key Takeaways
-
-1. **Output/Input specs** define module data flow
-2. **Multi-output** and **multi-input** enable advanced pipelines
-3. **Metadata accessors** provide timestamps, freshness, validity
-4. **Compile-time validation** ensures correctness and real-time safety
 
 ---
 
 ## 6. Message Flow and Subscription
 
-CommRaT uses a **3-mailbox architecture** with an **automatic subscription protocol** to enable efficient, deterministic message delivery between modules. This section explains how messages flow through the system and how modules discover and connect to each other.
+### 6.1 Subscription Protocol
 
-### 6.1 The Three-Mailbox Architecture
-
-Each module has **three separate mailboxes**, each serving a distinct purpose:
-
-```cpp
-// Base address format: [data_type_id_low16:16][system_id:8][instance_id:8]
-// Example: system_id=10, instance_id=1 → base address varies by primary output type
-
-CMD  mailbox:  base_address + 0    // User commands
-WORK mailbox:  base_address + 16   // Subscription protocol
-DATA mailbox:  base_address + 32   // Input data streams
-```
-
-**Why three mailboxes?**
-- **Separation of concerns**: Commands, control, and data don't interfere
-- **Real-time predictability**: High-priority data unaffected by control messages
-- **Blocking efficiency**: Each mailbox can block independently (0% CPU when idle)
-
-**Mailbox roles:**
-
-| Mailbox | Purpose | Messages | Threading |
-|---------|---------|----------|-----------|
-| **CMD** | User commands | Custom command types | `command_loop()` thread |
-| **WORK** | Subscription control | SubscribeRequest, SubscribeReply, UnsubscribeRequest | `work_loop()` thread |
-| **DATA** | Data streaming | User data messages (from subscriptions) | Processed in `data_thread_` |
-
-### 6.2 Hierarchical Addressing
-
-CommRaT uses **hierarchical addressing** to uniquely identify modules and their mailboxes:
-
-**Module identity:**
-```cpp
-commrat::ModuleConfig config{
-    .name = "MySensor",
-    .system_id = 10,      // Logical system (e.g., sensor subsystem)
-    .instance_id = 1      // Instance within system (e.g., sensor #1)
-};
-```
-
-**Address calculation:**
-```cpp
-// Base address incorporates primary output type ID (lower 16 bits)
-// Example for Output<TemperatureData> with system_id=10, instance_id=1:
-uint16_t type_id_low = get_message_id<TemperatureData>() & 0xFFFF;
-uint32_t base = (type_id_low << 16) | (system_id << 8) | instance_id;
-// base = (0xABCD << 16) | (10 << 8) | 1 = 0xABCD0A01
-
-uint32_t cmd_mailbox  = base + 0;   // 0xABCD0A01
-uint32_t work_mailbox = base + 16;  // 0xABCD0A11
-uint32_t data_mailbox = base + 32;  // 0xABCD0A21
-```
-
-**Key insight:** The base address encodes the **primary output type**, enabling type-specific message delivery for multi-output producers.
-
-### 6.3 The Subscription Protocol
-
-When a consumer module wants to receive data from a producer, it automatically initiates a **4-step subscription handshake**:
+CommRaT uses explicit subscription (not automatic discovery). When a consumer calls `start()`, it automatically subscribes to producers based on configuration:
 
 ```
 Consumer                           Producer
    |                                  |
    |  1. SubscribeRequest             |
-   |  (to producer's WORK mailbox)    |
+   |  (to producer's CMD mailbox)     |
    |--------------------------------->|
    |                                  | 2. Add subscriber
-   |                                  |    to list
    |  3. SubscribeReply               |
-   |  (to consumer's WORK mailbox)    |
    |<---------------------------------|
    |                                  |
    |  4. Data messages                |
    |  (to consumer's DATA mailbox)    |
    |<---------------------------------|
-   |<---------------------------------|
-   |<---------------------------------|
 ```
 
-**Step 1: SubscribeRequest**
+All subscription is automatic -- configured via `SingleInputConfig` source IDs.
 
-Consumer sends subscription request to producer's WORK mailbox:
+### 6.2 Address Calculation
 
 ```cpp
-SubscribeRequestPayload request{
-    .subscriber_mailbox_id = consumer_data_mailbox,  // Where to send data
-    .requested_period_ms = 0  // 0 = as fast as possible
-};
+// Base address encodes primary output type
+uint16_t type_id_low = get_message_id<TemperatureData>() & 0xFFFF;
+uint32_t base = (type_id_low << 16) | (system_id << 8) | instance_id;
+
+uint32_t cmd_mailbox  = base + 0;    // Commands
+uint32_t work_mailbox = base + 16;   // Send-only
+uint32_t data_mailbox = base + 32;   // Data receive
 ```
 
-**Step 2: Producer Adds Subscriber**
+### 6.3 Data Flow
 
-Producer's `work_loop()` receives request and adds consumer to subscriber list:
+**Producer:** `process()` writes to output workspace -> module publishes to all subscribers' DATA mailboxes via WORK mailbox.
 
-```cpp
-void handle_subscribe_request(const SubscribeRequestPayload& req) {
-    // Add subscriber (thread-safe)
-    add_subscriber(req.subscriber_mailbox_id);
-    
-    // Send acknowledgment
-    SubscribeReplyPayload reply{
-        .actual_period_ms = config_.period.count() / 1'000'000,  // Convert ns to ms
-        .success = true,
-        .error_code = 0
-    };
-    work_mailbox_.send(reply, /* consumer's WORK mailbox */);
-}
-```
+**Consumer:** Blocks on DATA mailbox `receive()` -> deserializes -> calls `process(input, output)` -> publishes to consumer's subscribers.
 
-**Step 3: SubscribeReply**
+### 6.4 Unsubscription
 
-Consumer receives confirmation on its WORK mailbox:
+On `stop()`, consumers automatically send `UnsubscribeRequest` to producers. Always stop consumers before producers:
 
 ```cpp
-void handle_subscribe_reply(const SubscribeReplyPayload& reply) {
-    if (reply.success) {
-        std::cout << "Subscription confirmed! Period: " 
-                  << reply.actual_period_ms << " ms\n";
-    } else {
-        std::cerr << "Subscription failed: error " << reply.error_code << "\n";
-    }
-}
-```
-
-**Step 4: Data Delivery**
-
-Producer publishes messages to all subscribers' DATA mailboxes:
-
-```cpp
-// In producer's periodic_loop or after process_continuous:
-for (uint32_t subscriber : subscribers_) {
-    cmd_mailbox_.send(output_message, subscriber);  // Send to DATA mailbox
-}
-```
-
-### 6.4 Automatic Subscription Setup
-
-**The subscription happens automatically** when you call `module.start()` on a consumer module with `Input<T>` or `Inputs<T, U, V>`:
-
-```cpp
-// Configuration specifies source
-commrat::ModuleConfig consumer_config{
-    .name = "MyConsumer",
-    .system_id = 20,
-    .instance_id = 1,
-    .source_system_id = 10,     // Subscribe to system 10
-    .source_instance_id = 1     // Instance 1
-};
-
-MyConsumer consumer(consumer_config);
-consumer.start();  // Automatically sends SubscribeRequest to (10, 1)
-```
-
-**What happens in `start()`:**
-1. Module spawns three threads: `command_loop()`, `work_loop()`, `data_thread_`
-2. `data_thread_` calculates producer's WORK mailbox address
-3. Sends `SubscribeRequest` to producer
-4. Waits for `SubscribeReply` on WORK mailbox
-5. Begins processing incoming data on DATA mailbox
-
-### 6.5 Message Delivery Mechanisms
-
-**Periodic Producer:**
-
-```cpp
-class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> {
-protected:
-    void process(SensorData& output) override {
-        output = read_sensor();  // Called every config_.period
-    }
-};
-```
-
-- `periodic_loop()` calls `process()` at fixed intervals
-- Result wrapped in `TimsMessage<SensorData>` with `timestamp = Time::now()`
-- Sent to all subscribers' DATA mailboxes
-
-**Continuous Consumer:**
-
-```cpp
-class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
-protected:
-    void process(const SensorData& input, FilteredData& output) override {
-        output = apply_filter(input);  // Called for each message
-    }
-};
-```
-
-- `continuous_loop()` blocks on DATA mailbox `receive()`
-- Receives `TimsMessage<SensorData>` from producer
-- Unwraps payload, calls `process(payload, output)`
-- Result wrapped with `timestamp = input.header.timestamp` (exact propagation)
-- Sent to filter's subscribers
-
-**Result:** Zero polling, zero CPU usage when idle, deterministic message delivery.
-
-### 6.6 Unsubscription and Cleanup
-
-On shutdown, consumers automatically unsubscribe:
-
-```cpp
-consumer.stop();  // Triggers unsubscribe protocol
-```
-
-**Unsubscribe steps:**
-1. Consumer sends `UnsubscribeRequest` to producer's WORK mailbox
-2. Producer removes consumer from subscriber list
-3. Producer sends `UnsubscribeReply` to consumer's WORK mailbox
-4. Consumer stops threads and closes mailboxes
-
-**Clean shutdown pattern:**
-
-```cpp
-// ALWAYS stop in reverse order of start()
-std::signal(SIGINT, signal_handler);  // Set up Ctrl+C handler
-
-producer.start();
-std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Initialization delay
-consumer.start();
-
-// Wait for shutdown signal
-while (!shutdown_requested.load()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-// Stop in reverse order
-consumer.stop();   // Unsubscribe first
+consumer.stop();   // Unsubscribes first
 producer.stop();   // Then stop producer
 ```
 
-### 6.7 Multi-Output Type-Specific Delivery
+### 6.5 Multi-Output Type Filtering
 
-For multi-output producers, subscribers receive **only their subscribed type**:
+For multi-output producers, subscribers receive only their subscribed type. The consumer's `Input<T>` type determines which output stream it subscribes to.
+
+When subscribing to a multi-output producer's non-primary output, use `MultiOutputConfig` to specify the producer's primary output type for correct address resolution:
 
 ```cpp
-class MultiProducer : public MyApp::Module<Outputs<DataA, DataB>, PeriodicInput> {
-protected:
-    void process(DataA& outA, DataB& outB) override {
-        outA = generate_a();
-        outB = generate_b();
+commrat::ModuleConfig receiver_config{
+    .name = "PressureRx",
+    .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
+    .inputs = commrat::SingleInputConfig{
+        .source_system_id = 10,
+        .source_instance_id = 1
     }
 };
 ```
-
-**Type filtering:**
-- Consumer's base address encodes expected message type (lower 16 bits)
-- Producer extracts expected type from subscriber address
-- Only sends outputs that match subscriber's expected type
-
-**Example:**
-
-```cpp
-// Consumer A expects DataA
-commrat::ModuleConfig consumerA_config{
-    .system_id = 20,
-    .instance_id = 1,
-    .source_system_id = 10,
-    .source_instance_id = 1
-    // Base address will encode DataA's message_id
-};
-
-// Consumer B expects DataB (MUST specify source_primary_output_type_id)
-commrat::ModuleConfig consumerB_config{
-    .system_id = 21,
-    .instance_id = 1,
-    .source_system_id = 10,
-    .source_instance_id = 1,
-    .source_primary_output_type_id = MyApp::get_message_id<DataA>()  // Producer's primary type
-    // Without this, consumerB would calculate wrong producer address!
-};
-```
-
-**Why `source_primary_output_type_id`?**
-- Multi-output producer's base address uses **first output type** (DataA)
-- Consumer B wants DataB but must find producer at DataA's address
-- `source_primary_output_type_id` tells consumer which address to use
-
-### 6.8 Error Handling
-
-**Subscription failures:**
-
-```cpp
-SubscribeReplyPayload reply{
-    .actual_period_ms = 0,
-    .success = false,
-    .error_code = 1  // 1=max_subscribers, 2=other
-};
-```
-
-**Common errors:**
-- **Max subscribers reached**: Producer has limited subscriber capacity
-- **Producer not running**: Consumer sends request before producer starts
-- **Type mismatch**: Consumer expects wrong message type (caught at compile time)
-- **Address collision**: Two modules with same system_id/instance_id
-
-**Best practices:**
-1. Start producers before consumers (with delay)
-2. Check `SubscribeReply.success` in critical systems
-3. Use unique system_id/instance_id combinations
-4. Monitor mailbox errors via error callbacks
-
-### 6.9 Message Flow Summary
-
-**Producer → Consumer Data Flow:**
-
-```
-1. Producer generates data (periodic or continuous)
-2. Wraps payload in TimsMessage with header (timestamp, seq_number)
-3. Serializes using SeRTial (zero-copy when possible)
-4. Sends to each subscriber's DATA mailbox (TiMS send)
-5. Consumer's DATA mailbox receives (blocking)
-6. Deserializes message (zero-copy when possible)
-7. Unwraps payload from TimsMessage
-8. Calls process(payload, output)
-9. Result wrapped and published to consumer's subscribers
-```
-
-**Subscription Control Flow:**
-
-```
-1. Consumer.start() sends SubscribeRequest to producer's WORK mailbox
-2. Producer.work_loop() receives request, adds subscriber
-3. Producer sends SubscribeReply to consumer's WORK mailbox
-4. Consumer.work_loop() receives reply, confirms subscription
-5. On shutdown, consumer sends UnsubscribeRequest
-6. Producer removes subscriber, sends UnsubscribeReply
-```
-
-### 6.10 Key Takeaways
-
-1. **Three mailboxes** (CMD, WORK, DATA) separate concerns and enable real-time predictability
-2. **Hierarchical addressing** (system_id, instance_id) uniquely identifies modules
-3. **Automatic subscription** happens on `module.start()` for Input<T> modules
-4. **Type-specific delivery** enables multi-output producers with type filtering
-5. **Blocking receives** ensure 0% CPU when idle, deterministic message delivery
-6. **Clean shutdown** requires reverse-order stop() and unsubscribe protocol
 
 ---
 
 ## 7. Multi-Input Synchronization
 
-Many real-world applications require **sensor fusion** - combining data from multiple sources with different update rates to produce a unified output. CommRaT's multi-input pattern provides **time-synchronized** data fusion with automatic timestamp alignment.
+### 7.1 The Problem
 
-### 7.1 The Challenge: Asynchronous Sensors
+Sensors run at different rates (IMU at 100Hz, GPS at 5Hz). Naive approaches lead to temporal misalignment. CommRaT solves this with primary/secondary input synchronization.
 
-Consider a robotics system with three sensors:
+### 7.2 Primary vs Secondary
 
-- **IMU**: 100Hz (10ms period) - fast, drives robot control loop
-- **GPS**: 5Hz (200ms period) - slow, provides absolute position
-- **Lidar**: 20Hz (50ms period) - medium, provides obstacle detection
-
-**Problem:** How do you fuse these asynchronous streams?
-
-**Naive approach (broken):**
-```cpp
-// DON'T DO THIS - race conditions, temporal misalignment
-class BadFusion : public MyApp::Module<Output<FusedData>, Input<IMUData>> {
-    GPSData latest_gps_;     // Stale data, no synchronization
-    LidarData latest_lidar_; // Stale data, no synchronization
-    
-    void process(const IMUData& imu, FusedData& output) override {
-        // GPS and Lidar timestamps may be from completely different times!
-        output = fuse(imu, latest_gps_, latest_lidar_);  // WRONG!
-    }
-};
-```
-
-**CommRaT solution:** Multi-input with automatic time synchronization.
-
-### 7.2 Multi-Input Specification
-
-Use `Inputs<T, U, V>` to declare multiple input types:
+- **Primary** (`Input<T>`): Blocking receive, drives execution rate
+- **Secondary** (`SyncedInput<T>`): Fetched via `get_data(timestamp)` aligned to primary's timestamp
 
 ```cpp
-class SensorFusion : public MyApp::Module<
+class SensorFusion : public MyApp::Module2<
     Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData>,  // Three input types
-    PrimaryInput<IMUData>                  // Primary input designation
+    Input<IMUData>,              // Primary: 100Hz
+    SyncedInput<GPSData>         // Secondary: 5Hz, time-synchronized
 > {
 protected:
-    void process(
-        const IMUData& imu,      // PRIMARY - blocking receive
-        const GPSData& gps,      // SECONDARY - time-synchronized get_data
-        const LidarData& lidar,  // SECONDARY - time-synchronized get_data
-        FusedData& output,       // OUTPUT reference - data will be published
-    ) override {
-        // All inputs guaranteed time-aligned to imu.header.timestamp!
-        output = fuse_sensors(imu, gps, lidar);
+    void process(const IMUData& imu, const Synced<GPSData>& gps,
+                 FusedData& output) override {
+        if (gps) {
+            output = fuse_with_gps(imu, gps.value());
+        } else if (gps.has_stale()) {
+            output = fuse_with_gps(imu, gps.stale());
+        } else {
+            output = dead_reckoning(imu);
+        }
     }
 };
 ```
 
-**Key concepts:**
-- **Primary input** (IMUData): Drives execution rate via blocking receive
-- **Secondary inputs** (GPSData, LidarData): Fetched via `get_data(timestamp)` to match primary
-- **Automatic synchronization**: Module ensures all inputs aligned to primary timestamp
+### 7.3 Synced<T> API
 
-### 7.3 Primary vs Secondary Inputs
+`Synced<T>` wraps a zero-copy const pointer with validity/freshness metadata:
 
-**Primary Input:**
-- **Blocking receive**: Module blocks until primary message arrives
-- **Execution driver**: Sets the fusion rate (e.g., 100Hz for IMU)
-- **Timestamp source**: All inputs synchronized to primary's timestamp
-- **Designated by**: `PrimaryInput<IMUData>` template parameter
+| Method | Returns | Meaning |
+|--------|---------|---------|
+| `operator bool()` | `bool` | True if data is **fresh** (strict) |
+| `is_fresh()` | `bool` | True if data is newly received |
+| `has_stale()` | `bool` | True if valid but not fresh |
+| `is_valid()` | `bool` | True if any data available (fresh or stale) |
+| `value()` | `const T&` | Fresh data (asserts if not fresh) |
+| `stale()` | `const T&` | Any valid data (asserts if invalid) |
+| `*gps` | `const T&` | Alias for `stale()` (most permissive) |
+| `value_or(default)` | `const T&` | Fresh data or default |
+| `stale_or(default)` | `const T&` | Valid data or default |
 
-**Secondary Inputs:**
-- **Non-blocking get_data**: Fetches best-match message from history buffer
-- **Time-aligned**: Retrieved based on primary input's timestamp
-- **May be stale**: If no recent message within tolerance, returns older data
-- **Freshness tracked**: `has_new_data<Index>()` indicates if data is fresh
+**Usage patterns:**
 
-**Why this design?**
-- Fast sensors drive execution (low latency)
-- Slow sensors don't block processing (deterministic timing)
-- All data temporally coherent (no race conditions)
+```cpp
+void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& out) override {
+    // Pattern 1: Strict freshness
+    if (gps) {
+        out = fuse(imu, gps.value());
+    }
 
-### 7.4 Configuration for Multi-Input Modules
+    // Pattern 2: Accept stale data
+    if (gps.is_valid()) {
+        out = fuse(imu, gps.stale());
+    }
 
-Multi-input modules require **input_sources** and **sync_tolerance**:
+    // Pattern 3: Default fallback
+    out = fuse(imu, gps.stale_or(default_gps));
+}
+```
+
+### 7.4 Configuration for Multi-Input
 
 ```cpp
 commrat::ModuleConfig fusion_config{
     .name = "SensorFusion",
-    .system_id = 20,
-    .instance_id = 1,
-    .period = commrat::Milliseconds(10),  // Primary input rate (100Hz)
-    .input_sources = {
-        {10, 1},  // IMU sensor (system 10, instance 1) - PRIMARY
-        {11, 1},  // GPS sensor (system 11, instance 1) - SECONDARY
-        {12, 1}   // Lidar sensor (system 12, instance 1) - SECONDARY
-    },
-    .sync_tolerance = 50'000'000  // 50ms tolerance (nanoseconds)
-};
-```
-
-**Configuration fields:**
-
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `input_sources` | System/instance IDs of input producers | `{{10,1}, {11,1}, {12,1}}` |
-| `sync_tolerance` | Max timestamp difference for get_data | `50'000'000` (50ms in ns) |
-| `period` | Primary input's expected rate | `Milliseconds(10)` (100Hz) |
-
-**Order matters:** First input_source is PRIMARY, rest are SECONDARY (unless PrimaryInput specified).
-
-### 7.5 How get_data Synchronization Works
-
-**Under the hood:**
-
-1. **HistoricalMailbox**: Each secondary input has a circular buffer (default: 100 messages)
-2. **Automatic buffering**: Every received message stored with timestamp
-3. **get_data(timestamp, tolerance)**: Finds closest message within tolerance
-4. **Best-match algorithm**: Returns message with smallest `|msg.timestamp - requested_timestamp|`
-
-**Example timeline:**
-
-```
-Time (ms):  0    50   100  150  200  250  300
-IMU:        ●----●----●----●----●----●----●    (100Hz primary)
-GPS:        ●---------●---------●---------●    (5Hz secondary)
-Lidar:      ●----●----●----●----●----●----●    (20Hz secondary, actually every 50ms)
-
-At t=150ms (IMU arrives):
-- Primary: receive() blocks, gets IMU@150ms
-- GPS: get_data(150ms, 50ms) → returns GPS@200ms (closest within tolerance)
-- Lidar: get_data(150ms, 50ms) → returns Lidar@150ms (exact match)
-```
-
-**Tolerance selection:**
-- Too small: Secondary inputs often invalid (get_data fails)
-- Too large: Temporal misalignment (stale data accepted)
-- **Rule of thumb**: 2-3x slowest sensor period (e.g., GPS@5Hz → 50ms tolerance)
-
-### 7.6 Detecting Fresh vs Stale Data
-
-Use metadata accessors to check secondary input freshness:
-
-```cpp
-void process(
-    const IMUData& imu,
-    const GPSData& gps,
-    const LidarData& lidar,
-    FusedData& output
-) override {
-    // Check if GPS is fresh (new message since last process_multi_input)
-    if (has_new_data<1>()) {  // Index 1 = GPSData
-        std::cout << "GPS updated!\n";
-    } else {
-        std::cout << "GPS stale (reusing old data)\n";
-    }
-    
-    // Check if Lidar get_data succeeded
-    if (!is_input_valid<2>()) {  // Index 2 = LidarData
-        std::cerr << "Lidar get_data failed (no data within tolerance)\n";
-        // Use fallback or skip Lidar fusion
-    }
-    
-    // Get exact age of GPS data
-    auto gps_meta = get_input_metadata<GPSData>();
-    uint64_t age_ns = imu_meta.timestamp - gps_meta.timestamp;
-    std::cout << "GPS age: " << age_ns / 1'000'000 << " ms\n";
-    
-    output = fuse_sensors(imu, gps, lidar);
-}
-```
-
-**Metadata for multi-input:**
-
-| Accessor | Returns | Use Case |
-|----------|---------|----------|
-| `get_input_metadata<Index>()` | Full metadata struct | Comprehensive input state |
-| `get_input_timestamp<Index>()` | uint64_t timestamp | Calculate data age |
-| `has_new_data<Index>()` | bool (true if fresh) | Detect sensor updates |
-| `is_input_valid<Index>()` | bool (true if get_data succeeded) | Handle optional inputs |
-
-### 7.7 Complete Multi-Input Example
-
-**Sensor fusion module:**
-
-```cpp
-#include <commrat/commrat.hpp>
-#include <commrat/timestamp.hpp>
-#include <iostream>
-
-// Define message types (POD structures)
-struct IMUData {
-    uint64_t timestamp;  // NOTE: This is redundant! Use TimsHeader.timestamp instead
-    double accel_x, accel_y, accel_z;
-    double gyro_x, gyro_y, gyro_z;
-};
-
-struct GPSData {
-    uint64_t timestamp;  // NOTE: This is redundant! Use TimsHeader.timestamp instead
-    double latitude, longitude, altitude;
-};
-
-struct FusedPose {
-    uint64_t timestamp;  // NOTE: This is redundant! Use TimsHeader.timestamp instead
-    double x, y, z;
-    double roll, pitch, yaw;
-    float confidence;
-};
-
-// Application registry
-using FusionApp = commrat::CommRaT<
-    commrat::Message::Data<IMUData>,
-    commrat::Message::Data<GPSData>,
-    commrat::Message::Data<FusedPose>
->;
-
-// Multi-input fusion module
-class SensorFusion : public FusionApp::Module<
-    commrat::Output<FusedPose>,
-    commrat::Inputs<IMUData, GPSData>,
-    commrat::PrimaryInput<IMUData>
-> {
-public:
-    explicit SensorFusion(const commrat::ModuleConfig& config)
-        : FusionApp::Module<commrat::Output<FusedPose>, commrat::Inputs<IMUData, GPSData>, commrat::PrimaryInput<IMUData>>(config) {
-        std::cout << "[Fusion] Initialized\n";
-    }
-
-protected:
-    void process(
-        const IMUData& imu,
-        const GPSData& gps,
-        FusedPose& output
-    ) override {
-        // Check GPS freshness
-        bool gps_fresh = has_new_data<1>();  // Index 1 = GPSData
-        
-        // Simple fusion algorithm (Kalman filter would go here)
-        FusedPose pose{
-            .timestamp = get_input_timestamp<0>(),  // IMU timestamp (primary)
-            .x = gps.latitude * 111000.0,  // Rough lat→meters
-            .y = gps.longitude * 111000.0,
-            .z = gps.altitude,
-            .roll = std::atan2(imu.accel_y, imu.accel_z),
-            .pitch = std::atan2(-imu.accel_x, std::sqrt(imu.accel_y*imu.accel_y + imu.accel_z*imu.accel_z)),
-            .yaw = 0.0,  // Would integrate gyro_z
-            .confidence = gps_fresh ? 0.9f : 0.5f  // Lower confidence for stale GPS
-        };
-        
-        std::cout << "[Fusion] Fused pose @ " << pose.timestamp / 1'000'000 << " ms"
-                  << " (GPS " << (gps_fresh ? "FRESH" : "STALE") << ")\n";
-        
-        output = pose;
-    }
-};
-```
-
-**Configuration and main:**
-
-```cpp
-int main() {
-    std::atomic<bool> shutdown{false};
-    std::signal(SIGINT, [](int) { shutdown.store(true); });
-    
-    // IMU sensor (100Hz primary)
-    commrat::ModuleConfig imu_config{
-        .name = "IMU",
-        .system_id = 10,
-        .instance_id = 1,
-        .period = commrat::Milliseconds(10)  // 100Hz
-    };
-    
-    // GPS sensor (5Hz secondary)
-    commrat::ModuleConfig gps_config{
-        .name = "GPS",
-        .system_id = 11,
-        .instance_id = 1,
-        .period = commrat::Milliseconds(200)  // 5Hz
-    };
-    
-    // Fusion module (multi-input)
-    commrat::ModuleConfig fusion_config{
-        .name = "SensorFusion",
-        .system_id = 20,
-        .instance_id = 1,
-        .period = commrat::Milliseconds(10),  // Match IMU rate
-        .input_sources = {
-            {10, 1},  // IMU (primary)
-            {11, 1}   // GPS (secondary)
+    .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+    .inputs = commrat::MultiInputConfig{
+        .sources = {
+            {.system_id = 10, .instance_id = 1, .is_primary = true},   // IMU
+            {.system_id = 11, .instance_id = 1, .is_primary = false}   // GPS
         },
-        .sync_tolerance = 50'000'000  // 50ms
-    };
-    
-    // Create modules
-    IMUSensor imu(imu_config);
-    GPSSensor gps(gps_config);
-    SensorFusion fusion(fusion_config);
-    
-    // Start in order: producers first
-    imu.start();
-    gps.start();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    fusion.start();
-    
-    // Run until Ctrl+C
-    while (!shutdown.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    
-    // Stop in reverse order
-    fusion.stop();
-    gps.stop();
-    imu.stop();
-    
-    return 0;
-}
-```
-
-### 7.8 Advanced Multi-Input Patterns
-
-**Optional secondary inputs:**
-
-```cpp
-void process(
-    const IMUData& imu,
-    const GPSData& gps,
-    const MagnetometerData& mag,
-    FusedData& output
-) override {
-    // Use magnetometer only if available
-    if (is_input_valid<2>()) {
-        output = fuse_with_mag(imu, gps, mag);
-    } else {
-        output = fuse_without_mag(imu, gps);  // Graceful degradation
-    }
-}
-```
-
-**Adaptive tolerance:**
-
-```cpp
-void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-    auto gps_meta = get_input_metadata<GPSData>();
-    uint64_t gps_age = get_input_timestamp<IMUData>() - gps_meta.timestamp;
-    
-    if (gps_age > 100'000'000) {  // > 100ms
-        std::cerr << "WARNING: GPS very stale (" << gps_age / 1'000'000 << " ms)\n";
-        // Reduce GPS weight in fusion
-    }
-    
-    return weighted_fusion(imu, gps, calculate_weights(gps_age));
-}
-```
-
-**Three or more inputs:**
-
-```cpp
-class MultiSensorFusion : public MyApp::Module<
-    Output<FusedData>,
-    Inputs<IMUData, GPSData, LidarData, CameraData>,
-    PrimaryInput<IMUData>
-> {
-protected:
-    void process(
-        const IMUData& imu,
-        const GPSData& gps,
-        const LidarData& lidar,
-        const CameraData& camera,
-        FusedData& output
-    ) override {
-        // All four inputs time-aligned to IMU timestamp
-        return fuse_all(imu, gps, lidar, camera);
+        .history_buffer_size = 100,
+        .sync_tolerance = std::chrono::milliseconds(50)
     }
 };
 ```
 
-### 7.9 Performance Considerations
+**Tolerance tuning:** Too small -> secondary inputs often invalid. Too large -> stale data accepted. Rule of thumb: 2-3x the slowest sensor's period.
 
-**HistoricalMailbox overhead:**
-- **Buffer size**: Default 100 messages per input (configurable)
-- **Memory**: `sizeof(TimsMessage<T>) * 100 * num_secondary_inputs`
-- **get_data complexity**: O(log N) binary search in circular buffer
-- **Real-time safe**: No dynamic allocation after initialization
+### 7.5 Multiple Secondary Inputs
 
-**Best practices:**
-1. **Choose primary wisely**: Use fastest sensor as primary (lowest latency)
-2. **Minimize secondaries**: Each secondary input adds get_data overhead
-3. **Tune buffer size**: Match buffer to expected message rates
-4. **Monitor freshness**: Log stale data warnings for debugging
-5. **Handle failures**: Check `is_input_valid()` for optional inputs
-
-### 7.10 Multi-Input vs Single-Input Patterns
-
-**When to use multi-input:**
-- Sensor fusion with different update rates
-- Combining asynchronous data streams
-- Time-critical applications requiring synchronization
-- Kalman filtering, SLAM, state estimation
-
-**When to use single-input:**
-- Simple pipeline (A → B → C)
-- Same update rate throughout
-- Stateless processing (no fusion needed)
-- Lowest latency required (no get_data overhead)
-
-**Hybrid pattern:**
 ```cpp
-// Fast path: Single-input for low latency
-class FastFilter : public MyApp::Module<Output<FilteredIMU>, Input<IMUData>> { ... };
-
-// Fusion path: Multi-input for comprehensive state
-class SlowFusion : public MyApp::Module<Output<FusedState>, Inputs<FilteredIMU, GPSData>> { ... };
+class MultiSensorFusion : public MyApp::Module2<
+    Output<FusedData>,
+    Input<IMUData>,
+    SyncedInput<GPSData>,
+    SyncedInput<LidarData>
+> {
+protected:
+    void process(const IMUData& imu, const Synced<GPSData>& gps,
+                 const Synced<LidarData>& lidar, FusedData& output) override {
+        // Handle each secondary independently
+        if (gps.is_valid() && lidar.is_valid()) {
+            output = full_fusion(imu, gps.stale(), lidar.stale());
+        } else if (gps.is_valid()) {
+            output = gps_only_fusion(imu, gps.stale());
+        } else {
+            output = dead_reckoning(imu);
+        }
+    }
+};
 ```
-
-### 7.11 Key Takeaways
-
-1. **Inputs<T, U, V>** enables multi-input with automatic time synchronization
-2. **PrimaryInput<T>** designates which input drives execution (blocking receive)
-3. **Secondary inputs** use get_data(timestamp, tolerance) for synchronization
-4. **HistoricalMailbox** buffers recent messages for temporal queries
-5. **Metadata accessors** (`has_new_data<>()`, `is_input_valid<>()`) track freshness and validity
-6. **Tolerance tuning** balances data freshness vs synchronization success rate
-7. **Real-time safe** with bounded execution time and no dynamic allocation
 
 ---
 
 ## 8. Timestamp Management
 
-Timestamps are the **single source of truth** for message timing in CommRaT. Every message has exactly one timestamp stored in the **TimsHeader**, enabling precise time synchronization, latency measurement, and temporal reasoning. This section explains how timestamps work and how to use them effectively.
+### 8.1 Single Source of Truth
 
-### 8.1 Single Source of Truth: TimsHeader.timestamp
-
-**Core principle:** Every message has **exactly one timestamp** in its header, never in the payload.
+Every message has exactly one timestamp in `TimsHeader.timestamp`. Never add timestamp fields to payloads.
 
 ```cpp
-// CommRaT message structure
-template<typename PayloadT>
-struct TimsMessage {
-    TimsHeader header;  // Contains timestamp (ns since epoch)
-    PayloadT payload;   // YOUR data (no timestamp field needed!)
-};
-
-// TiMS header structure
-struct TimsHeader {
-    uint32_t msg_type;      // Message type ID
-    uint32_t msg_size;      // Serialized size
-    uint64_t timestamp;     // ← SINGLE SOURCE OF TRUTH (nanoseconds since epoch)
-    uint32_t sequence_number; // Monotonically increasing counter
-    uint32_t flags;         // Reserved
-};
-```
-
-**Why header-only timestamps?**
-- **No duplication**: One timestamp per message, no redundancy
-- **Automatic management**: Module sets timestamp, not user code
-- **Type agnostic**: Works for any payload type
-- **Clean payloads**: User data structures remain simple POD types
-
-**WRONG - Don't do this:**
-```cpp
-// ❌ DON'T include timestamp in payload!
+// WRONG: Timestamp in payload
 struct SensorData {
-    uint64_t timestamp;  // ← REDUNDANT! Use header.timestamp instead
+    uint64_t timestamp;    // Redundant!
     float temperature;
-    float pressure;
 };
-```
 
-**RIGHT - Clean payload:**
-```cpp
-// ✅ DO use clean payload (no timestamp field)
+// RIGHT: Clean payload
 struct SensorData {
-    float temperature;
-    float pressure;
-    // No timestamp - it's in TimsHeader!
+    float temperature;     // TimsHeader.timestamp handles timing
 };
 ```
 
-### 8.2 Automatic Timestamp Assignment
+### 8.2 Automatic Assignment
 
-CommRaT **automatically assigns timestamps** based on module type:
+CommRaT sets timestamps automatically based on module type:
 
-| Module Type | Timestamp Assignment | Meaning |
-|-------------|---------------------|---------|
-| **PeriodicInput** | `Time::now()` | Data generation moment |
-| **ContinuousInput** | `input.header.timestamp` | Exact propagation from input |
-| **Multi-input** | `primary.header.timestamp` | Synchronization point |
-| **LoopInput** | `Time::now()` | Data generation moment |
+| Module Type | Timestamp Assignment |
+|-------------|---------------------|
+| Timer-driven (`Period<N>`) | `Time::now()` at generation |
+| Input-driven (`Input<T>`) | `input.header.timestamp` (propagated) |
+| Multi-input | `primary_input.header.timestamp` |
+| Loop mode | `Time::now()` at generation |
 
-**You never set timestamps manually** - the module does it automatically before sending.
+You never set timestamps manually -- the module handles it before publishing.
 
-**Example: Periodic producer**
+### 8.3 Accessing Timestamps
 
-```cpp
-class Sensor : public MyApp::Module<Output<SensorData>, PeriodicInput> {
-protected:
-    void process(SensorData& output) override {
-        // Just return payload - no timestamp needed!
-        output = SensorData{
-            .temperature = read_sensor(),
-            .pressure = read_pressure()
-        };
-        // Module automatically wraps in TimsMessage<SensorData>
-        // and sets header.timestamp = Time::now() before sending
-    }
-};
-```
-
-**Example: Continuous transformer**
+Use metadata accessors inside `process()`:
 
 ```cpp
-class Filter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
-protected:
-    void process(const SensorData& input, FilteredData& output) override {
-        // Input has no timestamp field - it's in header!
-        // Just return filtered payload
-        output = FilteredData{
-            .filtered_value = apply_filter(input.temperature)
-        };
-        // Module automatically wraps output and sets
-        // header.timestamp = input.header.timestamp (exact propagation)
-    }
-};
-```
-
-**Example: Multi-input fusion**
-
-```cpp
-class Fusion : public MyApp::Module<Output<FusedData>, Inputs<IMUData, GPSData>, PrimaryInput<IMUData>> {
-protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-        // Both inputs have clean payloads (no timestamp fields)
-        // Just return fused result
-        output = FusedData{
-            .position = fuse_position(imu, gps),
-            .velocity = fuse_velocity(imu, gps)
-        };
-        // Module automatically sets
-        // header.timestamp = primary_input.header.timestamp (IMU)
-    }
-};
-```
-
-### 8.3 Accessing Input Timestamps
-
-Use **metadata accessors** to access input timestamps in your `process()` functions:
-
-**Index-based access (always works):**
-
-```cpp
-void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-    // Get full metadata for each input
-    auto imu_meta = get_input_metadata<0>();   // Index 0 = first input (IMUData)
-    auto gps_meta = get_input_metadata<1>();   // Index 1 = second input (GPSData)
-    
-    // Access timestamps
-    uint64_t imu_ts = imu_meta.timestamp;
-    uint64_t gps_ts = gps_meta.timestamp;
-    
-    // Calculate GPS age
-    uint64_t gps_age_ns = imu_ts - gps_ts;
-    std::cout << "GPS age: " << gps_age_ns / 1'000'000 << " ms\n";
-    
-    output = fuse(imu, gps);
+void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& out) override {
+    uint64_t imu_ts = get_input_timestamp<0>();    // Primary timestamp
+    bool gps_fresh = has_new_data<1>();             // GPS freshness
+    bool gps_ok = is_input_valid<1>();              // GPS validity
 }
 ```
 
-**Type-based access (when types unique):**
+### 8.4 Units and Conversions
+
+All timestamps are `uint64_t` nanoseconds since epoch.
 
 ```cpp
-void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-    // Cleaner syntax when input types are unique
-    uint64_t imu_ts = get_input_timestamp<IMUData>();
-    uint64_t gps_ts = get_input_timestamp<GPSData>();
-    
-    // Note: Compile error if duplicate types (e.g., Inputs<IMUData, IMUData>)
-    
-    output = fuse(imu, gps);
-}
-```
-
-**Metadata structure:**
-
-```cpp
-template<typename T>
-struct InputMetadata {
-    uint64_t timestamp;       // From TimsHeader (nanoseconds since epoch)
-    uint32_t sequence_number; // From TimsHeader (monotonically increasing)
-    uint32_t message_id;      // From TimsHeader (message type ID)
-    bool is_new_data;         // True if fresh, false if stale/reused
-    bool is_valid;            // True if get_data succeeded, false if failed
-};
-```
-
-### 8.4 Timestamp Units and Conversions
-
-CommRaT uses **nanoseconds since epoch** (UNIX timestamp in nanoseconds):
-
-```cpp
-// Current time
-uint64_t now_ns = Time::now();  // Example: 1707398400000000000 (Feb 8, 2026)
-
-// Convert to milliseconds
+uint64_t now_ns = Time::now();
 uint64_t now_ms = now_ns / 1'000'000;
-
-// Convert to seconds
 double now_s = now_ns / 1'000'000'000.0;
 
-// Duration types (type-safe)
-Duration ten_ms = Milliseconds(10);        // 10'000'000 nanoseconds
-Duration one_sec = Seconds(1);             // 1'000'000'000 nanoseconds
-Duration tolerance = Milliseconds(50);     // For get_data sync_tolerance
+// Duration types
+Duration ten_ms = Milliseconds(10);
+Duration one_sec = Seconds(1);
 ```
 
-**Common operations:**
+### 8.5 Monotonicity
+
+Timestamps from a single producer are monotonically increasing. Sequence numbers (in `TimsHeader`) enable message loss detection:
 
 ```cpp
-// Calculate message age
-uint64_t age_ns = Time::now() - message.header.timestamp;
-double age_ms = age_ns / 1'000'000.0;
-
-// Calculate latency (end-to-end)
-uint64_t generation_time = sensor_msg.header.timestamp;
-uint64_t processing_time = Time::now();
-uint64_t latency_ns = processing_time - generation_time;
-
-// Check if message is recent
-constexpr uint64_t MAX_AGE_NS = 100'000'000;  // 100ms
-if ((Time::now() - msg.header.timestamp) > MAX_AGE_NS) {
-    std::cerr << "Message too old!\n";
-}
-```
-
-### 8.5 Monotonicity and Sequence Numbers
-
-**Monotonicity guarantee:** Timestamps from a single producer are **monotonically increasing**.
-
-```cpp
-// Producer guarantees
-message_1.header.timestamp <= message_2.header.timestamp  // Always true
-message_1.header.seq_number <  message_2.header.seq_number  // Always true (strict)
-```
-
-**Sequence numbers:**
-- Start at 0 for each module
-- Increment by 1 for each sent message
-- Enable message loss detection
-
-**Detecting message loss:**
-
-```cpp
-class Monitor : public MyApp::Module<Output<void>, Input<SensorData>> {
-    uint32_t last_seq_{0};
-    
-protected:
-    void process(const SensorData& input, SensorData& output) override {
-        auto meta = get_input_metadata<0>();
-        
-        // Check for dropped messages
-        uint32_t expected_seq = last_seq_ + 1;
-        if (meta.sequence_number != expected_seq) {
-            uint32_t dropped = meta.sequence_number - expected_seq;
-            std::cerr << "WARNING: Dropped " << dropped << " messages!\n";
-        }
-        
-        last_seq_ = meta.sequence_number;
-        output = input;  // Pass-through
+void process(const SensorData& input, SensorData& output) override {
+    auto meta = get_input_metadata<0>();
+    if (meta.sequence_number != last_seq_ + 1) {
+        // Message loss detected
     }
-};
-```
-
-**Verifying monotonicity (debugging):**
-
-```cpp
-void process(const SensorData& input, FilteredData& output) override {
-    static uint64_t last_ts = 0;
-    
-    uint64_t current_ts = get_input_timestamp<0>();
-    
-    if (current_ts < last_ts) {
-        std::cerr << "ERROR: Non-monotonic timestamp! "
-                  << current_ts << " < " << last_ts << "\n";
-    }
-    
-    last_ts = current_ts;
-    output = apply_filter(input);
+    last_seq_ = meta.sequence_number;
+    output = input;
 }
 ```
-
-### 8.6 Time Synchronization Across Modules
-
-**Within single host:** Timestamps use monotonic clock (no drift, immune to NTP updates).
-
-**Across hosts (future):** Time synchronization protocols (PTP, NTP) can be integrated via custom timestamp source.
-
-**Current implementation:**
-
-```cpp
-// commrat/platform/timestamp.hpp
-class Time {
-public:
-    static uint64_t now() {
-        // Uses std::chrono::steady_clock (monotonic, no jumps)
-        auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()
-        ).count();
-    }
-};
-```
-
-**For multi-host systems:**
-- Use PTP hardware timestamping (IEEE 1588)
-- Implement custom `Time::now()` using PTP clock
-- Ensure all hosts synchronized to sub-microsecond accuracy
-
-### 8.7 Debugging with Timestamps
-
-**Logging message flow:**
-
-```cpp
-void process(const SensorData& input, FilteredData& output) override {
-    uint64_t recv_time = Time::now();
-    uint64_t msg_time = get_input_timestamp<0>();
-    uint64_t latency_us = (recv_time - msg_time) / 1000;
-    
-    std::cout << "[Filter] Received message @ " << msg_time / 1'000'000 << " ms"
-              << " (latency: " << latency_us << " µs)\n";
-    
-    output = apply_filter(input);
-}
-```
-
-**Timestamp tracing (full pipeline):**
-
-```cpp
-// Sensor (t=0): Generates data
-SensorData sensor_output = read_sensor();
-// Module sets: header.timestamp = Time::now() = 1000000000
-
-// Filter (t=1ms): Receives and processes
-FilteredData filter_output = apply_filter(sensor_output);
-// Module sets: header.timestamp = input.header.timestamp = 1000000000
-
-// Monitor (t=2ms): Receives and logs
-void process_continuous(const FilteredData& input) {
-    uint64_t now = Time::now();  // 1002000000
-    uint64_t origin = get_input_timestamp<0>();  // 1000000000
-    uint64_t e2e_latency_us = (now - origin) / 1000;  // 2000 µs = 2 ms
-    
-    std::cout << "End-to-end latency: " << e2e_latency_us << " µs\n";
-}
-```
-
-**Performance profiling:**
-
-```cpp
-class ProfilingFilter : public MyApp::Module<Output<FilteredData>, Input<SensorData>> {
-    std::array<uint64_t, 1000> latencies_;
-    size_t idx_{0};
-    
-protected:
-    FilteredData process_continuous(const SensorData& input) override {
-        uint64_t start = Time::now();
-        
-        FilteredData result = apply_filter(input);
-        
-        uint64_t end = Time::now();
-        uint64_t processing_time_ns = end - start;
-        
-        latencies_[idx_++ % 1000] = processing_time_ns;
-        
-        if (idx_ % 1000 == 0) {
-            uint64_t avg = std::accumulate(latencies_.begin(), latencies_.end(), 0ULL) / 1000;
-            std::cout << "Avg processing time: " << avg / 1000 << " µs\n";
-        }
-        
-        return result;
-    }
-};
-```
-
-### 8.8 Common Timestamp Pitfalls
-
-**Pitfall 1: Payload timestamps**
-
-```cpp
-// ❌ WRONG - duplicated timestamp
-struct SensorData {
-    uint64_t timestamp;  // Don't do this!
-    float temperature;
-};
-
-// ✅ RIGHT - clean payload
-struct SensorData {
-    float temperature;  // TimsHeader.timestamp is enough
-};
-```
-
-**Pitfall 2: Manual timestamp setting**
-
-```cpp
-// TODO: manual timestamp setting should be provided, either as overload or member function
-// WRONG - trying to set timestamp manually
-void process(SensorData& output) override {
-    SensorData data{.temperature = read_sensor()};
-    data.timestamp = Time::now();  // NO! Payload has no timestamp field!
-    output = data;
-}
-
-// RIGHT - automatic timestamp
-void process(SensorData& output) override {
-    return SensorData{.temperature = read_sensor()};
-    // Module sets header.timestamp automatically
-}
-```
-
-**Pitfall 3: Stale data without checking**
-
-```cpp
-// TODO - make synced inputs std::optional<const InType&>!
-// RISKY - using GPS without freshness check
-void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-    // GPS might be 500ms old!
-    output = fuse(imu, gps);
-}
-
-// SAFE - check freshness
-void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-    uint64_t gps_age = get_input_timestamp<0>() - get_input_timestamp<1>();
-    if (gps_age > 100'000'000) {  // > 100ms
-        std::cerr << "GPS stale: " << gps_age / 1'000'000 << " ms\n";
-    }
-    output = fuse(imu, gps);
-}
-```
-
-**Pitfall 4: Timezone confusion**
-
-```cpp
-// WRONG - assuming local time
-uint64_t ts_ns = get_input_timestamp<0>();
-time_t ts_s = ts_ns / 1'000'000'000;
-struct tm* local = localtime(&ts_s);  // Wrong! Not UTC-aligned
-
-// RIGHT - use duration for intervals
-uint64_t start_ts = message1.header.timestamp;
-uint64_t end_ts = message2.header.timestamp;
-uint64_t duration_ns = end_ts - start_ts;  // Correct interval
-```
-
-### 8.9 Best Practices
-
-1. **Never add timestamp fields to payloads** - use `TimsHeader.timestamp` only
-2. **Access via metadata accessors** - `get_input_timestamp<>()` or `get_input_metadata<>()`
-3. **Check freshness for multi-input** - use `has_new_data<>()` and timestamp age
-4. **Monitor sequence numbers** - detect message loss in critical systems
-5. **Use nanosecond precision** - CommRaT timestamps are 64-bit nanoseconds
-6. **Profile with timestamps** - measure processing latency and end-to-end delays
-7. **Verify monotonicity** - add assertions in debug builds
-
-### 8.10 Key Takeaways
-
-1. **Single source of truth**: `TimsHeader.timestamp` is the ONLY timestamp (never in payload)
-2. **Automatic assignment**: Module sets timestamp based on input type (periodic/continuous/multi)
-3. **Metadata accessors**: `get_input_timestamp<>()`, `get_input_metadata<>()` for timestamp queries
-4. **Nanosecond precision**: All timestamps in nanoseconds since epoch (uint64_t)
-5. **Monotonicity**: Timestamps from single producer strictly increasing
-6. **Sequence numbers**: Enable message loss detection
-7. **Freshness tracking**: `has_new_data<>()` and timestamp age for multi-input
 
 ---
 
+## 9. Command Handling
+
+### 9.1 DataWithCommands Pattern
+
+Associate commands with an output's data type using `DataWithCommands`:
+
+```cpp
+// Define command payloads with nested Reply types
+struct CalibrateCmd {
+    float offset;
+    struct Reply {
+        bool success;
+        float previous_offset;
+    };
+};
+
+struct ResetCmd {
+    bool hard_reset;
+    struct Reply {
+        bool success;
+    };
+};
+
+// Associate commands with data type
+using TempWithCommands = commrat::DataWithCommands<
+    TemperatureData,
+    CalibrateCmd,
+    ResetCmd
+>;
+
+// Application definition
+using MyApp = commrat::CommRaT<
+    TempWithCommands,
+    commrat::Message::Data<FilteredData>
+>;
+```
+
+### 9.2 Implementing Command Handlers
+
+Use `on_command<OutputIndex>()` templates in your module:
+
+```cpp
+class CommandableSensor : public MyApp::Module2<
+    Output<TemperatureData>,
+    Period<200>
+> {
+protected:
+    void process(TemperatureData& output) override {
+        output.temperature_c = read_sensor() + calibration_offset_;
+    }
+
+    template<size_t OutputIndex>
+    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+        reply.previous_offset = calibration_offset_;
+        calibration_offset_ = cmd.offset;
+        reply.success = true;
+    }
+
+    template<size_t OutputIndex>
+    void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+        calibration_offset_ = 0.0f;
+        reply.success = true;
+    }
+
+private:
+    float calibration_offset_ = 0.0f;
+};
+```
+
+### 9.3 Command Dispatch
+
+Commands arrive on the output's CMD mailbox. The framework dispatches to the correct `on_command` handler based on message type. System commands (SubscribeRequest, UnsubscribeRequest, GetDataRequest) are handled automatically.
+
+---
+
+## 10. Configuration and Deployment
+
+### 10.1 ModuleConfig
+
+`ModuleConfig` uses tagged unions for output and input configuration:
+
+```cpp
+struct ModuleConfig {
+    std::string name;
+    OutputConfig outputs;         // SimpleOutputConfig | MultiOutputConfig | NoOutputConfig
+    InputConfig inputs;           // NoInputConfig | SingleInputConfig | MultiInputConfig
+    std::optional<std::chrono::milliseconds> period;
+    size_t max_subscribers{8};
+    int priority{10};
+    bool realtime{false};
+    // ... mailbox slot counts
+};
+```
+
+### 10.2 Output Config Types
+
+**SimpleOutputConfig** -- All outputs share same addressing (most common):
+
+```cpp
+commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1}
+```
+
+**MultiOutputConfig** -- Per-output addressing (for multi-output modules):
+
+```cpp
+commrat::MultiOutputConfig{.addresses = {
+    {.system_id = 10, .instance_id = 1},   // Output 0
+    {.system_id = 10, .instance_id = 1}    // Output 1
+}}
+```
+
+**NoOutputConfig** -- For monitor/logger modules (still needs addressing):
+
+```cpp
+commrat::NoOutputConfig{.system_id = 20, .instance_id = 1}
+```
+
+### 10.3 Input Config Types
+
+**NoInputConfig** -- Timer-driven or loop mode:
+
+```cpp
+commrat::NoInputConfig{}
+```
+
+**SingleInputConfig** -- One source module:
+
+```cpp
+commrat::SingleInputConfig{
+    .source_system_id = 10,
+    .source_instance_id = 1
+}
+```
+
+**MultiInputConfig** -- Multiple synchronized sources:
+
+```cpp
+commrat::MultiInputConfig{
+    .sources = {
+        {.system_id = 10, .instance_id = 1, .is_primary = true},
+        {.system_id = 11, .instance_id = 1, .is_primary = false}
+    },
+    .history_buffer_size = 100,
+    .sync_tolerance = std::chrono::milliseconds(50)
+}
+```
+
+### 10.4 CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(MyProject CXX)
+set(CMAKE_CXX_STANDARD 20)
+
+find_package(CommRaT REQUIRED)
+
+add_executable(my_system main.cpp)
+target_link_libraries(my_system CommRaT::commrat tims pthread)
+```
+
+### 10.5 Startup and Shutdown Order
+
+1. Start producers first, then consumers (with short delay)
+2. Stop consumers first (unsubscribe), then producers
+
+```cpp
+producer.start();
+std::this_thread::sleep_for(std::chrono::milliseconds(100));
+consumer.start();
+
+// ... run ...
+
+consumer.stop();
+producer.stop();
+```
+
+### 10.6 System ID Guidelines
+
+| Range | Purpose |
+|-------|---------|
+| 1-49 | Sensor modules |
+| 50-99 | Processing modules |
+| 100-149 | Output/actuator modules |
+| 200-254 | Test/diagnostic modules |
+
+Use unique `(system_id, instance_id)` pairs. Multiple instances of the same module type use different `instance_id` values.
+
+---
+
+## 11. Best Practices
+
+### DO
+
+- **Use `Module2<>`** with I/O specs (`Output<T>`, `Input<T>`, `Period<N>`, `SyncedInput<T>`)
+- **Keep payloads clean** -- no timestamp fields, no dynamic allocation
+- **Use `override`** on all `process()` methods
+- **Start producers before consumers** with a short delay
+- **Stop in reverse order** of start
+- **Use `std::array`** and `sertial::fixed_vector<T, N>` for bounded data
+- **Use `constexpr` / `static_assert`** for compile-time validation
+- **Use `Synced<T>`** API to handle fresh/stale/invalid correctly
+- **Use CommRaT abstractions** for threading (`Thread`, `Mutex`, `Time::now()`)
+- **Keep `process()` deterministic** -- bounded execution time
+
+### DON'T
+
+- **Don't use `std::vector` or `std::string`** in payloads or hot paths
+- **Don't use `new` / `delete` / `malloc`** in `process()`
+- **Don't use `std::cout`** in high-frequency `process()` loops (blocking I/O)
+- **Don't throw exceptions** in real-time code paths
+- **Don't block** in `process()` (no sleep, no mutex wait)
+- **Don't add timestamp fields** to payloads -- use `TimsHeader.timestamp`
+- **Don't use `std::thread` / `std::mutex`** directly -- use CommRaT wrappers
+- **Don't poll** -- use blocking receives (0% CPU idle)
+
+### Real-Time Safety Checklist
+
+Before shipping `process()` code, verify:
+1. No heap allocations (`new`, `malloc`, `vector::push_back`)
+2. No blocking I/O (`cout`, file writes, network calls)
+3. No unbounded loops
+4. No exceptions
+5. Bounded execution time
+6. All containers fixed-size
+
+---
+
+## 12. Troubleshooting
+
+### Common Issues
+
+**Module not receiving data**
+- Check `source_system_id` / `source_instance_id` match producer's `system_id` / `instance_id`
+- Ensure producer starts before consumer
+- Verify TiMS router is running (`tims_router_tcp`)
+
+**Address collision**
+- Two modules with same `(type_id, system_id, instance_id)` will collide
+- Use unique `system_id`/`instance_id` combinations
+- Multi-output modules: each output type creates a separate address
+
+**process() not called**
+- Timer-driven: check `period` is set in config
+- Input-driven: check subscription completed (producer running?)
+- Loop mode: verify no `Period` or `Input` spec is accidentally included
+
+**Compile error: type not registered**
+- Add message type to `CommRaT<...>` application definition
+- Ensure `Message::Data<T>` or `DataWithCommands<T, ...>` wraps the type
+
+**Synced input always invalid**
+- Check `sync_tolerance` is large enough (2-3x slowest sensor period)
+- Verify `history_buffer_size` is adequate
+- Ensure secondary producer is running and subscribed
+
+**Subscription fails**
+- Start producers before consumers
+- Check `max_subscribers` limit on producer
+- Verify address matching (system_id/instance_id)
+
+**High latency**
+- Avoid blocking I/O in `process()`
+- Check for priority inversion (set `realtime = true` and appropriate `priority`)
+- Profile `process()` duration -- should be less than period
+
+### Debugging Tips
+
+- Use `get_input_timestamp<N>()` to measure end-to-end latency
+- Use `has_new_data<N>()` to detect stale secondary inputs
+- Check sequence numbers for message loss
+- Log sparingly -- use `fprintf` (thread-safe) instead of `std::cout`
+
+### Error Reference
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| 0 messages received | Wrong source IDs | Match system_id/instance_id |
+| Compile error on `process()` | Wrong signature | Match I/O specs (see Section 5.5) |
+| Assertion in `Synced::value()` | Data not fresh | Check `if (gps)` before `.value()` |
+| Address collision at startup | Duplicate addresses | Use unique system_id/instance_id |
+| 100% CPU | Loop mode or busy `process()` | Add `Period<N>` or optimize |
+| Subscription timeout | Producer not started | Start producers first |

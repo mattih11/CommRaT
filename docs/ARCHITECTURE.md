@@ -1,804 +1,429 @@
 # CommRaT Architecture
 
-This document describes the architectural decisions, design principles, and internal implementation details of the CommRaT framework.
+Internal architecture reference for the CommRaT (Communication Runtime) framework.
+C++20 real-time messaging built on TiMS with compile-time type safety.
 
 ## Table of Contents
 
 1. [Design Philosophy](#design-philosophy)
-2. [System Architecture Overview](#system-architecture-overview)
+2. [System Overview](#system-overview)
 3. [Mailbox System](#mailbox-system)
 4. [Module Architecture](#module-architecture)
 5. [Threading Model](#threading-model)
 6. [Subscription Protocol](#subscription-protocol)
 7. [Timestamp Management](#timestamp-management)
-8. [Compile-Time Type System](#compile-time-type-system)
-9. [Memory Management](#memory-management)
-10. [Error Handling](#error-handling)
+8. [Message ID System](#message-id-system)
+9. [Memory and Error Handling](#memory-and-error-handling)
+10. [Design Decisions](#design-decisions)
 
 ---
 
 ## Design Philosophy
 
-CommRaT is built on three core principles:
+Three core principles:
 
-### 1. Compile-Time Everything
+**Compile-time everything** -- If it can be validated at compile time, it must be.
+Message IDs, type safety, and registry lookups are all resolved at compile time.
+No reflection, no RTTI, no runtime type dispatch.
 
-**If it can be validated at compile time, it MUST be validated at compile time.**
+**Zero runtime overhead** -- No dynamic allocation in `process()` hot paths.
+Use `std::array`, `sertial::fixed_vector`, `sertial::RingBuffer`. No exceptions.
+All blocking receives are kernel-level (0% CPU when idle).
 
-```cpp
-// Message IDs computed at compile time
-constexpr uint32_t id = MyApp::get_message_id<TemperatureData>();
-
-// Type mismatches caught at compile time
-class BadModule : public MyApp::Module<
-    Output<DataA>,
-    Input<DataB>  // ERROR: DataB not in registry - won't compile
-> {};
-
-// Registry lookups resolved at compile time
-static_assert(MyApp::is_registered<SensorData>, "Type not registered");
-```
-
-**Benefits:**
-- Zero runtime overhead for type dispatch
-- Impossible to send unregistered types
-- Message ID collisions detected at compile time
-- No reflection or RTTI needed
-
-### 2. Zero Runtime Overhead
-
-**Real-time systems cannot tolerate unpredictable performance.**
-
-```cpp
-// FORBIDDEN in hot paths:
-new/delete, malloc/free           // Heap allocation
-std::vector::push_back()          // May reallocate
-std::string operations            // Dynamic allocation
-throw exceptions                  // Unpredictable timing
-std::cout in loops                // Blocking I/O
-
-// REQUIRED instead:
-std::array<T, N>                  // Stack allocation
-sertial::fixed_vector<T, N>       // Bounded capacity
-sertial::RingBuffer<T, N>         // Circular buffer
-std::optional<T>                  // Error handling
-constexpr / consteval             // Compile-time computation
-```
-
-**Guarantees:**
-- No dynamic allocation in process() functions
-- No virtual function calls in hot paths (except process() itself)
-- No mutex contention in message processing
-- Deterministic execution time
-
-### 3. Simple User API
-
-**Complex machinery hidden behind clean interfaces.**
-
-Users interact with:
-- Message types (plain POD structs)
-- `Module<OutputSpec, InputSpec>` base class
-- Simple `process()` override
-- Configuration structs
-
-Users never see:
-- Template metaprogramming (SFINAE, concepts, variadic templates)
-- Message ID calculation algorithms
-- Mailbox address computation
-- Subscription protocol details
-- Type dispatch mechanisms
+**Simple user API** -- Users see message POD structs, `Module2` base class, and `process()`.
+All metaprogramming (SFINAE, concepts, variadic templates, address calculation) is hidden.
 
 ---
 
-## System Architecture Overview
+## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      CommRaT<Types...>                      │
-│  (Application-level registry + Module/Mailbox factories)   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    ▼                   ▼
-         ┌──────────────────┐  ┌──────────────────┐
-         │  Module Instance │  │  Module Instance │
-         │   (Producer)     │  │   (Consumer)     │
-         └──────────────────┘  └──────────────────┘
-                    │                   │
-        ┌───────────┼───────────┐      │
-        ▼           ▼           ▼      ▼
-    ┌─────┐    ┌─────┐    ┌─────┐  ┌─────┐
-    │ CMD │    │WORK │    │ PUB │  │DATA │
-    │ mbx │    │ mbx │    │ mbx │  │ mbx │
-    └─────┘    └─────┘    └─────┘  └─────┘
-        │           │           │       │
-        └───────────┴───────────┴───────┘
-                    ▼
-            ┌───────────────┐
-            │ TiMS (RACK)   │
-            │ IPC Backend   │
-            └───────────────┘
++----------------------------------------------------------+
+|                    CommRaT<Types...>                      |
+|        (Message registry + Module2/Mailbox types)        |
++----------------------------------------------------------+
+                            |
+                  +---------+----------+
+                  v                    v
+       +-----------------+  +-----------------+
+       | Module Instance  |  | Module Instance  |
+       |   (Producer)     |  |   (Consumer)     |
+       +-----------------+  +-----------------+
+              |                      |
+    +---------+------+               |
+    v         v      v               v
+ +-----+  +-----+  +-----+      +-----+
+ | CMD |  |WORK |  | CMD |      |DATA |
+ | mbx |  | mbx |  | mbx |      | mbx |
+ |(out0)|  |(send)| |(out1)|      |(in0)|
+ +-----+  +-----+  +-----+      +-----+
+    |         |        |             |
+    +---------+--------+-------------+
+                  v
+          +--------------+
+          | TiMS (RACK)  |
+          | IPC Backend  |
+          +--------------+
 ```
 
-### Layered Architecture
+### Layers
 
-**Layer 1: User Code**
-- Message type definitions (POD structs)
-- Module implementations (override process())
-- Configuration and initialization
-
-**Layer 2: CommRaT Framework**
-- Module base class with I/O specifications
-- MailboxSet per output type
-- Subscription protocol automation
-- Timestamp management and synchronization
-
-**Layer 3: Type System**
-- MessageRegistry (compile-time ID mapping)
-- Type traits and concepts
-- SFINAE-based processor selection
-
-**Layer 4: TiMS Wrapper**
-- C++ RAII wrappers around TiMS C API
-- Mailbox abstraction with type safety
-- Serialization integration (SeRTial)
-
-**Layer 5: TiMS (RACK)**
-- Socket-based IPC
-- Message routing
-- Blocking receive primitives
+1. **User code** -- Message POD structs, Module2 subclass, `process()` override
+2. **CommRaT framework** -- Module2 base, I/O specs, subscription automation
+3. **Type system** -- MessageRegistry, compile-time ID mapping, SFINAE processor selection
+4. **TiMS wrapper** -- RAII mailbox wrappers, SeRTial serialization
+5. **TiMS (RACK)** -- Socket IPC, message routing, blocking receive primitives
 
 ---
 
 ## Mailbox System
 
-### Mailbox Addressing
+### Three Mailbox Types
 
-Each module has a **base address** calculated from system_id and instance_id:
+Each module uses three kinds of mailboxes (no PUBLISH mailbox):
 
-```cpp
-uint32_t base = calculate_base_address(system_id, instance_id);
-// base = (system_id << 8) | instance_id
-// Range: 0x0000 to 0xFFFF (65536 unique addresses)
-```
+| Mailbox | Scope | Purpose | Thread |
+|---------|-------|---------|--------|
+| **CMD** | Per-output | Receive commands, subscription requests | Dedicated blocking thread |
+| **WORK** | Per-module | Send-only: subscribe to producers, publish to subscribers | No thread (sends from data thread) |
+| **DATA** | Per-input | Receive continuous data streams | Implicit in ContinuousInput |
 
-### Phase 5.3: MailboxSet per Output Type
+### Address Encoding
 
-**Problem:** Multi-output modules need independent subscriptions per output type.
-
-**Solution:** Each output gets its own set of mailboxes:
+Format: `[type_id:8][system_id:8][instance_id:8][mailbox_index:8]`
 
 ```cpp
-// Module with 2 outputs: TemperatureData, PressureData
-class SensorModule : public MyApp::Module<
-    Outputs<TemperatureData, PressureData>,
-    PeriodicInput
-> {};
+// From include/commrat/module/helpers/address_helpers.hpp
+constexpr uint32_t encode_address(uint8_t type_id, uint8_t system_id,
+                                   uint8_t instance_id, uint8_t mailbox_index);
 
-// Mailbox layout (base = 0x1001):
-CMD_0:  0x1001 + 0*16 + 0  = 0x1001  // Temp commands
-WORK_0: 0x1001 + 0*16 + 4  = 0x1005  // Temp subscriptions
-PUB_0:  0x1001 + 0*16 + 8  = 0x1009  // Temp publish control
-
-CMD_1:  0x1001 + 1*16 + 0  = 0x1011  // Pressure commands
-WORK_1: 0x1001 + 1*16 + 4  = 0x1015  // Pressure subscriptions
-PUB_1:  0x1001 + 1*16 + 8  = 0x1019  // Pressure publish control
-
-DATA:   0x1001 + 12        = 0x100D  // Shared input mailbox
+// Mailbox index constants
+constexpr uint8_t CMD_MBX_BASE  = 0;   // CMD at index 0 (per output)
+constexpr uint8_t WORK_MBX_BASE = 1;   // WORK at index 1
+constexpr uint8_t DATA_MBX_BASE = 3;   // DATA starts at index 3 (per input)
 ```
 
-**Formula:**
-```cpp
-uint32_t cmd_mbx  = base + output_index * 16 + 0;
-uint32_t work_mbx = base + output_index * 16 + 4;
-uint32_t pub_mbx  = base + output_index * 16 + 8;
-uint32_t data_mbx = base + 12;  // Fixed offset, shared
+**type_id** is derived from the module's primary output message ID (low 8 bits).
+For multi-output modules, the first output type determines `type_id`.
+
+**Example** (single-output module, system_id=10, instance_id=1, type_id=0x42):
+
+```
+CMD:  0x420A0100   (type=0x42, sys=0x0A, inst=0x01, idx=0x00)
+WORK: 0x420A0101   (type=0x42, sys=0x0A, inst=0x01, idx=0x01)
+DATA: 0x420A0103   (type=0x42, sys=0x0A, inst=0x01, idx=0x03)
 ```
 
-### Three-Mailbox Protocol (per output)
-
-**CMD (Command Mailbox)**
-- User commands (reset, calibrate, etc.)
-- Module lifecycle control
-- Administrative messages
-- Handled by: `command_loop()` thread
-
-**WORK (Subscription Protocol)**
-- Subscription requests from consumers
-- Acknowledgments from producer
-- Subscription lifecycle management
-- Handled by: `work_loop()` thread
-
-**PUB (Publish Control)**
-- Future use: publish rate control, filtering
-- Currently unused but reserved in address space
-- Handled by: (reserved)
-
-**DATA (Input Mailbox)**
-- Incoming data messages from subscribed producers
-- Shared by all inputs (one DATA mailbox per module)
-- Handles all subscribed message types
-- Handled by: `data_thread_` thread
-
-### Type-Specific Subscription Filtering
-
-Consumers subscribe to a specific output type from multi-output producers:
-
-```cpp
-// Producer configuration (has 2 outputs)
-ModuleConfig producer_config{
-    .system_id = 10,
-    .instance_id = 1,
-    // ... outputs: TemperatureData, PressureData
-};
-
-// Consumer configuration (wants only TemperatureData)
-ModuleConfig temp_consumer_config{
-    .name = "TempMonitor",
-    .system_id = 20,
-    .instance_id = 1,
-    .source_system_id = 10,
-    .source_instance_id = 1,
-    .source_primary_output_type_id = MyApp::get_message_id<TemperatureData>()
-};
-
-// Result: Consumer subscribes to WORK_0, receives only TemperatureData on its DATA mailbox
-```
+For multi-output modules, each output gets its own CMD mailbox at index 0..N-1.
+DATA mailboxes start at `get_data_mbx_base(num_outputs)`.
 
 ---
 
 ## Module Architecture
 
-### Module Base Class Hierarchy
+### Module2 Base Class
+
+Defined in `include/commrat/module2.hpp`.
 
 ```cpp
-CommRaT<Types...>::Module<OutputSpec, InputSpec, Commands...>
-    │
-    ├─► MailboxSetManager (per output type)
-    │   ├─► CMD mailbox
-    │   ├─► WORK mailbox
-    │   └─► PUB mailbox (reserved)
-    │
-    ├─► DATA mailbox (shared for all inputs)
-    │
-    ├─► ProcessorBase (SFINAE-selected based on I/O spec)
-    │   └─► Provides appropriate virtual process(...) signature
-    │
-    └─► Threads:
-        ├─► command_loop()  (CMD mailbox)
-        ├─► work_loop()     (WORK mailbox, per output)
-        └─► data_thread_    (DATA mailbox or timer)
+template<typename Registry, typename... IOSpecs>
+class Module2;
 ```
 
-### Processor Selection (SFINAE)
-
-The correct `process()` signature is selected at compile time based on I/O specification:
+Users access it through the application alias:
 
 ```cpp
-// PeriodicInput + Output<T> → void process(T& output)
-class ContinuousProcessorBase<void, T> {
-    virtual void process(T& output) = 0;
+using MyApp = CommRaT<Message::Data<TempData>, Message::Data<FilteredData>>;
+
+// Timer-driven producer
+class Sensor : public MyApp::Module2<Output<TempData>, Period<Milliseconds(100)>> {
+    void process(TempData& output) override { /* ... */ }
 };
 
-// Input<U> + Output<T> → void process(const U& input, T& output)
-class ContinuousProcessorBase<U, T> {
-    virtual void process(const U& input, T& output) = 0;
+// Input-driven consumer
+class Filter : public MyApp::Module2<Output<FilteredData>, Input<TempData>> {
+    void process(const TempData& input, FilteredData& output) override { /* ... */ }
 };
 
-// PeriodicInput + Outputs<T, U> → void process(T& out1, U& out2)
-class MultiOutputProcessorBase<std::tuple<T, U>, void> {
-    virtual void process(T& out1, U& out2) = 0;
+// Multi-input fusion
+class Fusion : public MyApp::Module2<
+    Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>
+> {
+    void process(const IMUData& imu, Synced<GPSData> gps, FusedData& out) override {
+        if (gps) {
+            out = fuse(imu, gps.value());
+        } else {
+            out = dead_reckon(imu);
+        }
+    }
 };
 
-// Inputs<U, V> + Output<T> → void process(const U& in1, const V& in2, T& output)
-class MultiInputProcessorBase<std::tuple<U, V>, T, 2> {
-    virtual void process(const U& in1, const V& in2, T& output) = 0;
+// Loop mode (no Input, no Period)
+class Spinner : public MyApp::Module2<Output<StatusData>> {
+    void process(StatusData& output) override { /* ... */ }
 };
 ```
 
-User's module inherits from multiple bases, but **only one provides a process() signature** (others are empty).
+I/O specs defined in `include/commrat/module/io/io_spec.hpp`:
+
+- `Output<T>` -- one or more output types
+- `Input<T>` -- primary continuous input (at most one, drives execution)
+- `SyncedInput<T>` -- secondary pull-based input (timestamp-synchronized)
+- `Period<Duration>` -- timer-driven execution (mutually exclusive with `Input<T>`)
+
+### Execution Modes (Auto-Inferred)
+
+| Has Input? | Has Period? | Mode |
+|---|---|---|
+| Yes | No | **Input-driven**: blocks on DATA mailbox receive |
+| No | Yes | **Timer-driven**: sleeps for period between calls |
+| No | No | **Loop-driven**: calls process() continuously |
+
+### Process Signature Selection
+
+The I/O spec tuple determines the `process()` signature at compile time:
+
+```
+Output<A>, Period<D>                -> void process(A& out)
+Output<A>, Input<B>                 -> void process(const B& in, A& out)
+Output<A>, Output<B>, Period<D>     -> void process(A& out1, B& out2)
+Output<A>, Input<B>, SyncedInput<C> -> void process(const B& in, Synced<C> synced, A& out)
+```
+
+Inputs come first (const ref for primary, `Synced<T>` for synced), outputs last (mutable ref).
+
+### Synced<T> Wrapper
+
+Defined in `include/commrat/module/io/synced.hpp`.
+Zero-copy wrapper for synchronized secondary input data with explicit freshness handling:
+
+```cpp
+template<typename T>
+class Synced {
+    const T* data_;
+    bool is_valid_, is_fresh_;
+public:
+    explicit operator bool() const;      // True if fresh
+    const T& value() const;              // Fresh only (asserts)
+    const T& stale() const;              // Any valid (asserts)
+    const T& value_or(const T&) const;   // Fresh or default
+    const T& stale_or(const T&) const;   // Valid or default
+    bool is_fresh() const;
+    bool is_valid() const;
+};
+```
+
+### Internal Structure
+
+```
+Module2<Registry, IOSpecs...>
+  |-- IOHandler          (structured I/O access: outputs(), inputs(), publish, fetch)
+  |-- CommandHandler     (system + user command dispatch per output)
+  |-- SelectProcessorBase (SFINAE picks correct process() signature)
+  |
+  |-- ModuleOutput (per output, owns CMD mailbox + subscriber list + history buffer)
+  |-- ContinuousInput (per Input<T>, owns DATA mailbox)
+  |-- SyncedInput (per SyncedInput<T>, uses get_data RPC via WORK)
+  |-- WorkMailbox (single, send-only)
+  |
+  |-- data_thread_         (1 thread: runs process())
+  |-- command_threads_[]   (N threads: one per output CMD mailbox)
+```
+
+Key source files:
+- `module/io/output/module_output.hpp` -- Output with CMD mailbox, subscribers, history
+- `module/io/input/continuous_input.hpp` -- Primary input with DATA mailbox
+- `module/io/input/synced_input.hpp` -- Secondary input via get_data
+- `module/io/input/cmd_input.hpp` -- CMD mailbox for request/reply RPCs
 
 ---
 
 ## Threading Model
 
-### Three-Thread Architecture
+Each module runs **1 + N** threads (N = number of outputs):
 
-Each module runs **three concurrent threads**:
+**1 data_thread** -- Runs `process()` based on execution mode:
+- Input-driven: blocks on `ContinuousInput::receive()`, calls process, publishes
+- Timer-driven: sleeps for period, calls process, publishes
+- Loop-driven: calls process, publishes, repeats immediately
 
-**1. Command Thread (`command_loop()`)**
-```cpp
-void command_loop() {
-    while (running_) {
-        auto result = mailbox_set_[0].cmd_mailbox.receive_any(visitor);
-        // Blocking receive - 0% CPU when idle
-        // Visitor dispatches to on_command<T>(const T&)
-    }
-}
-```
-- Handles user commands
-- Low frequency (typically)
-- Runs for each output mailbox set
+**N command_threads** -- One per output. Each blocks on its CMD mailbox:
+- Receives `SubscribeRequest`, `UnsubscribeRequest`, `GetDataRequest`, `GetNextDataRequest`
+- Dispatches system commands automatically
+- Dispatches user commands via `on_command<OutputIndex>(payload, reply)`
+- 0% CPU when no commands arrive
 
-**2. Subscription Thread (`work_loop()`)**
-```cpp
-void work_loop(size_t output_index) {
-    while (running_) {
-        auto result = mailbox_set_[output_index].work_mailbox.receive<SubscriptionRequest>();
-        // Consumer wants to subscribe
-        handle_subscription(result->message, output_index);
-    }
-}
-```
-- Handles subscription protocol
-- One thread per output type
-- Automatic acknowledgment to consumer
-
-**3. Data Thread (`data_thread_()`)**
-```cpp
-// Continuous input mode
-void data_thread_() {
-    while (running_) {
-        auto result = data_mailbox_.receive<InputType>();
-        // Blocking receive
-        process_and_publish(result->message);
-    }
-}
-
-// Periodic mode
-void data_thread_() {
-    while (running_) {
-        Time::sleep(config_.period);
-        process_and_publish();
-    }
-}
-
-// Loop mode
-void data_thread_() {
-    while (running_) {
-        process_and_publish();  // No sleep, maximum throughput
-    }
-}
-```
-- Drives process() execution
-- Mode depends on InputSpec
-
-### Zero CPU When Idle
-
-All threads use **blocking receives** on TiMS mailboxes:
-
-```cpp
-tims_recvmsg_timed(mbx, buffer, size, timeout=0);  // Block forever
-```
-
-**Result:** Module consumes 0% CPU when no messages arrive. No polling, no spin loops.
+No work_thread -- WORK mailbox is send-only (used from data_thread or startup).
 
 ---
 
 ## Subscription Protocol
 
-### Automatic Subscription Flow
-
-When a consumer module starts with `Input<T>`:
+### Flow
 
 ```
-┌──────────┐                          ┌──────────┐
-│ Consumer │                          │ Producer │
-│  (Input) │                          │ (Output) │
-└──────────┘                          └──────────┘
-      │                                     │
-      │  1. SubscriptionRequest            │
-      │  (to WORK mailbox)                 │
-      ├────────────────────────────────────>│
-      │                                     │
-      │  Contains:                          │
-      │  - consumer_data_mailbox            │
-      │  - requested_message_type_id        │
-      │                                     │
-      │                                     │ work_loop() receives
-      │                                     │ Validates type
-      │                                     │ Adds to subscribers_
-      │                                     │
-      │  2. SubscriptionAck                 │
-      │  (to consumer's DATA mailbox)       │
-      │<────────────────────────────────────┤
-      │                                     │
-      │  Contains:                          │
-      │  - success status                   │
-      │  - producer info                    │
-      │                                     │
-      │                                     │
-      │  3. Data Messages                   │
-      │  (to consumer's DATA mailbox)       │
-      │<════════════════════════════════════┤
-      │<════════════════════════════════════┤
-      │<════════════════════════════════════┤
+Consumer                                Producer
+   |                                       |
+   |  1. SubscribeRequest                 |
+   |  (via WORK -> Producer's CMD mbx)    |
+   |-------------------------------------->|
+   |                                       | command_thread receives
+   |                                       | validates, adds subscriber
+   |  2. SubscribeReply                   |
+   |  (Producer -> Consumer's WORK mbx)   |
+   |<--------------------------------------|
+   |                                       |
+   |  3. Data (continuous)                |
+   |  (Producer WORK -> Consumer DATA)    |
+   |<======================================|
+   |<======================================|
 ```
 
-### Subscription Message Types
+### Message Types
+
+Defined in `include/commrat/messaging/system/subscription_messages.hpp`:
 
 ```cpp
-struct SubscriptionRequest {
-    uint32_t consumer_data_mailbox;      // Where to send data
-    uint32_t requested_message_type_id;  // Which output type to subscribe to
-    uint8_t consumer_system_id;
-    uint8_t consumer_instance_id;
+struct SubscribeRequestPayload {
+    uint32_t subscriber_addr{0};       // Consumer's DATA mailbox address
+    int64_t requested_period_ms{0};    // Desired update period (0 = max rate)
 };
 
-struct SubscriptionAck {
-    bool success;
-    uint32_t producer_system_id;
-    uint32_t producer_instance_id;
-    uint32_t message_type_id;
+struct SubscribeReplyPayload {
+    int64_t actual_period_ms{0};
+    bool success{false};
+    uint32_t error_code{0};            // 0=ok, 1=max_subscribers, 2=other
+};
+
+struct UnsubscribeRequestPayload {
+    uint32_t subscriber_addr{0};
+};
+
+struct UnsubscribeReplyPayload {
+    bool success{true};
 };
 ```
 
-### Subscriber Tracking
-
-Each `MailboxSet` maintains a list of subscribers per output type:
+These use `MessageDefinition` with request/reply pairing:
 
 ```cpp
-struct SubscriberInfo {
-    uint32_t data_mailbox;       // Where to send messages
-    uint32_t message_type_id;    // Which type they want
-    uint8_t system_id;
-    uint8_t instance_id;
-};
-
-std::array<
-    sertial::fixed_vector<SubscriberInfo, MAX_SUBSCRIBERS>,
-    OutputCount
-> subscribers_;
+using SubscribeRequest = MessageDefinition<
+    SubscribeRequestPayload, MessagePrefix::System,
+    SystemSubPrefix::Subscription, 0x0001, SubscribeReplyPayload>;
+using SubscribeReply = typename SubscribeRequest::ReplyMessageDef;
 ```
 
-When publishing, iterate subscribers and send to each DATA mailbox.
+### Data Requests (Get Synchronization)
+
+Defined in `include/commrat/messaging/system/data_request_messages.hpp`.
+Used internally by `SyncedInput` for timestamp-synchronized pulls:
+
+```cpp
+template<typename T>
+struct GetDataRequestPayload {
+    uint64_t target_timestamp{0};
+    uint64_t tolerance_ns{0};
+    uint8_t interpolation_mode{0};     // NEAREST, LINEAR, PREVIOUS, NEXT
+};
+
+template<typename T>
+struct GetDataReplyPayload {
+    T data;
+    bool found{false};
+    uint64_t data_timestamp{0};
+    int64_t timestamp_delta_ns{0};
+};
+```
+
+Consumer sends `GetDataRequest` to producer's CMD mailbox. Producer searches history
+buffer and replies with closest match. One-shot operation (no subscription created).
 
 ---
 
 ## Timestamp Management
 
-### Single Source of Truth: TimsHeader.timestamp
+**Single source of truth: `TimsHeader.timestamp`**. Payload structs must NOT have timestamp fields.
 
-**Rule:** ALL timestamps come from `TimsHeader.timestamp`. Payload structs MUST NOT have timestamp fields.
+Automatic assignment based on execution mode:
+- **Timer-driven**: `timestamp = Time::now()` at each period
+- **Input-driven**: `timestamp = input.header.timestamp` (propagated)
+- **Multi-input**: `timestamp = primary_input.header.timestamp` (sync point)
 
-```cpp
-// CORRECT: No timestamp in payload
-struct SensorData {
-    float value;
-    int sensor_id;
-};
-
-// WRONG: Timestamp in payload creates confusion
-struct BadSensorData {
-    uint64_t timestamp;  // DON'T DO THIS
-    float value;
-};
-```
-
-### Automatic Timestamp Assignment
-
-**PeriodicInput:** Timestamp assigned at generation
-```cpp
-void periodic_publish() {
-    TimsHeader header;
-    header.timestamp = Time::now();  // Current time
-    T output{};
-    process(output);
-    send_with_header(header, output);
-}
-```
-
-**Input<T>:** Timestamp propagated from input
-```cpp
-void continuous_publish(const ReceivedMessage<InputType>& received) {
-    TimsHeader header = received.header;  // Copy input timestamp
-    U output{};
-    process(received.message, output);
-    send_with_header(header, output);
-}
-```
-
-**Inputs<T, U, ...>:** Timestamp synchronized to primary input
-```cpp
-void multi_input_publish(const ReceivedMessage<PrimaryType>& primary) {
-    TimsHeader header = primary.header;  // Primary timestamp
-    
-    // Secondary inputs synchronized via get_data(primary.header.timestamp)
-    auto secondary = historical_mailbox_.get_data<SecondaryType>(
-        primary.header.timestamp,
-        config_.sync_tolerance_ns
-    );
-    
-    process(primary.message, secondary, output);
-    send_with_header(header, output);
-}
-```
-
-### Phase 6: Multi-Input Synchronization (RACK-style get_data)
-
-**Problem:** Fusing sensors with different rates (e.g., 100Hz IMU + 10Hz GPS).
-
-**Solution:** Historical buffering with timestamp-based lookup:
+Abstractions from `include/commrat/platform/timestamp.hpp`:
 
 ```cpp
-class HistoricalMailbox<T> {
-    sertial::RingBuffer<TimsMessage<T>, CAPACITY> history_;
-    
-    std::optional<T> get_data(uint64_t target_timestamp, uint64_t tolerance);
-};
-```
-
-**Algorithm:**
-1. Primary input blocks on receive() (drives execution)
-2. Secondary inputs use `get_data(primary_timestamp, tolerance)`
-3. Returns closest message within tolerance window
-4. If no match, returns `std::nullopt`
-
-**Metadata tracking:**
-```cpp
-struct InputMetadata<T> {
-    uint64_t timestamp;        // From TimsHeader
-    uint32_t sequence_number;
-    uint32_t message_id;
-    bool is_new_data;          // True if fresh, false if reused
-    bool is_valid;             // True if get_data succeeded
-};
+Timestamp ts = Time::now();
+Duration timeout = Milliseconds(100);
+Time::sleep(Milliseconds(10));
 ```
 
 ---
 
-## Compile-Time Type System
+## Message ID System
 
-### Message Registry
-
-The MessageRegistry maps types to IDs at compile time:
+Message IDs are computed at compile time via prefix/subprefix/local_id:
 
 ```cpp
-template<typename... MessageTypes>
-class MessageRegistry {
-    // Compile-time ID calculation using type hashing
-    template<typename T>
-    static constexpr uint32_t get_message_id() {
-        return detail::hash_type_name<T>();
-    }
-    
-    // Collision detection via static_assert
-    static_assert(all_ids_unique(), "Message ID collision detected");
-};
+using TempMsg = MessageDefinition<
+    TemperatureData,
+    MessagePrefix::UserDefined,
+    UserDefinedSubPrefix::Data,
+    AUTO_ID>;    // Auto-assigned starting from 1
 ```
 
-### Type-to-Index Mapping
+Key constants:
+- `AUTO_ID = 0` -- marker for auto-assigned IDs
+- `MAX_MESSAGE_ID = 0x7FFF` -- sign bit reserved for reply IDs
+- Reply ID = `static_cast<uint16_t>(-request_id)` (e.g., request 0x0001 -> reply 0xFFFF)
 
-Find index of type in parameter pack:
+System messages are auto-included in every registry (Subscribe, Unsubscribe, GetData, GetNextData).
 
-```cpp
-template<typename T, typename... Ts>
-struct type_index;
-
-// Base case: Found at index 0
-template<typename T, typename... Ts>
-struct type_index<T, T, Ts...> {
-    static constexpr size_t value = 0;
-};
-
-// Recursive case: Check next type
-template<typename T, typename U, typename... Ts>
-struct type_index<T, U, Ts...> {
-    static constexpr size_t value = 1 + type_index<T, Ts...>::value;
-};
-```
-
-### Concepts for Type Constraints
-
-```cpp
-template<typename T>
-concept Registered = requires {
-    { MyApp::get_message_id<T>() } -> std::convertible_to<uint32_t>;
-};
-
-template<typename T>
-concept SerTialSerializable = requires(T t) {
-    { sertial::Message<T>::serialize(t) };
-};
-
-template<typename T>
-concept ValidMessageType = Registered<T> && SerTialSerializable<T>;
-```
+Defined in `include/commrat/messaging/message_id.hpp`
+and `include/commrat/messaging/message_registry.hpp`.
 
 ---
 
-## Memory Management
+## Memory and Error Handling
 
-### Stack Allocation Only
+**Hot paths**: Stack-only. `std::array<T,N>`, `sertial::fixed_vector<T,N>`, `sertial::RingBuffer<T,N>`.
+No `new`, `malloc`, `std::vector::push_back`, `std::string`, or exceptions.
 
-**Hot paths use only stack-allocated containers:**
+**Cold paths** (startup/config): Heap allocation permitted.
 
-```cpp
-// Process function (called frequently)
-void process(const SensorData& input, FilteredData& output) {
-    std::array<float, 10> window;           // Stack
-    sertial::fixed_vector<float, 50> buf;   // Stack with capacity
-    
-    // Process without allocations...
-    output = compute(input, window, buf);
-}
-```
-
-### Cold Path Allocations
-
-**Startup and configuration may allocate:**
-
-```cpp
-// Module constructor (called once)
-Module(const ModuleConfig& config) {
-    subscribers_.reserve(MAX_SUBSCRIBERS);  // Allocation OK here
-    mailbox_sets_ = /* ... */;              // Allocation OK here
-}
-```
-
-### Zero-Copy Message Passing
-
-TiMS uses shared memory regions for large messages. CommRaT preserves this:
-
-```cpp
-auto result = mailbox.receive<LargeData>();
-// result.message is a view into shared memory
-// No copy until user explicitly copies
-process(result->message);  // Pass by const reference
-```
+**Error handling**: `std::optional` or error codes. Never exceptions in real-time paths.
+Compile-time validation via `static_assert` and concepts preferred over runtime checks.
 
 ---
 
-## Error Handling
+## Design Decisions
 
-### No Exceptions in Real-Time Paths
+### Why CMD Per Output (not shared)?
 
-```cpp
-// WRONG: Exception in hot path
-void process(const T& input, U& output) {
-    if (invalid(input)) {
-        throw std::runtime_error("Invalid input");  // Unpredictable timing!
-    }
-}
+Each output independently manages its own subscribers and command handlers.
+Independent CMD mailboxes avoid runtime type dispatch and allow per-output rate control.
 
-// CORRECT: Return std::optional or error code
-std::optional<U> validate_and_process(const T& input) {
-    if (invalid(input)) {
-        return std::nullopt;
-    }
-    return compute(input);
-}
-```
+### Why No PUBLISH Mailbox?
 
-### MailboxResult<T>
-
-TiMS operations return `std::optional`:
-
-```cpp
-template<typename T>
-using MailboxResult = std::optional<T>;
-
-auto result = mailbox.receive<SensorData>();
-if (result) {
-    process(result->message);
-} else {
-    // Receive failed (timeout, mailbox closed, etc.)
-}
-```
-
-### Compile-Time Validation Preferred
-
-Push errors to compile time whenever possible:
-
-```cpp
-// Runtime error (BAD)
-if (!is_registered(msg)) {
-    return error("Type not registered");
-}
-
-// Compile-time error (GOOD)
-template<typename T>
-    requires is_registered<T>
-auto send(const T& msg) { /* ... */ }
-```
-
----
-
-## Performance Characteristics
-
-### Latency
-
-- **Message send:** ~5-10 µs (TiMS + serialization)
-- **Blocking receive:** Immediate wakeup (<1 µs kernel scheduling)
-- **Type dispatch:** 0 ns (compile-time resolved)
-- **Subscription overhead:** One-time setup (~100 µs)
-
-### Memory Footprint
-
-- **Per module:** ~16 KB (mailboxes + thread stacks)
-- **Per message:** Header (64 bytes) + payload (user-defined)
-- **Historical buffer:** `sizeof(TimsMessage<T>) * CAPACITY`
-
-### Scalability
-
-- **Max modules:** 65536 (16-bit address space)
-- **Max message types:** 2^32 (uint32_t message_id)
-- **Max outputs per module:** Limited by address space (typically 10-20)
-- **Max subscribers per output:** Configurable (default 50)
-
----
-
-## Trade-Offs and Design Decisions
-
-### Why MailboxSet per Output?
-
-**Alternative considered:** Single WORK mailbox, demux by message type.
-
-**Rejected because:**
-- Requires runtime type dispatch in hot path
-- Complicates subscription acknowledgment
-- No independent rate control per output type
-
-**Chosen approach:**
-- Independent mailboxes = independent subscription management
-- Clean separation at address level
-- Slight address space cost (3 mailboxes per output vs. 1)
+Publishing goes through the WORK mailbox (send-only). A separate PUBLISH mailbox
+added addressing complexity with no benefit -- the WORK mailbox already handles
+outbound sends without a dedicated thread.
 
 ### Why Blocking Receives?
 
-**Alternative considered:** Polling (epoll, select, busy-wait).
-
-**Rejected because:**
-- Polling wastes CPU even when idle
-- Busy-wait impossible in real-time systems
-- epoll/select adds complexity and latency
-
-**Chosen approach:**
-- Kernel-level blocking (futex-based)
-- 0% CPU when idle
-- Immediate wakeup on message arrival
+Polling wastes CPU. Busy-wait is incompatible with real-time. Kernel-level blocking
+(futex-based via TiMS) gives 0% CPU when idle with immediate wakeup on message arrival.
 
 ### Why TimsHeader.timestamp Only?
 
-**Alternative considered:** Allow payload timestamps.
-
-**Rejected because:**
-- Ambiguity: Which timestamp is "correct"?
-- Synchronization complexity with multiple timestamps
-- Users might forget to set payload timestamp
-
-**Chosen approach:**
-- Single source of truth in header
-- Framework manages timestamp automatically
-- Metadata accessors expose timestamp when needed
-
----
-
-## Future Architecture Directions
-
-### Phase 7+: Planned Features
-
-1. **Optional Inputs:** Secondary inputs that don't block execution if unavailable
-2. **Buffering Strategies:** Sliding window, latest-only, custom policies
-3. **ROS 2 Adapter:** Separate repository (rclcpp-commrat)
-4. **DDS Compatibility:** Abstract transport layer
-5. **Platform Abstraction:** libevl support for true real-time Linux
-
-### Open Questions
-
-See [ROADMAP.md](../ROADMAP.md) for detailed discussion of:
-
-- Input synchronization policy (get_data failure modes)
-- Output publishing order (sequential vs. parallel)
-- Command reply mechanism (one-way vs. request-response)
-- Error recovery strategies (restart, degrade, failover)
+Single source of truth eliminates ambiguity. The framework assigns timestamps
+automatically based on execution mode. Users access metadata via `get_input_timestamp<N>()`.
 
 ---
 
 ## References
 
-- [API Reference](API_REFERENCE.md) - Complete API documentation
-- [User Guide](USER_GUIDE.md) - Framework usage guide
-- [Getting Started](GETTING_STARTED.md) - First application tutorial
-- [RACK Project](https://github.com/smolorz/RACK) - TiMS messaging system
-- [SeRTial](https://github.com/mattih11/SeRTial) - Serialization library
+- [API Reference](API_REFERENCE.md)
+- [User Guide](USER_GUIDE.md)
+- [Getting Started](GETTING_STARTED.md)
+- [RACK Project](https://github.com/smolorz/RACK) -- TiMS messaging system
+- [SeRTial](https://github.com/mattih11/SeRTial) -- Serialization library

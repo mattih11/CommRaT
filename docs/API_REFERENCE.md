@@ -1,802 +1,1061 @@
 # CommRaT API Reference
 
-**Version**: 1.0.0  
-**Last Updated**: February 12, 2026
+**Version**: 2.0.0
+**Last Updated**: April 7, 2026
 
-This document provides a comprehensive reference for the CommRaT API. For detailed Doxygen documentation, run `make docs` and open `docs/api/html/index.html`.
+Accurate API reference derived from header files. For Doxygen docs, run `make docs`.
 
 ---
 
 ## Table of Contents
 
-1. [Application Template](#application-template)
-2. [Module Base Class](#module-base-class)
-3. [I/O Specifications](#io-specifications)
-4. [Metadata Accessors](#metadata-accessors)
-5. [Configuration](#configuration)
-6. [Threading Abstractions](#threading-abstractions)
-7. [Timestamp Abstractions](#timestamp-abstractions)
-8. [Mailbox Interface](#mailbox-interface)
-9. [Message Definitions](#message-definitions)
-10. [Introspection System](#introspection-system)
+1. [Application Template (CommRaT)](#application-template)
+2. [Module2 Base Class](#module2-base-class)
+3. [I/O Specification Tags](#io-specification-tags)
+4. [Synced Wrapper](#synced-wrapper)
+5. [ModuleOutput](#moduleoutput)
+6. [ContinuousInput](#continuousinput)
+7. [SyncedInputImpl](#syncedinputimpl)
+8. [Messages and Serialization](#messages-and-serialization)
+9. [Message Definitions (MessageDefinition, Message::Data, etc.)](#message-definitions)
+10. [Message Registry](#message-registry)
+11. [Module Configuration](#module-configuration)
+12. [Timestamp / Time](#timestamp--time)
+13. [Threading Abstractions](#threading-abstractions)
+14. [Introspection](#introspection)
 
 ---
 
 ## Application Template
 
-### CommRaT<MessageDefs...>
-
-The main application template that defines your messaging system.
+**Header:** `<commrat/commrat.hpp>`
 
 ```cpp
 template<typename... MessageDefs>
-class CommRaT;
+class CommRaT : public MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest>;
 ```
 
-**Usage:**
+Automatically includes system messages (`SubscribeRequest`, `UnsubscribeRequest` and their replies).
+
+### Type Aliases
+
+| Alias | Type |
+|-------|------|
+| `Registry` | `MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest>` |
+| `UserRegistry` | `MessageRegistry<MessageDefs...>` (user types only) |
+| `payload_types` | `typename Registry::PayloadTypes` (tuple of all payload types) |
+| `Module2<IOSpecs...>` | `commrat::Module2<CommRaT, IOSpecs...>` |
+| `Mailbox<PayloadT>` | `commrat::Mailbox<MessageDefs..., SubscribeRequest, UnsubscribeRequest>` |
+| `Introspection` | `IntrospectionHelper<CommRaT>` |
+
+### Inherited from Registry
+
+```cpp
+template<typename T> static constexpr bool is_registered;
+template<typename T> static constexpr uint32_t get_message_id();
+template<typename T> static auto serialize(TimsMessage<T>& message);
+template<typename T> static auto deserialize(std::span<const std::byte> data);
+template<typename Visitor> static bool visit(uint32_t msg_id, std::span<const std::byte> data, Visitor&& v);
+template<typename Callback> static bool dispatch(uint32_t msg_id, std::span<const std::byte> data, Callback&& cb);
+static constexpr size_t max_message_size;
+```
+
+### System Nested Struct
+
+```cpp
+struct System {
+    using PayloadTypes = std::tuple<SubscribeRequestPayload, SubscribeReplyPayload,
+                                    UnsubscribeRequestPayload, UnsubscribeReplyPayload>;
+    template<typename T> static constexpr uint32_t get_message_id();
+    using WorkMailbox = MailboxFor<Registry>;  // Unrestricted mailbox for subscription protocol
+};
+```
+
+### Usage
+
 ```cpp
 using MyApp = commrat::CommRaT<
-    commrat::Message::Data<TemperatureData>,
-    commrat::Message::Data<PressureData>,
-    commrat::Message::Command<ResetCmd>
+    Message::Data<TemperatureData>,
+    Message::Data<PressureData>,
+    Message::Command<ResetCmd>
 >;
-```
 
-**Provides:**
-- `MyApp::Module<OutputSpec, InputSpec, ...Commands>` - Module template
-- `MyApp::Mailbox<T>` - Mailbox template for type T
-- `MyApp::HistoricalMailbox<HistorySize>` - Buffered mailbox with get_data()
-- `MyApp::Introspection` - Schema export helper
-- `MyApp::get_message_id<T>()` - Compile-time message ID lookup
-- `MyApp::is_registered<T>` - Check if type is in registry
-- `MyApp::serialize<T>(message)` - Serialize message to bytes
-- `MyApp::deserialize<T>(buffer)` - Deserialize message from bytes
-- `MyApp::visit(buffer, visitor)` - Type dispatch with visitor pattern
-- `MyApp::dispatch(buffer, overload_set)` - Type dispatch with overload set
-- `MyApp::max_message_size` - Maximum message size constant
-- `MyApp::payload_types` - Type alias to tuple of all payload types
-
-**Header:** `<commrat/commrat.hpp>`
-
----
-
-## Module Base Class
-
-### Module<OutputSpec, InputSpec, ...CommandTypes>
-
-Base class for all CommRaT modules. Handles mailbox management, threading, subscription protocol, and message dispatch.
-
-```cpp
-template<typename UserRegistry,
-         typename OutputSpec,
-         typename InputSpec,
-         typename... CommandTypes>
-class Module;
-```
-
-**Template Parameters:**
-- `OutputSpec` - Output specification: `Output<T>`, `Outputs<T, U, ...>`, or `NoOutput`
-- `InputSpec` - Input specification: `Input<T>`, `Inputs<T, U, ...>`, `PeriodicInput`, or `LoopInput`
-- `CommandTypes...` - Optional command types handled by this module
-
-**Pure Virtual Methods:**
-
-User must override the appropriate `process()` method based on I/O specification:
-
-```cpp
-// PeriodicInput with single output
-void process(T& output) override;
-
-// PeriodicInput with multiple outputs
-void process(T1& out1, T2& out2, ...) override;
-
-// Input<T> with single output
-void process(const T& input, U& output) override;
-
-// Input<T> with multiple outputs
-void process(const T& input, U1& out1, U2& out2, ...) override;
-
-// Inputs<T, U, V> with single output
-void process(const T& in1, const U& in2, const V& in3, W& output) override;
-
-// Inputs<T, U, V> with multiple outputs
-void process(const T& in1, const U& in2, const V& in3, W1& out1, W2& out2, ...) override;
-
-// LoopInput with single output (no blocking, continuous)
-void process(T& output) override;
-```
-
-**Lifecycle Methods:**
-```cpp
-void start();  // Start module threads
-void stop();   // Stop module threads gracefully
-```
-
-**Command Handling:**
-```cpp
-// Override for each command type
-virtual void on_command(const CommandType& cmd);
-```
-
-**Protected Members:**
-```cpp
-const ModuleConfig& config_;  // Module configuration
-```
-
-**Header:** `<commrat/registry_module.hpp>`
-
-**Example:**
-```cpp
-class SensorModule : public MyApp::Module<
-    Output<SensorData>,
-    PeriodicInput
-> {
-protected:
-    void process(SensorData& output) override {
-        output = SensorData{.value = read_sensor()};
-    }
+class Sensor : public MyApp::Module2<Output<SensorData>, Period<Milliseconds(10)>> {
+    // ...
 };
 ```
 
 ---
 
-## I/O Specifications
+## Module2 Base Class
 
-### Output Specifications
+**Header:** `<commrat/module2.hpp>`
 
-**Output<T>** - Single output type
 ```cpp
-template<typename T>
-struct Output;
+template<typename Registry, typename... IOSpecs>
+class Module2;
 ```
 
-**Outputs<Ts...>** - Multiple output types
+When used via `MyApp::Module2<IOSpecs...>`, `Registry` is bound to `CommRaT`.
+
+### Template Parameters
+
+- `Registry` -- Message registry (bound automatically via `CommRaT::Module2`)
+- `IOSpecs...` -- I/O specifications: `Output<T>`, `Input<T>`, `SyncedInput<T>`, `Period<D>`
+
+### Public Type Aliases
+
 ```cpp
-template<typename... Ts>
-struct Outputs;
+using OutputData = typename IO::Meta::SingleOutputType;  // Payload type if exactly 1 output, else void
+using InputData  = typename IO::Meta::SingleInputType;   // Payload type if exactly 1 input, else void
 ```
 
-**NoOutput** - No output (sink module)
+### Constructor / Destructor
+
 ```cpp
-struct NoOutput;
+explicit Module2(const ModuleConfig& config);
+virtual ~Module2();  // Calls stop(), joins command threads, stops work mailbox
 ```
 
-**Example:**
+### Public Lifecycle Methods
+
 ```cpp
-// Single output
-Module<Output<Data>, Input<Sensor>>
-
-// Multiple outputs
-Module<Outputs<Raw, Filtered, Stats>, PeriodicInput>
-
-// No output (sink)
-Module<NoOutput, Input<LogData>>
+void start();  // Start mailboxes, subscribe inputs, launch data + command threads
+void stop();   // Set stop flag, unsubscribe inputs, stop outputs, join threads
 ```
 
-### Input Specifications
+### Protected Lifecycle Hooks
 
-**PeriodicInput** - Timer-driven execution
 ```cpp
-struct PeriodicInput;
-```
-- Executes `process()` at fixed intervals
-- Period specified in `ModuleConfig::period`
-- No input parameters to `process()`
-
-**LoopInput** - Maximum throughput execution
-```cpp
-struct LoopInput;
-```
-- Executes `process()` as fast as possible
-- No blocking, continuous loop
-- Use for computation-heavy modules
-
-**Input<T>** - Single continuous input
-```cpp
-template<typename T>
-struct Input;
-```
-- Blocks on `receive()` for messages of type T
-- `process(const T& input, OutputType& output)` called for each message
-- Automatic subscription to source module
-
-**Inputs<Ts...>** - Multiple synchronized inputs
-```cpp
-template<typename... Ts>
-struct Inputs;
-```
-- First type is primary (blocking receive)
-- Secondary inputs synchronized via `get_data(primary_timestamp)`
-- `process(const T1& in1, const T2& in2, ..., OutputType& output)` called when primary receives
-
-**Example:**
-```cpp
-// Periodic generation
-Module<Output<Data>, PeriodicInput>
-
-// Event-driven processing
-Module<Output<Filtered>, Input<Raw>>
-
-// Multi-sensor fusion
-Module<Output<Fused>, Inputs<IMU, GPS, Lidar>>
-
-// Maximum throughput
-Module<Output<Result>, LoopInput>
+virtual void on_start();  // Called at end of start() -- user override
+virtual void on_stop();   // Called at beginning of stop() -- user override
 ```
 
-**Header:** `<commrat/io_spec.hpp>`
+### Pure Virtual -- process()
+
+Signature is auto-determined from `IOSpecs`:
+
+```cpp
+// No inputs (timer-driven or loop-driven):
+void process(O1& out1, O2& out2, ...) override;
+
+// With continuous input:
+void process(const I1& in1, O1& out1, ...) override;
+
+// With continuous + synced inputs:
+void process(const I1& in1, Synced<I2> synced_in, ..., O1& out1, ...) override;
+```
+
+### Protected Metadata Accessors
+
+```cpp
+template<size_t InputIndex> uint64_t get_input_timestamp() const;
+template<size_t InputIndex> bool has_new_data() const;
+template<size_t InputIndex> bool is_input_valid() const;
+```
+
+All require `InputIndex < IO::Meta::num_inputs`.
+
+### Protected Member
+
+```cpp
+ModuleConfig config_;
+```
+
+### Threading Model
+
+- **1 data thread** -- runs `process()` in a loop (timer/input/loop driven)
+- **N command threads** -- one per output, blocking receive on CMD mailbox
+- **Work mailbox** -- no dedicated thread, used for outbound sends
 
 ---
 
-## Metadata Accessors
+## I/O Specification Tags
 
-Modules with inputs can access metadata about received messages.
+**Header:** `<commrat/module/io/io_spec.hpp>`
 
-### Index-Based Access
-
-Works for any number of inputs:
-
-```cpp
-// Get full metadata structure
-auto meta = get_input_metadata<0>();  // Primary input
-auto meta = get_input_metadata<1>();  // Secondary input
-
-// Convenience accessors
-uint64_t ts = get_input_timestamp<0>();
-bool fresh = has_new_data<1>();
-bool valid = is_input_valid<2>();
-```
-
-### Type-Based Access
-
-Works when input types are unique (limited to first 2 inputs currently):
-
-```cpp
-// Get metadata by type
-auto imu_meta = get_input_metadata<IMUData>();
-uint64_t gps_ts = get_input_timestamp<GPSData>();
-bool fresh = has_new_data<LidarData>();
-```
-
-**Note:** Type-based access limited to first 2 input types due to tuple unpacking implementation. Use index-based access for 3+ inputs.
-
-### InputMetadata Structure
+### Output\<T\>
 
 ```cpp
 template<typename T>
-struct InputMetadata {
-    uint64_t timestamp;          // From TimsHeader (nanoseconds since epoch)
-    uint32_t sequence_number;    // Message sequence number
-    uint32_t message_id;         // Message type ID
-    bool is_new_data;            // True if fresh, false if reused from history
-    bool is_valid;               // True if get_data succeeded, false if failed
+struct Output {
+    using Type = T;
+    static constexpr bool is_output = true;
 };
 ```
 
-**Example:**
+Declares a module output of type `T`. Multiple `Output<T>` allowed per module.
+
+### Input\<T\>
+
 ```cpp
-class FusionModule : public MyApp::Module<
-    Output<FusedData>,
-    Inputs<IMUData, GPSData>
-> {
-protected:
-    void process(const IMUData& imu, const GPSData& gps, FusedData& output) override {
-        auto imu_meta = get_input_metadata<0>();
-        auto gps_meta = get_input_metadata<1>();
-        
-        if (!gps_meta.is_new_data) {
-            std::cout << "GPS data is stale\n";
-        }
-        
-        output = fuse_sensors(imu, gps);
-    }
+template<typename T>
+struct Input {
+    using Type = T;
+    static constexpr bool is_input = true;
+    static constexpr bool is_continuous = true;
 };
 ```
 
-**Header:** `<commrat/module/metadata/input_metadata_accessors.hpp>`
+Continuous push-model input. At most one per module. Mutually exclusive with `Period<>`.
 
----
-
-## Configuration
-
-### ModuleConfig
-
-Configuration structure for module initialization.
+### SyncedInput\<T\>
 
 ```cpp
-struct ModuleConfig {
-    const char* name;                    // Module name (for logging)
-    uint8_t system_id;                   // System ID (0-255)
-    uint8_t instance_id;                 // Instance ID within system (0-255)
-    
-    // For periodic modules
-    Duration period{Milliseconds(0)};    // Execution period
-    
-    // For input modules (single source)
-    uint8_t source_system_id{0};
-    uint8_t source_instance_id{0};
-    uint32_t source_primary_output_type_id{0};  // For multi-output filtering
-    
-    // For multi-input modules
-    struct InputSource {
-        uint8_t system_id;
-        uint8_t instance_id;
-        Duration requested_period{Milliseconds(0)};
+template<typename T>
+struct SyncedInput {
+    using Type = T;
+    static constexpr bool is_input = true;
+    static constexpr bool is_synced = true;
+};
+```
+
+Pull-model secondary input. Uses `get_data(timestamp)` for synchronization. Multiple allowed.
+
+### Period\<DefaultPeriod\>
+
+```cpp
+template<auto DefaultPeriod>
+struct Period {
+    static constexpr auto default_period = DefaultPeriod;
+    static constexpr bool is_periodic = true;
+};
+```
+
+Timer-driven execution at fixed period. Mutually exclusive with `Input<>`.
+
+### Execution Mode Inference
+
+| Condition | Mode |
+|-----------|------|
+| `Input<T>` present | Input-driven (blocking receive) |
+| `Period<D>` present, no `Input<T>` | Timer-driven (periodic sleep) |
+| Neither | Loop-driven (max throughput) |
+
+Constraints enforced at compile time:
+- At most one `Input<T>`
+- At most one `Period<D>`
+- `Input<T>` and `Period<D>` are mutually exclusive
+
+### Type Traits
+
+```cpp
+template<typename T> inline constexpr bool is_output_v;
+template<typename T> inline constexpr bool is_input_v;
+template<typename T> inline constexpr bool is_synced_input_v;
+template<typename T> inline constexpr bool is_period_v;
+template<typename T> inline constexpr bool is_continuous_input_v;
+template<typename T> inline constexpr bool is_synced_input_instance_v;
+template<typename T> inline constexpr bool is_module_output_v;
+```
+
+### BuildIOTuple\<Registry, IOSpecs...\>
+
+Compile-time builder that converts I/O specs to a tuple of instances.
+
+```cpp
+template<typename Registry, typename... IOSpecs>
+struct BuildIOTuple {
+    using type = /* std::tuple<ModuleOutput<...>, ContinuousInput<...>, ...> */;
+    static constexpr size_t num_outputs;
+    static constexpr size_t num_continuous_inputs;
+    static constexpr size_t num_synced_inputs;
+    static constexpr bool is_input_driven;
+    static constexpr bool is_timer_driven;
+    static constexpr bool is_loop_driven;
+
+    struct Meta {
+        static constexpr size_t num_outputs;
+        static constexpr size_t num_inputs;         // continuous + synced
+        static constexpr bool has_inputs;
+        static constexpr bool has_outputs;
+        static constexpr bool is_input_driven;
+        static constexpr bool is_timer_driven;
+        static constexpr bool is_loop_driven;
+        static constexpr size_t primary_input_index;
+        static constexpr bool has_primary_input;
+        static constexpr auto period;               // Milliseconds (timer-driven only)
+
+        using OutputTypes;      // std::tuple<T1, T2, ...>
+        using InputTypes;       // std::tuple<T1, T2, ...>
+        using InputWrappers;    // Wrapper types for ProcessorBase
+        using SingleOutputType; // T if exactly 1 output, else void
+        using SingleInputType;  // T if exactly 1 input, else void
     };
-    sertial::fixed_vector<InputSource, 8> input_sources;
-    
-    // Multi-input synchronization
-    uint64_t sync_tolerance_ns{100'000'000};  // 100ms default
+
+    static constexpr auto output_indices();         // std::array mapping logical -> tuple indices
+    static constexpr auto input_indices();
+
+    template<size_t OutputIndex, typename IOTupleType>
+    static constexpr auto& get_output(IOTupleType&& tuple);
+
+    template<size_t InputIndex, typename IOTupleType>
+    static constexpr auto& get_input(IOTupleType&& tuple);
 };
 ```
-
-**Example:**
-```cpp
-// Periodic producer
-ModuleConfig sensor_config{
-    .name = "Sensor",
-    .system_id = 10,
-    .instance_id = 1,
-    .period = Milliseconds(100)  // 10 Hz
-};
-
-// Single-input consumer
-ModuleConfig filter_config{
-    .name = "Filter",
-    .system_id = 20,
-    .instance_id = 1,
-    .source_system_id = 10,
-    .source_instance_id = 1
-};
-
-// Multi-input fusion
-ModuleConfig fusion_config{
-    .name = "Fusion",
-    .system_id = 30,
-    .instance_id = 1,
-    .period = Milliseconds(10),
-    .input_sources = {
-        {.system_id = 10, .instance_id = 1},  // IMU
-        {.system_id = 11, .instance_id = 1}   // GPS
-    },
-    .sync_tolerance_ns = 50'000'000  // 50ms
-};
-```
-
-**Header:** `<commrat/registry_module.hpp>`
 
 ---
 
-## Threading Abstractions
+## Synced Wrapper
 
-CommRaT provides platform-agnostic threading primitives for portability and future real-time platform support (e.g., libevl).
-
-### Thread
-
-Wrapper around `std::thread` (or platform equivalent).
-
-```cpp
-class Thread {
-public:
-    template<typename Func>
-    Thread(Func&& func);
-    
-    void join();
-    void detach();
-};
-```
-
-### Synchronization Primitives
-
-```cpp
-class Mutex;              // std::mutex wrapper
-class SharedMutex;        // std::shared_mutex wrapper
-class Lock;               // std::lock_guard wrapper
-class SharedLock;         // std::shared_lock wrapper
-```
-
-**Example:**
-```cpp
-Mutex mutex_;
-std::vector<int> data_;
-
-void add_data(int value) {
-    Lock lock(mutex_);
-    data_.push_back(value);
-}
-```
-
-**Header:** `<commrat/threading.hpp>`
-
-**Note:** Always use CommRaT abstractions instead of `std::` types directly to enable future platform-specific implementations.
-
----
-
-## Timestamp Abstractions
-
-Platform-agnostic time and duration types.
-
-### Timestamp
-
-```cpp
-using Timestamp = std::chrono::steady_clock::time_point;
-```
-
-### Duration
-
-```cpp
-using Duration = std::chrono::nanoseconds;
-using Nanoseconds = std::chrono::nanoseconds;
-using Microseconds = std::chrono::microseconds;
-using Milliseconds = std::chrono::milliseconds;
-using Seconds = std::chrono::seconds;
-```
-
-### Time Utilities
-
-```cpp
-class Time {
-public:
-    static Timestamp now();
-    static void sleep(Duration duration);
-};
-```
-
-**Example:**
-```cpp
-auto start = Time::now();
-// ... do work ...
-auto end = Time::now();
-auto elapsed = std::chrono::duration_cast<Milliseconds>(end - start);
-
-Time::sleep(Milliseconds(100));
-```
-
-**Header:** `<commrat/timestamp.hpp>`
-
----
-
-## Mailbox Interface
-
-Low-level mailbox interface (typically not used directly - Module class handles this).
-
-### Mailbox<Registry>
-
-```cpp
-template<typename Registry>
-class Mailbox {
-public:
-    explicit Mailbox(uint32_t address);
-    
-    // Type-safe send/receive
-    template<typename T>
-    auto send(const T& message, uint32_t dest_address) -> MailboxResult<void>;
-    
-    template<typename T>
-    auto receive() -> MailboxResult<ReceivedMessage<T>>;
-    
-    // Visitor-based polymorphic receive
-    template<typename Visitor>
-    auto receive_any(Visitor&& visitor) -> MailboxResult<void>;
-};
-```
-
-### ReceivedMessage<T>
+**Header:** `<commrat/module/io/synced.hpp>`
 
 ```cpp
 template<typename T>
-struct ReceivedMessage {
-    TimsHeader header;
-    T message;
-};
+class Synced;
 ```
+
+Zero-copy wrapper for synchronized secondary input data. Holds `const T*` with validity/freshness metadata.
+
+### States
+
+- **Fresh**: `get_data()` found data matching requested timestamp exactly
+- **Stale**: Valid data, but not an exact timestamp match
+- **Invalid**: No data available
+
+### Public Type Alias
+
+```cpp
+using value_type = T;
+```
+
+### Constructors
+
+```cpp
+constexpr Synced() noexcept;                             // Invalid state
+constexpr Synced(const T& data, bool is_fresh) noexcept; // From reference
+```
+
+### Validity Checks (const)
+
+```cpp
+constexpr explicit operator bool() const noexcept;  // true if FRESH
+constexpr bool is_fresh() const noexcept;            // true if valid AND fresh
+constexpr bool has_stale() const noexcept;           // true if valid but NOT fresh
+constexpr bool is_valid() const noexcept;            // true if any valid data
+```
+
+### Data Access (const, zero-copy)
+
+```cpp
+constexpr const T& value() const noexcept;                        // Fresh only (asserts)
+constexpr const T& stale() const noexcept;                        // Any valid (asserts)
+constexpr const T& value_or(const T& default_value) const noexcept;  // Fresh or default
+constexpr const T& stale_or(const T& default_value) const noexcept;  // Valid or default
+constexpr const T& operator*() const noexcept;                    // Alias for stale()
+constexpr const T* operator->() const noexcept;                   // Member access (asserts valid)
+```
+
+### Modification (non-const -- internal use by SyncedInput)
+
+```cpp
+constexpr Synced& operator=(const T& data) noexcept;  // Set fresh data
+constexpr void mark_stale() noexcept;                  // Keep data, mark not fresh
+constexpr void reset() noexcept;                       // Clear to invalid
+```
+
+---
+
+## ModuleOutput
+
+**Header:** `<commrat/module/io/output/module_output.hpp>`
+
+```cpp
+template<typename CommratApp, typename T, std::size_t SLOTS = 100>
+class ModuleOutput;
+```
+
+Output with timestamped ring buffer. Provides publish, get_data, workspace, and subscription management.
+
+### Public Type Aliases
+
+```cpp
+using Type = T;
+using ConfigType = OutputConfig;
+using DataMessage = Message::Data<T>;
+using message_def_type = DataMessage;
+using CmdMailbox = TypedMailbox<CommratApp, SubscribeRequestPayload, SubscribeReplyPayload,
+                                UnsubscribeRequestPayload, UnsubscribeReplyPayload,
+                                GetDataRequestPayload<T>, GetDataReplyPayload<T>,
+                                GetNextDataRequestPayload<T>, GetNextDataReplyPayload<T>>;
+using PublishMailbox = TypedMailbox<CommratApp, T>;
+```
+
+### Constructors
+
+```cpp
+ModuleOutput();  // Default (uninitialized, must call initialize())
+ModuleOutput(SystemId system_id, InstanceId instance_id,
+             Milliseconds default_tolerance = Milliseconds(50));
+```
+
+### Lifecycle
+
+```cpp
+void initialize(uint8_t sys_id, uint8_t inst_id, Milliseconds tolerance);  // Allocation phase
+void start();  // Activate mailboxes
+void stop();   // Deactivate mailboxes
+```
+
+### Publishing
+
+```cpp
+void publish(T&& data, Timestamp timestamp);       // Move-publish to all subscribers
+void publish(const T& data, Timestamp timestamp);   // Copy-publish
+T& get_workspace();                                  // Zero-copy workspace buffer
+void publish_workspace(Timestamp timestamp);         // Move workspace into buffer + send
+```
+
+### Data Queries
+
+```cpp
+const TimsMessage<T>* get_data(uint64_t timestamp,
+                                Milliseconds tolerance = Milliseconds(-1),
+                                InterpolationMode mode = InterpolationMode::NEAREST) const;
+std::pair<uint64_t, uint64_t> get_timestamp_range() const;
+std::size_t buffer_size() const;
+void clear_buffer();
+```
+
+### Mailbox Access
+
+```cpp
+CmdMailbox& get_cmd_mailbox();
+uint32_t get_cmd_address() const;
+```
+
+### Command Handlers
+
+```cpp
+auto handle_subscribe_request(const SubscribeRequestPayload& req) -> SubscribeReplyPayload;
+auto handle_unsubscribe_request(const UnsubscribeRequestPayload& req) -> UnsubscribeReplyPayload;
+auto handle_get_data_request(const GetDataRequestPayload<T>& req) -> GetDataReplyPayload<T>;
+auto handle_get_next_data_request(const GetNextDataRequestPayload<T>& req) -> GetNextDataReplyPayload<T>;
+```
+
+### Constants
+
+```cpp
+static constexpr std::size_t kMaxSubscribers = 16;
+```
+
+---
+
+## ContinuousInput
+
+**Header:** `<commrat/module/io/input/continuous_input.hpp>`
+
+```cpp
+template<typename Registry, typename OutputType>
+class ContinuousInput : public CmdInput<Registry, OutputType>;
+```
+
+Push-model input. Receives continuous data stream via subscription to a producer.
+
+### Public Type Aliases
+
+```cpp
+using DataMessage = Message::Data<OutputType>;
+using DataMailbox = TypedMailbox<Registry, OutputType>;
+```
+
+### Constructors
+
+```cpp
+ContinuousInput();  // Default (uninitialized)
+ContinuousInput(MailboxFor<Registry>& work_mbx, MailboxFor<Registry>& data_mbx,
+                uint8_t producer_system_id, uint8_t producer_instance_id,
+                Milliseconds requested_period = Milliseconds::zero(),
+                Milliseconds poll_timeout = Milliseconds(100),
+                Milliseconds cmd_timeout = Milliseconds(1000));
+```
+
+### Initialization / Lifecycle
+
+```cpp
+void initialize(typename Registry::System::WorkMailbox& work_mbx,
+                const MailboxConfig& data_mbx_config,
+                uint8_t producer_system_id, uint8_t producer_instance_id,
+                Milliseconds requested_period = Milliseconds::zero(),
+                Milliseconds poll_timeout = Milliseconds(100),
+                Milliseconds cmd_timeout = Milliseconds(1000));
+void start();  // Activate DATA mailbox
+void stop();   // Deactivate DATA mailbox
+```
+
+### Subscription Protocol
+
+```cpp
+bool subscribe(Milliseconds& actual_period, Milliseconds timeout = Milliseconds::zero());
+bool unsubscribe(Milliseconds timeout = Milliseconds::zero());
+```
+
+### Data Access
+
+```cpp
+bool poll_data();                            // Blocking receive into internal buffer (zero-copy)
+const OutputType& get_payload() const;       // Last received payload
+const TimsHeader& get_header() const;        // Last received header
+uint64_t get_timestamp() const;              // Header timestamp (nanoseconds)
+uint32_t get_sequence_number() const;
+uint32_t get_message_type() const;
+```
+
+### Status
+
+```cpp
+bool has_data() const;           // True if last poll_data() succeeded
+bool is_valid() const;           // Alias for has_data()
+bool is_fresh() const;           // True if valid (continuous is always fresh when valid)
+bool is_subscribed() const;
+Milliseconds get_actual_period() const;
+```
+
+---
+
+## SyncedInputImpl
+
+**Header:** `<commrat/module/io/input/synced_input.hpp>`
+
+```cpp
+template<typename Registry, typename OutputType>
+class SyncedInputImpl : public CmdInput<Registry, OutputType>;
+```
+
+Pull-model input. Retrieves data via RPC `get_data(timestamp)` to producer's CMD mailbox.
+
+### Public Type Alias
+
+```cpp
+using DataMessage = Message::Data<OutputType>;
+```
+
+### Constructors
+
+```cpp
+SyncedInputImpl();  // Default (uninitialized)
+SyncedInputImpl(MailboxFor<Registry>& work_mbx,
+                uint8_t producer_system_id, uint8_t producer_instance_id,
+                Milliseconds tolerance = Milliseconds(50),
+                InterpolationMode interpolation = InterpolationMode::NEAREST,
+                Milliseconds cmd_timeout = Milliseconds(100));
+```
+
+### Initialization
+
+```cpp
+void initialize(typename Registry::System::WorkMailbox& work_mbx,
+                uint8_t producer_system_id, uint8_t producer_instance_id,
+                Milliseconds tolerance = Milliseconds(50),
+                InterpolationMode interpolation = InterpolationMode::NEAREST,
+                Milliseconds cmd_timeout = Milliseconds(100));
+```
+
+### Data Retrieval (RPC)
+
+```cpp
+bool get_data(const Timestamp& timestamp, const TimsMessage<OutputType>*& msg,
+              Milliseconds timeout = Milliseconds(0));
+bool get_next_data(const TimsMessage<OutputType>*& msg,
+                   Milliseconds timeout = Milliseconds(0));
+```
+
+### Data Access
+
+```cpp
+Synced<OutputType> get_payload() const;     // Returns Synced wrapper with validity/freshness
+const TimsHeader& get_header() const;
+uint64_t get_timestamp() const;
+uint32_t get_sequence_number() const;
+uint32_t get_message_id() const;
+```
+
+### Status
+
+```cpp
+bool is_valid() const;   // True if last get_data/get_next_data found data
+bool is_fresh() const;   // True if data was an exact timestamp match
+```
+
+---
+
+## Messages and Serialization
+
+**Header:** `<commrat/messages.hpp>`
 
 ### TimsHeader
 
 ```cpp
 struct TimsHeader {
-    uint64_t timestamp;
-    uint32_t sequence_number;
-    uint32_t message_id;
-    uint8_t priority;
-    uint8_t flags;
-    uint16_t source_system_id;
-    uint16_t source_instance_id;
-    // ... additional fields
+    uint32_t msg_type;      // Message type ID
+    uint32_t msg_size;      // Set by serialization
+    uint64_t timestamp;     // Set by send()
+    uint32_t seq_number;    // Set by send()
+    uint32_t dest;          // Destination mailbox address
+    uint32_t src;           // Source mailbox address (for replies)
+    uint32_t flags;
 };
 ```
 
-**Header:** `<commrat/mailbox.hpp>`
+### TimsMessage\<PayloadT\>
 
-**Note:** Most users work with `Module` class and never directly use mailboxes.
+```cpp
+template<typename PayloadT>
+struct TimsMessage {
+    TimsHeader header;
+    PayloadT payload;
+    using payload_type = PayloadT;
+};
+```
+
+Aggregate type (no constructors). Use designated initializers.
+
+### Type Traits
+
+```cpp
+template<typename T> inline constexpr bool is_commrat_message_v;  // true for TimsMessage<P>
+template<typename T> using message_payload_t;                     // Extract PayloadT from TimsMessage<P>
+```
+
+### Serialization Functions
+
+```cpp
+template<typename T> auto serialize(T& message);                            // Requires is_commrat_message_v<T>
+template<typename T> auto deserialize(std::span<const std::byte> data);
+template<typename T> auto deserialize(const uint8_t* data, size_t size);    // TIMS compatibility
+```
+
+### Compile-Time Size Utilities
+
+```cpp
+template<typename T> inline constexpr size_t max_message_buffer_size_v;
+template<typename T> inline constexpr size_t packed_message_size_v;
+template<typename T> inline constexpr bool message_has_padding_v;
+```
 
 ---
 
 ## Message Definitions
 
-### Message Namespace
+**Header:** `<commrat/messaging/message_id.hpp>`, `<commrat/messaging/message_helpers.hpp>`
 
-Helper types for defining messages in the registry:
+### MessageDefinition
+
+```cpp
+template<
+    typename PayloadT,
+    MessagePrefix Prefix_ = MessagePrefix::UserDefined,
+    auto SubPrefix_ = UserSubPrefix::Data,
+    uint16_t ID_ = 0,           // 0 = auto-assign
+    typename ReplyT = void      // void = no reply
+>
+struct MessageDefinition;
+```
+
+#### Static Members
+
+```cpp
+static constexpr MessagePrefix prefix;
+static constexpr uint8_t subprefix;
+static constexpr uint16_t local_id;          // 0 = auto-assigned at registry construction
+static constexpr bool needs_auto_id;         // true if local_id == 0
+static constexpr bool is_request;            // true if ReplyT != void
+static constexpr bool is_reply;              // true if derived as reply (negative ID)
+static constexpr bool has_reply;             // true if ReplyT != void
+static constexpr uint16_t request_id;        // For replies: the request's ID
+```
+
+#### Type Aliases
+
+```cpp
+using Payload = PayloadT;
+using ReplyPayload = ReplyT;
+using ReplyMessageDef = /* auto-generated MessageDefinition with negated ID, or void */;
+```
+
+### Message ID Structure
+
+Format: `0xPSMM` where P=prefix, S=subprefix, MM=message ID (2 bytes).
+
+```cpp
+constexpr uint32_t make_message_id(uint8_t prefix, uint8_t subprefix, uint16_t id);
+constexpr uint32_t system_message_id(SystemSubPrefix subprefix, uint16_t id);
+constexpr uint32_t user_message_id(UserSubPrefix subprefix, uint16_t id);
+```
+
+### Enums
+
+```cpp
+enum class MessagePrefix : uint8_t { System = 0x00, UserDefined = 0x01 };
+enum class SystemSubPrefix : uint8_t { Subscription = 0x00, Control = 0x01, Reserved = 0xFF };
+enum class UserSubPrefix : uint8_t { Data = 0x00, Commands = 0x01, Events = 0x02,
+                                      GetData = 0x03, GetNextData = 0x04, Custom = 0x05 };
+```
+
+### Constants
+
+```cpp
+static constexpr uint16_t MAX_MESSAGE_ID = 0x7FFF;  // Sign bit reserved for reply IDs
+```
+
+### Convenience Aliases (Message:: namespace)
 
 ```cpp
 namespace Message {
-    // Data message (user data types)
-    template<typename T>
-    struct Data;
-    
-    // Command message (module commands)
-    template<typename T>
-    struct Command;
+    // Data<T> -- UserDefined::Data, auto-ID. Includes GetData protocol support.
+    template<typename T, MessagePrefix Prefix = UserDefined, uint16_t LocalID = 0>
+    using Data = DataMessageDef<T, Prefix, LocalID>;
+
+    // Command<T, ReplyT> -- UserDefined::Commands, auto-ID. Optional reply type.
+    template<typename T, typename ReplyT = void, MessagePrefix Prefix = UserDefined, uint16_t LocalID = 0>
+    using Command = MessageDefinition<T, Prefix, UserSubPrefix::Commands, LocalID, ReplyT>;
+
+    // Event<T> -- UserDefined::Events, auto-ID.
+    template<typename T, MessagePrefix Prefix = UserDefined, uint16_t LocalID = 0>
+    using Event = MessageDefinition<T, Prefix, UserSubPrefix::Events, LocalID>;
+
+    // DataWith<PayloadT>::Commands<CmdDefs...> -- Data with associated commands.
+    template<typename PayloadT>
+    struct DataWith {
+        template<typename... CommandTypes>
+        using Commands = DataWithCommands<PayloadT, CommandTypes...>;
+    };
 }
 ```
 
-**Usage:**
-```cpp
-struct TemperatureData { float temp; };
-struct ResetCmd { bool clear_state; };
-
-using MyApp = CommRaT<
-    Message::Data<TemperatureData>,
-    Message::Command<ResetCmd>
->;
-```
-
-### System Messages
-
-Automatically included in every registry:
+`Message::Data<T>` additionally provides:
 
 ```cpp
-enum class SystemMessages : uint32_t {
-    SubscribeRequest   = 0x00000001,
-    SubscribeReply     = 0x00000002,
-    UnsubscribeRequest = 0x00000003,
-    UnsubscribeReply   = 0x00000004
-};
-```
-
-**Header:** `<commrat/messages.hpp>`
-
----
-
-## Serialization Integration
-
-CommRaT uses SeRTial for automatic serialization. Your message types must be SeRTial-compatible (POD structs work automatically).
-
-### Requirements
-
-Message types must:
-- Be POD (Plain Old Data) or SeRTial-serializable
-- Have default constructors
-- Use bounded containers: `sertial::fixed_vector<T, N>`, `sertial::fixed_string<N>`
-- Avoid `std::vector`, `std::string` in real-time paths
-
-**Valid:**
-```cpp
-struct SensorData {
-    float value;
-    uint64_t timestamp;
-    sertial::fixed_vector<float, 10> history;
-};
-```
-
-**Invalid (dynamic allocation):**
-```cpp
-struct BadData {
-    std::vector<float> values;  // Dynamic allocation!
-    std::string name;           // Dynamic allocation!
-};
+using GetDataRequestDef;
+using GetDataReplyDef;
+using GetNextDataRequestDef;
+using GetNextDataReplyDef;
 ```
 
 ---
 
-## Address Calculation
+## Message Registry
 
-Modules have hierarchical addressing:
+**Header:** `<commrat/messaging/message_registry.hpp>`
 
 ```cpp
-// Base address calculation
-uint32_t base = calculate_base_address(system_id, instance_id);
-
-// Mailbox offsets (per output type)
-uint32_t cmd_mbx  = base + output_index * 16 + 0;   // Command
-uint32_t work_mbx = base + output_index * 16 + 4;   // Subscription protocol
-uint32_t pub_mbx  = base + output_index * 16 + 8;   // Publish control
-
-// Shared DATA mailbox (all inputs)
-uint32_t data_mbx = base + 12;  // Fixed offset
+template<typename... MessageDefs>
+class MessageRegistry;
 ```
 
-**Note:** Address calculation is handled internally by Module class.
+Compile-time registry with auto-ID assignment, reply expansion, GetData expansion, and collision detection.
+
+### Public Type Aliases
+
+```cpp
+using MessageDefsTuple = /* std::tuple of all processed MessageDefinitions (after expansion) */;
+using PayloadTypes = /* std::tuple of all payload types */;
+template<uint32_t ID> using PayloadTypeFor = /* payload type for given message ID */;
+```
+
+### Public Constants
+
+```cpp
+static constexpr size_t num_types;          // Number of user-provided MessageDefs
+static constexpr size_t max_message_size;   // Max serialized size across all types
+template<uint32_t ID> static constexpr bool has_message_id;
+```
+
+### Public Static Methods
+
+```cpp
+static constexpr size_t size();                        // Actual count after expansion
+
+template<typename T> static constexpr bool is_registered;
+template<typename T> static constexpr uint32_t get_message_id();  // requires is_registered<T>
+
+template<typename... SpecificTypes>
+static constexpr size_t max_size_for_types();          // Max size for subset of types
+
+template<typename T> static auto serialize(T& message);                     // Payload type
+template<typename PayloadT> static auto serialize(TimsMessage<PayloadT>&);  // Full message
+template<typename T> static auto deserialize(std::span<const std::byte>);   // Payload or TimsMessage
+
+template<typename Visitor>
+static bool visit(uint32_t msg_id, std::span<const std::byte> data, Visitor&& visitor);
+
+template<typename Callback>
+static bool dispatch(uint32_t msg_id, std::span<const std::byte> data, Callback&& callback);
+
+static constexpr size_t max_buffer_size();
+```
 
 ---
 
-## Error Handling
+## Module Configuration
 
-CommRaT uses `std::optional` and result types for error handling (no exceptions in real-time paths).
+**Header:** `<commrat/module/module_config.hpp>`
+
+### ModuleConfig
 
 ```cpp
-template<typename T>
-using MailboxResult = std::optional<T>;
+struct ModuleConfig {
+    std::string name;
+
+    OutputConfig outputs = SimpleOutputConfig{.system_id = 0, .instance_id = 0};
+    InputConfig inputs = NoInputConfig{};
+
+    std::optional<std::chrono::milliseconds> period{std::chrono::milliseconds{100}};
+    size_t message_slots{10};
+    size_t max_subscribers{8};
+    int priority{10};
+    bool realtime{false};
+
+    rfl::DefaultVal<uint32_t> cmd_message_slots = DEFAULT_CMD_SLOTS;   // 10
+    rfl::DefaultVal<uint32_t> data_message_slots = DEFAULT_DATA_SLOTS; // 50
+};
 ```
 
-**Example:**
+### Output Configuration Accessors
+
 ```cpp
-auto result = mailbox.receive<SensorData>();
-if (result) {
-    auto& msg = result->message;
-    process(msg);
-} else {
-    // Receive failed
+uint8_t system_id() const;              // NoOutput or SimpleOutput
+uint8_t instance_id() const;            // NoOutput or SimpleOutput
+uint8_t system_id(size_t index) const;  // MultiOutput
+uint8_t instance_id(size_t index) const;// MultiOutput
+bool has_no_output() const;
+bool has_simple_output() const;
+bool has_multi_output_config() const;
+```
+
+### Input Configuration Accessors
+
+```cpp
+uint8_t source_system_id() const;                // SingleInput
+uint8_t source_instance_id() const;              // SingleInput
+const std::vector<MultiInputConfig::InputSource>& input_sources() const;  // MultiInput
+std::chrono::milliseconds sync_tolerance() const;                         // MultiInput
+size_t history_buffer_size() const;                                       // MultiInput
+uint8_t input_system_id(size_t index) const;                              // MultiInput
+uint8_t input_instance_id(size_t index) const;                            // MultiInput
+bool has_no_input() const;
+bool has_single_input() const;
+bool has_multi_input_config() const;
+```
+
+### Output Config Variants
+
+```cpp
+struct NoOutputConfig     { uint8_t system_id{0}; uint8_t instance_id{0}; };
+struct SimpleOutputConfig { uint8_t system_id{0}; uint8_t instance_id{0}; };
+struct MultiOutputConfig  {
+    struct OutputAddress { uint8_t system_id{0}; uint8_t instance_id{0}; };
+    std::vector<OutputAddress> addresses;
+};
+using OutputConfig = rfl::TaggedUnion<"output_type", NoOutputConfig, SimpleOutputConfig, MultiOutputConfig>;
+```
+
+### Input Config Variants
+
+```cpp
+struct NoInputConfig {};
+struct SingleInputConfig { uint8_t source_system_id{0}; uint8_t source_instance_id{0}; };
+struct MultiInputConfig {
+    struct InputSource {
+        uint8_t system_id{0};
+        uint8_t instance_id{0};
+        bool is_primary{false};
+        mutable size_t input_index{0};
+    };
+    std::vector<InputSource> sources;
+    size_t history_buffer_size{100};
+    std::chrono::milliseconds sync_tolerance{50};
+};
+using InputConfig = rfl::TaggedUnion<"input_type", NoInputConfig, SingleInputConfig, MultiInputConfig>;
+```
+
+---
+
+## Timestamp / Time
+
+**Header:** `<commrat/platform/timestamp.hpp>`
+
+### Types
+
+```cpp
+using Timestamp    = uint64_t;                    // Nanoseconds since epoch
+using Nanoseconds  = std::chrono::nanoseconds;
+using Microseconds = std::chrono::microseconds;
+using Milliseconds = std::chrono::milliseconds;
+using Seconds      = std::chrono::seconds;
+using Minutes      = std::chrono::minutes;
+using Hours        = std::chrono::hours;
+```
+
+### Time Class
+
+```cpp
+class Time {
+public:
+    enum class ClockSource { SYSTEM_CLOCK, STEADY_CLOCK, HIGH_RES_CLOCK,
+                             REALTIME_CLOCK, MONOTONIC_CLOCK };
+
+    static Timestamp now() noexcept;
+    static Timestamp get_timestamp(ClockSource source = ClockSource::STEADY_CLOCK) noexcept;
+    static void set_clock_source(ClockSource source) noexcept;  // Not thread-safe, call once
+
+    // Conversions
+    template<typename Rep, typename Period>
+    static constexpr Timestamp to_nanoseconds(std::chrono::duration<Rep, Period> d) noexcept;
+    template<typename Duration>
+    static constexpr Duration from_nanoseconds(Timestamp ns) noexcept;
+    static constexpr Timestamp milliseconds_to_ns(uint64_t ms) noexcept;
+    static constexpr Timestamp microseconds_to_ns(uint64_t us) noexcept;
+    static constexpr uint64_t ns_to_milliseconds(Timestamp ns) noexcept;
+    static constexpr uint64_t ns_to_microseconds(Timestamp ns) noexcept;
+
+    // Comparison
+    static constexpr Timestamp diff(Timestamp t1, Timestamp t2) noexcept;
+    static constexpr bool is_within_tolerance(Timestamp ts, Timestamp target, Timestamp tol_ns) noexcept;
+
+    // Sleep
+    static void sleep_ns(Timestamp ns) noexcept;
+    template<typename Rep, typename Period>
+    static void sleep(std::chrono::duration<Rep, Period> duration) noexcept;
+};
+```
+
+### User-Defined Literals
+
+```cpp
+namespace commrat::literals {
+    constexpr Timestamp operator""_ns(unsigned long long ns) noexcept;
+    constexpr Timestamp operator""_us(unsigned long long us) noexcept;
+    constexpr Timestamp operator""_ms(unsigned long long ms) noexcept;
+    constexpr Timestamp operator""_s(unsigned long long s) noexcept;
 }
 ```
 
 ---
 
-## Compile-Time Features
+## Threading Abstractions
 
-### Message ID Calculation
+**Header:** `<commrat/platform/threading.hpp>`
 
-Message IDs computed at compile time:
-
-```cpp
-constexpr uint32_t id = MyApp::get_message_id<TemperatureData>();
-static_assert(id == expected_id, "Message ID mismatch");
-```
-
-### Type Safety
-
-All type mismatches caught at compile time:
+### Enums
 
 ```cpp
-// ERROR: Wrong input type - won't compile
-class BadModule : public MyApp::Module<
-    Output<DataA>,
-    Input<DataB>  // If DataB not in registry
-> {};
+enum class ThreadPriority   { IDLE = 0, LOW = 10, NORMAL = 50, HIGH = 75, REALTIME = 99 };
+enum class SchedulingPolicy { NORMAL, FIFO, ROUND_ROBIN, DEADLINE };
 ```
 
-### Zero Overhead
+### ThreadConfig
 
-All registry lookups and type dispatch resolved at compile time - no runtime cost.
+```cpp
+struct ThreadConfig {
+    std::string name{"unnamed"};
+    ThreadPriority priority = ThreadPriority::NORMAL;
+    SchedulingPolicy policy = SchedulingPolicy::NORMAL;
+    int cpu_affinity = -1;   // -1 = no affinity
+    size_t stack_size = 0;   // 0 = default
+};
+```
+
+### Thread
+
+```cpp
+class Thread {
+public:
+    Thread();                                    // Default (no thread)
+    template<typename Func> explicit Thread(Func&& func);  // Start with default config
+    template<typename Func> Thread(const ThreadConfig& config, Func&& func);
+    explicit Thread(const ThreadConfig& config); // Config only, call start() later
+    ~Thread();                                   // Joins if joinable
+
+    Thread(Thread&&) = default;
+    Thread& operator=(Thread&&) = default;
+
+    template<typename Func> void start(Func&& func);
+    void join();
+    void detach();
+    bool joinable() const noexcept;
+    std::thread::native_handle_type native_handle();
+    std::thread::id get_id() const noexcept;
+    const ThreadConfig& config() const noexcept;
+};
+```
+
+### Synchronization
+
+```cpp
+class Mutex {
+public:
+    void lock();
+    bool try_lock();
+    void unlock();
+    std::mutex& native();
+};
+
+class SharedMutex {
+public:
+    void lock();              // Exclusive (write)
+    void lock_shared();       // Shared (read)
+    bool try_lock();
+    bool try_lock_shared();
+    void unlock();
+    void unlock_shared();
+    std::shared_mutex& native();
+};
+
+using Lock             = std::lock_guard<Mutex>;
+using UniqueLock       = std::unique_lock<Mutex>;
+using SharedLock       = std::shared_lock<SharedMutex>;
+using UniqueLockShared = std::unique_lock<SharedMutex>;
+
+class ConditionVariable {
+public:
+    void notify_one() noexcept;
+    void notify_all() noexcept;
+    void wait(std::unique_lock<std::mutex>& lock);
+    template<typename Predicate> void wait(std::unique_lock<std::mutex>& lock, Predicate pred);
+    template<typename Rep, typename Period>
+    std::cv_status wait_for(std::unique_lock<std::mutex>& lock,
+                            const std::chrono::duration<Rep, Period>& rel_time);
+};
+```
+
+### Convenience Macros
+
+```cpp
+Synchronized(mutex) { /* exclusive critical section */ }
+ReadLocked(mutex)    { /* shared read section */ }
+WriteLocked(mutex)   { /* exclusive write section */ }
+```
 
 ---
 
-## Introspection System
+## Introspection
 
-### MyApp::Introspection
+**Header:** `<commrat/introspection/introspection_helper.hpp>`
 
-Helper class for exporting message schemas (CommRaT metadata + SeRTial layout).
+```cpp
+using Introspection = MyApp::Introspection;  // IntrospectionHelper<CommRaT>
+```
 
-**Header:** `<commrat/introspection.hpp>`
-
-#### export_as<T, Writer>()
-
-Export complete schema for a single message type.
+### Methods
 
 ```cpp
 template<typename T, typename Writer = rfl::json::Writer>
 static std::string export_as();
-```
 
-**Returns:** Formatted string containing:
-- **CommRaT metadata**: message_id, payload_type, full_type, max_message_size, registry_name
-- **SeRTial layout**: Full `TimsMessage<T>` structure (header + payload) with field names, types, sizes, offsets
-- **JSON schema**: Embedded schema in `type_schema` field
-
-**Example:**
-```cpp
-// Export to JSON (default)
-auto json = MyApp::Introspection::export_as<TemperatureData>();
-
-// Export to YAML
-auto yaml = MyApp::Introspection::export_as<TemperatureData, rfl::yaml::Writer>();
-```
-
-**Output structure:**
-```json
-{
-  "commrat": {
-    "message_id": 16777219,
-    "payload_type": "TemperatureData",
-    "full_type": "commrat::TimsMessage<TemperatureData>",
-    "max_message_size": 104,
-    "registry_name": "MyApp"
-  },
-  "layout": {
-    "name": "commrat::TimsMessage<TemperatureData>",
-    "sizeof_bytes": 40,
-    "base_packed_size": 40,
-    "max_packed_size": 40,
-    "has_variable_fields": false,
-    "field_count": 2,
-    "field_names": ["header", "payload"],
-    "field_types": ["commrat::TimsHeader", "TemperatureData"],
-    "field_sizes": [24, 16],
-    "field_offsets": [0, 24],
-    "type_schema": "{...embedded JSON schema...}"
-  }
-}
-```
-
-#### export_all<Writer>()
-
-Export schemas for all registered message types.
-
-```cpp
 template<typename Writer = rfl::json::Writer>
 static std::string export_all();
-```
 
-**Returns:** JSON array of MessageSchema objects (one per registered type)
-
-**Example:**
-```cpp
-auto all_schemas = MyApp::Introspection::export_all();
-std::cout << all_schemas;  // Prints JSON array
-```
-
-#### write_to_file<Writer>(filename)
-
-Convenience method to write all schemas to a file.
-
-```cpp
 template<typename Writer = rfl::json::Writer>
 static void write_to_file(const std::string& filename);
 ```
-
-**Example:**
-```cpp
-// Write JSON schemas
-MyApp::Introspection::write_to_file("schemas.json");
-
-// Write YAML schemas
-MyApp::Introspection::write_to_file<rfl::yaml::Writer>("schemas.yaml");
-```
-
-### MessageSchema<PayloadT, Registry>
-
-Complete schema structure combining CommRaT and SeRTial metadata.
-
-```cpp
-template<typename PayloadT, typename Registry>
-struct MessageSchema {
-    struct CommRaTMetadata {
-        uint32_t message_id;
-        std::string payload_type;
-        std::string full_type;
-        size_t max_message_size;
-        std::string registry_name;
-    } commrat;
-    
-    sertial::StructLayout<TimsMessage<PayloadT>> layout;
-};
-```
-
-**Direct usage:**
-```cpp
-using Schema = commrat::MessageSchema<TemperatureData, MyApp>;
-
-// Access metadata at compile time
-constexpr auto msg_id = Schema{}.commrat.message_id;
-
-// Access layout information
-constexpr auto num_fields = Schema{}.layout.field_count;
-```
-
-**Use Cases:**
-- Generic logger/replay tools (type-agnostic logging)
-- Web-based message viewers (display schemas)
-- JSON configuration validation (check field names/types)
-- Documentation generation (auto-generate API docs)
-- ROS 2 adapter (map CommRaT ↔ ROS message types)
 
 ---
 
 ## See Also
 
-- [User Guide](USER_GUIDE.md) - Comprehensive framework guide
-- [Getting Started](GETTING_STARTED.md) - First application tutorial
-- [Architecture](ARCHITECTURE.md) - Design decisions and internals
-- [Introspection Example](../examples/introspection_example.cpp) - Complete working example
-- [Examples](../examples/) - Working code examples
-- [Doxygen Docs](api/html/index.html) - Generated API documentation (after `make docs`)
+- [User Guide](USER_GUIDE.md)
+- [Getting Started](GETTING_STARTED.md)
+- [Architecture](ARCHITECTURE.md)
+- [Examples](../examples/)
+- [Doxygen Docs](api/html/index.html) (after `make docs`)

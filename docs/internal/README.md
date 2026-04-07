@@ -48,11 +48,12 @@ CommRaT has evolved through several major phases:
 - Simple module types
 
 ### Phase 5: I/O Specifications (Complete)
-- `Output<T>` / `Outputs<Ts...>` for type-safe outputs
-- `Input<T>` / `Inputs<Ts...>` for multi-input modules
-- `PeriodicInput`, `LoopInput` as input modes
-- Backward compatible normalization
-- Helper base class pattern for conditional virtuals
+- `Output<T>` for type-safe outputs (multiple per module)
+- `Input<T>` for primary continuous input
+- `SyncedInput<T>` for secondary synchronized inputs
+- `Period<Duration>` for timer-driven execution
+- Loop mode (no Period, no Input)
+- Module2 I/O tuple architecture
 
 ### Phase 6: Multi-Input Synchronization (Complete - Phase 6.10)
 - **6.1-6.2**: OutputBuffer with get_data lookup
@@ -63,11 +64,10 @@ CommRaT has evolved through several major phases:
 - **6.9**: 3-input sensor fusion (IMU+GPS+Lidar)
 - **6.10**: Timestamp metadata accessors (get_input_metadata, freshness tracking)
 
-### Phase 7: Planned Future Work
-- Optional secondary inputs (get_data failure handling)
-- Advanced buffering strategies
-- ROS 2 adapter (separate repository)
-- Performance profiling tools
+### Phase 7: Current Work
+- **Completed**: Synced<T> wrapper (fresh/stale/invalid handling), TimestampedRingBuffer
+- **In progress**: Subscription protocol integration (Subscribe/Unsubscribe handlers in ModuleOutput)
+- **Planned**: Command infrastructure, ROS 2 adapter, performance profiling
 
 ## Key Design Principles
 

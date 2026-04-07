@@ -1,16 +1,19 @@
 # CommRaT Development Roadmap
 
-**Last Updated**: February 11, 2026
+**Last Updated**: April 7, 2026
 
 This document tracks planned features, improvements, and long-term ideas for CommRaT. For active bugs and runtime issues, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
 ## Current Focus
 
-### Documentation (In Progress)
-- Complete USER_GUIDE.md sections
-- Create runnable examples (hello_commrat, sensor_fusion, etc.)
-- API reference with cross-references
-- Architecture diagrams and explanations
+### Subscription Protocol Integration (In Progress)
+- Wire Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`
+- Enable end-to-end data flow via subscription protocol
+- See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) Issue 2
+
+### Documentation Update (In Progress)
+- Update USER_GUIDE.md, API_REFERENCE.md for Module2 API
+- Fix outdated code examples throughout docs
 
 ## Near-Term Features
 
@@ -23,12 +26,9 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Status: Planned
 - Priority: Medium
 
-**Optional Secondary Inputs**
-- Make synchronized inputs return `std::optional<const T&>`
-- Allows graceful handling when get_data fails (tolerance exceeded)
-- Avoids using stale data without freshness checks
-- Status: Planned
-- Priority: High
+**Optional Secondary Inputs** -- COMPLETED
+- Implemented as `Synced<T>` wrapper with fresh/stale/invalid handling
+- `SyncedInput<T>` I/O spec for secondary inputs
 
 **Command Ergonomics**
 - Improve command dispatch beyond overload-based pattern
@@ -39,17 +39,14 @@ This document tracks planned features, improvements, and long-term ideas for Com
 ### Memory Optimization
 
 **Command Specification Wrapper**
-- Wrap commands like `Command<ResetCmd>` similar to `Input<T>`/`Output<T>`
-- Improves API consistency
-- Enables better type introspection
-- Status: Detailed design exists (see work/COMMAND_AND_MAILBOX_REFACTOR_PLAN.md)
+- Wrap commands like `Command<ResetCmd>` via `DataWithCommands<T, Cmd1, ...>`
+- Improves API consistency with I/O tuple architecture
+- Status: Partially implemented
 - Priority: Medium
 
 **SendCommand Pattern**
-- Enable compile-time validated command sending between modules
-- Type-safe inter-module command routing
-- Detailed design exists
-- Status: Planned (see work/COMMAND_AND_MAILBOX_REFACTOR_PLAN.md)
+- Compile-time validated command sending between modules
+- Status: Planned
 - Priority: Low
 
 ### Performance
@@ -61,12 +58,9 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Status: Concept phase
 - Priority: Medium
 
-**RingBuffer Zero-Copy Integration**
-- Use SeRTial RingBuffer for message history
-- Zero-allocation circular buffer with serialization
-- Already available in SeRTial, needs integration
-- Status: Requirements documented (see work/SERTIAL_RINGBUFFER_REQUEST.md)
-- Priority: Low
+**RingBuffer Integration** -- COMPLETED
+- `TimestampedRingBuffer` used in `ModuleOutput` for message history
+- Zero-allocation circular buffer with compile-time sizing
 
 ## Long-Term Ideas
 
@@ -140,38 +134,18 @@ This document tracks planned features, improvements, and long-term ideas for Com
 
 ## Open Architectural Questions
 
-The following design decisions remain open from multi-I/O architecture planning (see `docs/internal/phase_history/ARCHITECTURE_ANALYSIS.md` for full analysis):
-
 ### Input Synchronization Policy
-
-**Question**: When module has `Inputs<T1, T2, T3>`, should `process()` be called:
-- **Option A**: When ANY input arrives (asynchronous, low latency, may use stale data)
-- **Option B**: When ALL inputs arrive (wait for complete set, temporal alignment)
-- **Option C**: User-configurable via template parameter or runtime config
-
-**Current Implementation**: Option A (asynchronous)
-**Future Enhancement**: Add `SynchronizedInputs<T1, T2, T3>` for Option B
+Current: Primary `Input<T>` drives execution; secondary `SyncedInput<T>` uses get_data.
+Future: Consider `SynchronizedInputs<T1, T2, T3>` that waits for all inputs.
 
 ### Output Publishing Order
-
-**Question**: When module has `Outputs<T1, T2, T3>`, are outputs published:
-- **Option A**: Simultaneously (parallel notification)
-- **Option B**: Sequentially (deterministic order T1→T2→T3)
-- **Option C**: Priority-based (critical outputs first)
-
-**Current Implementation**: Option B (sequential)
-**Future Enhancement**: `PrioritizedOutputs<...>` for Option C
+Current: Sequential (T1, T2, T3 in order).
+Future: Consider priority-based publishing for critical outputs.
 
 ### Command Reply Timeout
-
-**Question**: If command expects reply but source doesn't respond:
-- **Option A**: Block forever (risky)
-- **Option B**: Configurable timeout with error return
-- **Option C**: Async reply via callback
-
-**Current Implementation**: Option A (blocking)
-**Recommended**: Option B with 1-second default timeout
-**Future Enhancement**: Async callback mechanism
+Current: Blocking wait (system messages only).
+Recommended: Configurable timeout with 1-second default.
+Future: Async callback mechanism.
 
 **DDS Compatibility Layer**
 - Direct DDS backend instead of TiMS
@@ -207,13 +181,9 @@ The following design decisions remain open from multi-I/O architecture planning 
 
 ### Architecture
 
-**Module Base Refactoring**
-- Reduce Module class from 13+ base classes to specialized variants
-- Eliminate `void/void` template specialization workarounds
-- Cleaner error messages and faster compilation
-- Status: Detailed proposal exists (see work/MODULE_BASE_REFACTORING_PROPOSAL.md)
-- Priority: Low (current architecture works)
-- Risk: High (major refactoring)
+**Module Base Refactoring** -- COMPLETED
+- Module2 I/O tuple architecture replaces old Module<> with 13+ base classes
+- Clean `Module2<Output<T>, Input<U>, Period<D>>` API
 
 **Async get_data**
 - Non-blocking future-based historical data retrieval
@@ -237,39 +207,17 @@ The following design decisions remain open from multi-I/O architecture planning 
 
 ## Completed Features
 
-For historical context on completed work, see `docs/internal/phase_history/` and `docs/internal/refactoring/`.
+For full history, see `docs/internal/phase_history/` and `docs/internal/refactoring/`.
 
-### Recent Completions
-
-**Type-Specific Mailbox Sizing** (Complete)
-- Mailboxes sized based on actual message types they handle
-- 70-95% memory reduction achieved
-- Compile-time type validation for send/receive
-- `TypedMailbox<Registry, AllowedTypes...>` with static_assert checking
-- See `docs/internal/refactoring/` for implementation details
-
-**Registry Module Refactoring** (Complete)
-- Extracted type traits, multi-output, threading, protocol loops
-- Reduced registry_module.hpp from 1437 lines to manageable components
-- Improved code organization and maintainability
-- See `docs/internal/refactoring/REGISTRY_MODULE_REFACTORING_COMPLETE.md`
-
-**Multi-Input Synchronization** (Complete)
-- Primary/secondary input pattern
-- HistoricalMailbox with get_data mechanism
-- Timestamp-based synchronization with tolerance
-- 100% success rate in sensor fusion testing
-
-**Multi-Output Modules** (Complete)
-- Type-specific message publishing
-- Per-output MailboxSet architecture
-- Automatic type filtering for subscribers
-
-**Timestamp Metadata Accessors** (Complete)
-- `get_input_timestamp<N>()`
-- `get_input_metadata<N>()`
-- `has_new_data<N>()`
-- `is_input_valid<N>()`
+- Module2 I/O tuple architecture (replaces old Module<>)
+- `Synced<T>` wrapper for secondary inputs (fresh/stale/invalid)
+- `TimestampedRingBuffer` in ModuleOutput
+- TypedMailbox with compile-time buffer sizing (70-95% memory savings)
+- Multi-input synchronization (primary/secondary with get_data)
+- Multi-output modules (per-output CMD mailbox)
+- Zero-copy workspace API
+- Introspection system (JSON/YAML/TOML/XML export)
+- Timestamp metadata accessors (`get_input_timestamp<N>()`, etc.)
 
 ## Contributing Ideas
 

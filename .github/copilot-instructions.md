@@ -119,7 +119,6 @@ Messages use **Message::** namespace for clean syntax:
 ```cpp
 // Message structure (plain POD, sertial-serializable)
 struct TemperatureData {
-    uint64_t timestamp;
     uint32_t sensor_id;
     float temperature_c;
     float confidence;
@@ -218,8 +217,9 @@ class SensorFusion : public MyApp::Module2<
     SyncedInput<GPSData>         // Secondary (synchronized)
 > {
 protected:
-    void process(const IMUData& imu, const std::optional<GPSData>& gps, FusedData& output) override {
-        output = gps ? fuse_sensors(imu, *gps) : dead_reckoning(imu);
+    void process(const IMUData& imu, Synced<GPSData> gps, FusedData& output) override {
+        if (gps) output = fuse_sensors(imu, gps.value());
+        else output = dead_reckoning(imu);
     }
 };
 ```
@@ -398,8 +398,8 @@ struct GetNextDataReplyPayload {
 **Single Source of Truth**: `TimsHeader.timestamp` ONLY - no payload timestamp fields!
 
 **Automatic Timestamp Assignment:**
-- `PeriodicInput`: `timestamp = Time::now()` at generation
-- `Input<T>`: `timestamp = input.header.timestamp` (propagation)
+- `Period<>` (timer-driven): `timestamp = Time::now()` at generation
+- `Input<T>` (input-driven): `timestamp = input.header.timestamp` (propagation)
 - `Multi-input`: `timestamp = primary_input.header.timestamp` (sync point)
 
 **Accessing Metadata:**
@@ -553,12 +553,16 @@ CommRaT/
 │   └── platform/
 │       ├── threading.hpp                  # Thread, Mutex abstractions
 │       └── timestamp.hpp                  # Time, Duration, Timestamp
-├── examples/
-│   └── module2_simple_example.cpp         # Timer/Input/Loop examples
-├── docs/work/
-│   ├── ZERO_COPY_ARCHITECTURE.md          # Zero-copy design
-│   ├── MODULE_REFACTOR_STRATEGY.md        # Module2 roadmap
-│   └── MODULE_REFACTOR_QUICKSTART.md      # Quick reference
+├── examples/                              # Working examples (CTest validated)
+├── docs/
+│   ├── ARCHITECTURE.md                    # System architecture
+│   ├── API_REFERENCE.md                   # API documentation
+│   ├── GETTING_STARTED.md                 # First-time setup
+│   ├── USER_GUIDE.md                      # Comprehensive guide
+│   ├── KNOWN_ISSUES.md                    # Active issues
+│   ├── internal/                          # Design decisions, phase history
+│   ├── work/                              # Active design docs
+│   └── archive/                           # Archived docs
 ├── tims/                                  # TiMS library
 └── SeRTial/                               # Serialization library
 ```
@@ -598,20 +602,18 @@ CommRaT/
 
 ### Documentation Structure
 
-**Active Documentation** (`docs/work/`):
-- `ZERO_COPY_ARCHITECTURE.md` - Zero-copy workspace design (Phase 6 complete)
-- `MODULE_REFACTOR_STRATEGY.md` - Module2 I/O tuple architecture roadmap
-- `MODULE_REFACTOR_QUICKSTART.md` - Quick reference for current state
-- `MODULE2_PRODUCTION_ROADMAP.md` - Path to production-ready Module2
-- `REGISTRY_CONSOLIDATION.md` - Registry cleanup and utility design
-- `KNOWN_ISSUES.md` - Active issues and workarounds
+**Active Documentation** (`docs/`):
+- `docs/KNOWN_ISSUES.md` - Active issues and workarounds
+- `docs/ARCHITECTURE.md` - System architecture overview
+- `docs/API_REFERENCE.md` - API documentation
+- `docs/work/ZERO_COPY_ARCHITECTURE.md` - Zero-copy workspace design
+- `docs/archive/` - Archived design documents (historical reference)
 
 **When to update documentation:**
-- Major architectural changes → Update `ARCHITECTURE_ANALYSIS.md`
-- Bug fixes with non-obvious causes → Add to `FIXES_APPLIED.md`
+- Major architectural changes → Update `docs/ARCHITECTURE.md`
+- Bug fixes with non-obvious causes → Add to `docs/internal/phase_history/FIXES_APPLIED.md`
 - Phase completion → Update `docs/README.md` current state section
-- Design decisions with trade-offs → Add to `ARCHITECTURE_ANALYSIS.md`
-- Template metaprogramming insights → Document in relevant analysis file
+- Design decisions with trade-offs → Add to `docs/internal/design_decisions/`
 - **New issues discovered → Add to `KNOWN_ISSUES.md` with status, symptoms, workarounds**
 - **Issues resolved → Update status in `KNOWN_ISSUES.md` and document solution**
 
@@ -774,7 +776,7 @@ void process(const T& input) {
 - **Consumer-side get_data** (SyncedInput with get_data() and get_next_data() RPCs)
 - **Producer-side get_data handling** (ModuleOutput CMD mailbox handlers for GetDataRequest/GetNextDataRequest)
 - **Mailbox ownership and lifecycle** (ContinuousInput owns TypedMailbox<Registry, T>, two-phase init/start)
-- **Mailbox addressing correctness** (WORK uses primary output type_id, PUBLISH=2, DATA=3+)
+- **Mailbox addressing correctness** (WORK uses primary output type_id, DATA addresses per-input)
 - **Input-driven skip logic** (data_loop skips process() when primary input times out, prevents zero timestamps)
 - **Multi-output module support** (initialize_input handles MultiOutputConfig, instance_id indexed access)
 
