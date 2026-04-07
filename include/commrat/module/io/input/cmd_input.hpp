@@ -141,11 +141,11 @@ public:
         Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
         while (Time::now() < deadline) {
             TimsMessage<ReplyType> received;
+            auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::nanoseconds(deadline - Time::now()));
             bool got_msg = work_mbx_->receive(
                 received,
-                Milliseconds(std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::nanoseconds(deadline - Time::now())
-                ))
+                Milliseconds(remaining)
             );
             
             if (!got_msg) {

@@ -212,6 +212,7 @@ public:
           >(config)
         , imu_count_(0)
         , gps_stale_warnings_(0)
+        , gps_invalid_warnings_(0)
     {
         std::cout << "[Fusion] Initialized\n";
     }
@@ -251,16 +252,18 @@ protected:
         // ====================================================================
         
         if (!gps_fresh && gps_stale_warnings_ < 5) {
-            std::cout << "[Fusion] WARNING: GPS stale (age: " << gps_age_ms << " ms, "
-                      << "reused from previous iteration)\n";
+            std::cout << "[Fusion] GPS stale (age: " << gps_age_ms << " ms) "
+                      << "- expected at " << (gps_valid ? "multi-rate" : "startup") << "\n";
             gps_stale_warnings_++;
             if (gps_stale_warnings_ == 5) {
-                std::cout << "[Fusion] (suppressing further stale warnings...)\n";
+                std::cout << "[Fusion] (suppressing further stale messages...)\n";
             }
         }
         
-        if (!gps_valid) {
-            std::cerr << "[Fusion] ERROR: GPS get_data FAILED!\n";
+        if (!gps_valid && gps_invalid_warnings_ < 3) {
+            std::cerr << "[Fusion] WARNING: GPS data unavailable "
+                      << "(tolerance may be too tight for GPS rate)\n";
+            gps_invalid_warnings_++;
         }
         
         // ====================================================================
@@ -319,6 +322,7 @@ protected:
 private:
     uint32_t imu_count_;
     uint32_t gps_stale_warnings_;
+    uint32_t gps_invalid_warnings_;
 };
 
 // ============================================================================
@@ -395,6 +399,8 @@ int main() {
     // ========================================================================
     
     // NEW: Multi-input uses index-based type inference - no source_primary_output_type_id needed!
+    // sync_tolerance must be >= producer period to avoid gaps.
+    // GPS at 10Hz (100ms period) needs >= 100ms tolerance; 150ms adds margin for jitter.
     commrat::ModuleConfig fusion_config{
         .name = "SensorFusion",
         .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
@@ -402,7 +408,8 @@ int main() {
             .sources = {
                 {.system_id = 10, .instance_id = 1},  // IMU (primary, first in list)
                 {.system_id = 11, .instance_id = 1}   // GPS (secondary)
-            }
+            },
+            .sync_tolerance = std::chrono::milliseconds(150)  // >= GPS period (100ms) + jitter margin
         }
     };
     

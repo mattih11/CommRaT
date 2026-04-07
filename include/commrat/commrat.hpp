@@ -163,14 +163,10 @@ public:
             typename UnsubscribeRequest::ReplyMessageDef::Payload
         >;
         
-        // WorkMailbox for subscription protocol (WORK mailbox handles Subscribe/Unsubscribe)
-        using WorkMailbox = TypedMailbox<
-            Registry,
-            SubscribeRequestPayload,
-            SubscribeReplyPayload,
-            UnsubscribeRequestPayload,
-            UnsubscribeReplyPayload
-        >;
+        // WorkMailbox - unrestricted Mailbox that can send/receive any registered type.
+        // Needs full registry access because it handles subscription protocol
+        // AND GetData/GetNextData RPC (template-parameterized payload types).
+        using WorkMailbox = MailboxFor<Registry>;
     };
     
     // Inherit all registry functionality

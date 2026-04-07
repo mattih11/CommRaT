@@ -54,6 +54,8 @@ namespace commrat {
 template<typename T>
 class Synced {
 public:
+    using value_type = T;  ///< Underlying data type
+
     /**
      * @brief Construct invalid Synced (no data)
      */

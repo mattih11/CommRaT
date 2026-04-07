@@ -388,9 +388,10 @@ public:
             return false;
         }
         
-        // Receive raw bytes into mailbox buffer
+        // Receive raw bytes into mailbox buffer (with TiMS metadata for src/dest)
         typename sertial::Message<TimsMessage<T>>::buffer_type buffer;
-        auto bytes = tims_.receive_raw_bytes(buffer, timeout);
+        TimsWrapper::TimsMetadata tims_metadata;
+        auto bytes = tims_.receive_raw_bytes(buffer, timeout, &tims_metadata);
         
         if (bytes <= 0) {
             return false;
@@ -405,6 +406,12 @@ public:
         }
         
         message = std::move(*result);  // Move into user's storage (final destination)
+        
+        // Populate src/dest from TiMS transport metadata
+        // (CommRaT header src/dest are 0 from serialization; real values come from TiMS layer)
+        message.header.src = tims_metadata.src;
+        message.header.dest = tims_metadata.dest;
+        
         return true;
     }
     
