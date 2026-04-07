@@ -1,18 +1,6 @@
 /**
  * @file typed_mailbox.hpp
- * @brief Type-restricted mailbox with optimized buffer sizing (Phase 7)
- * 
- * TypedMailbox is a wrapper around Mailbox that restricts which message types
- * can be sent/received and uses optimized buffer sizes based on those types.
- * 
- * Key Benefits:
- * - 70-95% memory reduction per mailbox
- * - Compile-time type safety (reject wrong message types)
- * - Self-documenting (mailbox type shows what it handles)
- * - Zero runtime overhead (all checks at compile time)
- * 
- * @author CommRaT Development Team
- * @date February 10, 2026
+ * @brief Type-restricted mailbox with optimized buffer sizing
  */
 
 #pragma once
@@ -27,57 +15,11 @@ namespace commrat {
 /**
  * @brief Type-restricted mailbox with optimized buffer sizing
  * 
- * Unlike regular Mailbox which can handle all types in the registry,
- * TypedMailbox is restricted to a specific subset of payload types.
- * This enables:
+ * Restricts receive types to AllowedPayloadTypes (buffer sized accordingly).
+ * Can additionally send SendOnlyTypes without buffer impact.
  * 
- * 1. **Memory optimization**: Buffer sized for max(AllowedTypes) instead of max(Registry)
- * 2. **Type safety**: Compile-time rejection of wrong message types
- * 3. **Documentation**: Type signature shows what mailbox handles
- * 
- * **Key Feature**: Separate receive and send type restrictions!
- * - Buffer sized for AllowedPayloadTypes only (receive types)
- * - Can send AllowedPayloadTypes OR SendOnlyTypes
- * - Receive restricted to AllowedPayloadTypes only
- * 
- * @tparam Registry Full message registry (MessageRegistry<...>)
- * @tparam AllowedPayloadTypes Payload types this mailbox can RECEIVE (determines buffer size)
- * @tparam SendOnlyTypes Additional types that can be SENT but not received (no buffer impact)
- * 
- * Memory Savings Example:
- * @code
- * // Registry has: TinyCmd (16B), SmallCmd (24B), HugeData (2048B)
- * // Registry::max_message_size = 2048 bytes
- * 
- * // OLD: Regular mailbox uses 2048 bytes per receive buffer
- * Mailbox<Registry> cmd_mailbox(config);  // 10 slots × 2048B = 20,480B
- * 
- * // NEW: TypedMailbox uses 24 bytes per receive buffer (max of allowed types)
- * TypedMailbox<Registry, TinyCmd, SmallCmd> cmd_mailbox(config);  // 10 slots × 24B = 240B
- * // SAVINGS: 20,240 bytes (98.8%)!
- * @endcode
- * 
- * Usage Example:
- * @code
- * using MyRegistry = MessageRegistry<
- *     MessageDefinition<ResetCmd, ...>,
- *     MessageDefinition<CalibrateCmd, ...>,
- *     MessageDefinition<SensorData, ...>
- * >;
- * 
- * // CMD mailbox only handles commands
- * TypedMailbox<MyRegistry, ResetCmd, CalibrateCmd> cmd_mailbox(config);
- * 
- * // DATA mailbox only handles sensor data
- * TypedMailbox<MyRegistry, SensorData> data_mailbox(config);
- * 
- * // Send/receive work as usual
- * cmd_mailbox.send(ResetCmd{}, dest);
- * auto result = cmd_mailbox.receive<ResetCmd>();
- * 
- * // Compile error: SensorData not allowed in cmd_mailbox
- * // cmd_mailbox.send(SensorData{}, dest);  // static_assert fails!
- * @endcode
+ * @tparam Registry Full message registry
+ * @tparam AllowedPayloadTypes Payload types this mailbox can receive (determines buffer size)
  */
 template<typename Registry, typename... AllowedPayloadTypes>
 class TypedMailbox {
@@ -92,35 +34,9 @@ private:
         using type = MessageDefinition<PayloadT, MessagePrefix::UserDefined, UserSubPrefix::Data>;
     };
     
-    // Create underlying mailbox with all MessageDefinitions from registry
-    // (We'll add type validation in send/receive methods)
-    
-    // Helper to detect ::Registry member
-    template<typename T, typename = void>
-    struct HasRegistryMember : std::false_type {};
-    
-    template<typename T>
-    struct HasRegistryMember<T, std::void_t<typename T::Registry>> : std::true_type {};
-    
-    // Helper to extract Mailbox type from Registry
-    // CommRaT has ::Registry member, MessageRegistry can be decomposed directly
-    
-    template<typename R, typename Enable = void>
-    struct ExtractMailboxType;
-    
-    // Case 1: Registry has ::Registry member (CommRaT) - recurse
-    template<typename R>
-    struct ExtractMailboxType<R, std::enable_if_t<HasRegistryMember<R>::value>> {
-        using type = typename ExtractMailboxType<typename R::Registry, void>::type;
-    };
-    
-    // Case 2: MessageRegistry<...> - extract template parameters directly
-    template<typename... MessageDefs>
-    struct ExtractMailboxType<MessageRegistry<MessageDefs...>, std::enable_if_t<!HasRegistryMember<MessageRegistry<MessageDefs...>>::value>> {
-        using type = Mailbox<MessageDefs...>;
-    };
-    
-    using UnderlyingMailbox = typename ExtractMailboxType<Registry>::type;
+    // Use MailboxFor<Registry> from message_registry.hpp (handles both
+    // MessageRegistry<...> and CommRaT<...> transparently)
+    using UnderlyingMailbox = MailboxFor<Registry>;
     
     UnderlyingMailbox mailbox_;
     

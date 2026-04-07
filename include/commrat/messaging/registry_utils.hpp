@@ -27,6 +27,25 @@ struct DataWithCommands;
 namespace registry {
 
 // ============================================================================
+// Tuple Utilities (forwarding to std:: equivalents)
+// ============================================================================
+
+template<typename T>
+inline constexpr std::size_t tuple_size_v = std::tuple_size_v<T>;
+
+template<typename T>
+inline constexpr bool is_empty_tuple_v = (std::tuple_size_v<T> == 0);
+
+template<typename T, typename Tuple>
+struct ContainsType;
+
+template<typename T, typename... Us>
+struct ContainsType<T, std::tuple<Us...>> : std::disjunction<std::is_same<T, Us>...> {};
+
+template<typename T, typename Tuple>
+inline constexpr bool contains_type_v = ContainsType<T, Tuple>::value;
+
+// ============================================================================
 // Internal Helpers
 // ============================================================================
 
@@ -380,45 +399,7 @@ using filter_replies_t = typename FilterReplies<Registry>::type;
 // Tuple Utilities
 // ============================================================================
 
-/**
- * @brief Get size of a tuple type
- */
-template<typename Tuple>
-struct TupleSize;
-
-template<typename... Types>
-struct TupleSize<std::tuple<Types...>> {
-    static constexpr size_t value = sizeof...(Types);
-};
-
-template<typename Tuple>
-inline constexpr size_t tuple_size_v = TupleSize<Tuple>::value;
-
-/**
- * @brief Check if tuple is empty
- */
-template<typename Tuple>
-inline constexpr bool is_empty_tuple_v = (tuple_size_v<Tuple> == 0);
-
-/**
- * @brief Check if tuple contains a type
- */
-template<typename T, typename Tuple>
-struct ContainsType;
-
-template<typename T>
-struct ContainsType<T, std::tuple<>> : std::false_type {};
-
-template<typename T, typename First, typename... Rest>
-struct ContainsType<T, std::tuple<First, Rest...>> 
-    : std::conditional_t<
-        std::is_same_v<T, First>,
-        std::true_type,
-        ContainsType<T, std::tuple<Rest...>>
-    > {};
-
-template<typename T, typename Tuple>
-inline constexpr bool contains_type_v = ContainsType<T, Tuple>::value;
+// Use std::tuple_size_v directly (no custom wrapper needed)
 
 // ============================================================================
 // Convenience Functions (Runtime-Usable)
@@ -436,27 +417,27 @@ inline constexpr bool contains_type_v = ContainsType<T, Tuple>::value;
  */
 template<typename Registry>
 constexpr size_t data_message_count() {
-    return tuple_size_v<data_messages_t<Registry>>;
+    return std::tuple_size_v<data_messages_t<Registry>>;
 }
 
 template<typename Registry>
 constexpr size_t command_message_count() {
-    return tuple_size_v<command_messages_t<Registry>>;
+    return std::tuple_size_v<command_messages_t<Registry>>;
 }
 
 template<typename Registry>
 constexpr size_t subscription_message_count() {
-    return tuple_size_v<subscription_messages_t<Registry>>;
+    return std::tuple_size_v<subscription_messages_t<Registry>>;
 }
 
 template<typename Registry>
 constexpr size_t request_message_count() {
-    return tuple_size_v<filter_requests_t<Registry>>;
+    return std::tuple_size_v<filter_requests_t<Registry>>;
 }
 
 template<typename Registry>
 constexpr size_t reply_message_count() {
-    return tuple_size_v<filter_replies_t<Registry>>;
+    return std::tuple_size_v<filter_replies_t<Registry>>;
 }
 
 // ============================================================================

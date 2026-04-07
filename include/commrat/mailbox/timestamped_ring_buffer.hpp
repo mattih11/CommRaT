@@ -1,12 +1,9 @@
 /**
  * @file timestamped_ring_buffer.hpp
- * @brief Thread-safe timestamped ring buffer for multi-input synchronization (Phase 6)
+ * @brief Thread-safe timestamped ring buffer for multi-input synchronization
  * 
- * Extends SeRTial's RingBuffer with timestamp-based lookup for synchronized get_data.
- * Used by HistoricalMailbox to store message history for secondary inputs.
- * 
- * @author CommRaT Development Team
- * @date February 8, 2026
+ * Extends SeRTial's RingBuffer with timestamp-based lookup for get_data.
+ * Used by HistoricalMailbox / ModuleOutput for secondary input sync.
  */
 
 #pragma once
@@ -59,44 +56,10 @@ enum class InterpolationMode {
 /**
  * @brief Thread-safe timestamped ring buffer with get_data lookup
  * 
- * Wraps SeRTial::RingBuffer with:
- * - Thread-safe push/get operations
- * - Timestamp-based lookup (get_data)
- * - Multiple interpolation modes
- * - Maintains temporal ordering (must push in timestamp order)
+ * @tparam T Message type (must have timestamp via TimestampAccessor)
+ * @tparam MaxSize Maximum capacity (default: 100)
  * 
- * @tparam T Message type (must have .timestamp member)
- * @tparam MaxSize Maximum capacity (default: 100 messages)
- * 
- * Requirements for T:
- * - Must have uint64_t timestamp field (milliseconds since epoch)
- * - Must be copyable or movable
- * - Timestamps must be monotonically increasing on push
- * 
- * Thread Safety:
- * - Multiple concurrent readers (shared lock)
- * - Single writer (exclusive lock)
- * - Lock-free reads possible in future optimization
- * 
- * Example:
- * @code
- * struct IMUData {
- *     uint64_t timestamp;  // Required!
- *     float ax, ay, az;
- * };
- * 
- * OutputBuffer<IMUData, 100> history;
- * 
- * // Producer thread
- * history.push(IMUData{.timestamp = 1000, .ax = 1.0f, ...});
- * 
- * // Consumer thread (secondary input)
- * auto data = history.get_data(1050, std::chrono::milliseconds(50), 
- *                             InterpolationMode::NEAREST);
- * if (data) {
- *     // Use data synchronized to timestamp 1050
- * }
- * @endcode
+ * Thread-safe: shared lock for reads, exclusive lock for writes.
  */
 template<typename T, std::size_t MaxSize = 100>
 class OutputBuffer {

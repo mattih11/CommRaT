@@ -185,22 +185,4 @@ static constexpr size_t get_data_mailbox_size() {
     return sizeof(TimsMessage<InputType>);
 }
 
-// ============================================================================
-// Mailbox Configuration Helpers
-// ============================================================================
-
-/**
- * @brief Create work mailbox config (for SystemRegistry messages)
- * @deprecated Work mailbox concept will be merged into CMD mailbox
- */
-static inline MailboxConfig createWorkMailboxConfig(const ModuleConfig& config) {
-    return MailboxConfig{
-        .mailbox_id = 0,  // Set by caller
-        .message_slots = config.message_slots,
-        .max_message_size = SystemRegistry::max_message_size,
-        .send_priority = static_cast<uint8_t>(config.priority),
-        .realtime = config.realtime
-    };
-}
-
 } // namespace commrat

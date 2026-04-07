@@ -6,13 +6,11 @@
 #include "../messaging/registry_utils.hpp"
 #include "../messaging/message_id.hpp"
 #include "../platform/threading.hpp"
-#include <expected>
 #include <optional>
 #include <chrono>  // Keep for std::chrono::milliseconds in API
 #include <functional>
 #include <concepts>
 #include <span>
-#include <queue>
 
 namespace commrat {
 
@@ -311,7 +309,6 @@ public:
         auto tims_result = tims_.send(message, dest_mailbox);
         
         if (tims_result != TimsResult::SUCCESS) {
-            std::cerr << "[Mailbox] TiMS send failed with code: " << static_cast<int>(tims_result) << std::endl;
             return MailboxError::NetworkError;
         }
         
@@ -594,11 +591,19 @@ public:
     }
     
 private:
-    // Convert MailboxConfig to TimsConfig
+    // Convert MailboxConfig to TimsConfig (no heap allocation)
     static TimsConfig create_tims_config(const MailboxConfig& config) {
         TimsConfig tims_config;
         tims_config.mailbox_id = config.mailbox_id;
-        tims_config.mailbox_name = "mailbox_" + std::to_string(config.mailbox_id);
+        // Format name into fixed_string (stack-allocated, real-time safe)
+        tims_config.mailbox_name = sertial::fixed_string<32>("mailbox_");
+        // Convert uint32 to digits without heap allocation
+        char digits[11];  // max 10 digits + null
+        int pos = 0;
+        uint32_t v = config.mailbox_id;
+        if (v == 0) { digits[pos++] = '0'; }
+        else { while (v > 0) { digits[pos++] = '0' + static_cast<char>(v % 10); v /= 10; } }
+        for (int i = pos - 1; i >= 0; --i) tims_config.mailbox_name.push_back(digits[i]);
         tims_config.max_msg_size = config.max_message_size;
         tims_config.priority = config.send_priority;
         tims_config.realtime = config.realtime;
@@ -609,33 +614,5 @@ private:
     TimsWrapper tims_;
     std::atomic<bool> running_;
 };
-
-// ============================================================================
-// Convenience Type Aliases
-// ============================================================================
-
-/**
- * @brief Standard mailbox with common message types
- */
-using StandardMailbox = Mailbox<
-    CommandMessage,
-    StatusMessage,
-    ErrorMessage,
-    AckMessage,
-    SensorMessage,
-    RobotStateMessage
->;
-
-/**
- * @brief Create a custom mailbox with standard types plus user types
- */
-template<typename... CustomTypes>
-using CustomMailbox = Mailbox<
-    CommandMessage,
-    StatusMessage,
-    ErrorMessage,
-    AckMessage,
-    CustomTypes...
->;
 
 } // namespace commrat

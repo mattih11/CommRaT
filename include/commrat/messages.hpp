@@ -5,10 +5,8 @@
 #include <span>
 #include <cstring>
 
-// Real SeRTial includes
+// SeRTial serialization
 #include <sertial/sertial.hpp>
-#include <sertial/containers/fixed_vector.hpp>
-#include <sertial/containers/fixed_string.hpp>
 
 namespace commrat {
 
@@ -24,32 +22,8 @@ struct TimsHeader {
     uint32_t flags;
 };
 
-// Message type ID - use compile-time type hash for automatic unique IDs
+// Message type ID
 using MessageType = uint32_t;
-
-// Helper to get compile-time hash of a type
-template<typename T>
-constexpr MessageType type_hash() {
-    // Use type_info hash at compile time
-    // For C++20, we can use a simple constexpr hash
-    constexpr auto name = std::string_view{__PRETTY_FUNCTION__};
-    uint32_t hash = 2166136261u;  // FNV-1a initial value
-    for (char c : name) {
-        hash ^= static_cast<uint32_t>(c);
-        hash *= 16777619u;  // FNV prime
-    }
-    return hash;
-}
-
-// ============================================================================
-// Message Type Traits (Automatic Type-to-ID Mapping)
-// ============================================================================
-
-// Default: use compile-time type hash for automatic unique IDs
-template<typename PayloadT>
-struct message_type_for {
-    static constexpr MessageType value = type_hash<PayloadT>();
-};
 
 // ============================================================================
 // Templated Message Wrapper (No MsgType parameter needed!)
@@ -65,80 +39,6 @@ struct TimsMessage {
     // Payload type accessor
     using payload_type = PayloadT;
 };
-
-// ============================================================================
-// Payload Type Definitions (using SeRTial containers)
-// ============================================================================
-
-// Command payload
-struct CommandPayload {
-    uint32_t command_id;
-    uint32_t target_id;
-    sertial::fixed_vector<uint8_t, 64> parameters;
-};
-// Note: Use MessageDefinition for new code instead of message_type_for
-
-// Status payload
-struct StatusPayload {
-    uint32_t status_code;
-    uint32_t subsystem_id;
-    float cpu_load;
-    float memory_usage;
-    sertial::fixed_string<64> description;
-};
-
-// Error payload
-struct ErrorPayload {
-    uint32_t error_code;
-    uint32_t source_id;
-    sertial::fixed_string<128> error_text;
-};
-
-// Acknowledgment payload
-struct AckPayload {
-    uint32_t acked_seq_number;
-    uint32_t ack_code;
-};
-
-// Sensor data payload (example with dynamic data)
-struct SensorPayload {
-    uint32_t sensor_id;
-    float temperature;
-    float pressure;
-    float humidity;
-    sertial::fixed_vector<float, 16> additional_readings;
-};
-
-// Robot state payload (example nested structures)
-struct RobotStatePayload {
-    struct Pose {
-        double x, y, z;
-        double roll, pitch, yaw;
-    } pose;
-    
-    struct Velocity {
-        double linear_x, linear_y, linear_z;
-        double angular_x, angular_y, angular_z;
-    } velocity;
-    
-    uint32_t robot_id;
-    sertial::fixed_string<32> status;
-};
-
-// ============================================================================
-// Convenient Type Aliases
-// ============================================================================
-
-using CommandMessage = TimsMessage<CommandPayload>;
-using StatusMessage = TimsMessage<StatusPayload>;
-using ErrorMessage = TimsMessage<ErrorPayload>;
-using AckMessage = TimsMessage<AckPayload>;
-using SensorMessage = TimsMessage<SensorPayload>;
-using RobotStateMessage = TimsMessage<RobotStatePayload>;
-
-// Generic data message for any type
-template<typename T>
-using DataMessage = TimsMessage<T>;
 
 // ============================================================================
 // Type Traits
@@ -207,21 +107,6 @@ auto deserialize(const uint8_t* data, size_t size) -> sertial::DeserializeResult
     return deserialize<T>(byte_span);
 }
 
-// Internal functions for compatibility (used by MessageService)
-template<typename T>
-auto serialize_message(T& message) -> typename sertial::Message<T>::Result {
-    return serialize(message);
-}
-
-template<typename T>
-auto deserialize_message(std::span<const std::byte> data) -> sertial::DeserializeResult<T> {
-    return deserialize<T>(data);
-}
-
-template<typename T>
-auto deserialize_message(const uint8_t* data, size_t size) -> sertial::DeserializeResult<T> {
-    return deserialize<T>(data, size);
-}
 // ============================================================================
 // Compile-Time Utilities
 // ============================================================================

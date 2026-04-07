@@ -2,41 +2,15 @@
 
 /**
  * @file io_spec.hpp
- * @brief Complete I/O specification system for Module<>
+ * @brief I/O specification system: Output<T>, Input<T>, Period<D>, SyncedInput<T>
  * 
- * Provides:
- * 1. I/O specification tags (Output<T>, Input<T>, Period<D>, SyncedInput<T>)
- * 2. Type traits for specifications and instances
- * 3. Execution mode validation and inference
- * 4. BuildIOTuple for compile-time I/O tuple construction
+ * Execution modes (auto-inferred):
+ * - INPUT-DRIVEN: Has Input<T> - blocked on receive()
+ * - TIMER-DRIVEN: Has Period<D>, no Input - periodic sleep
+ * - LOOP-DRIVEN: No Input, no Period - continuous loop
  * 
- * ============================================================================
- * EXECUTION MODELS (Auto-Inferred)
- * ============================================================================
- * 
- * CommRaT modules have three execution models based on I/O specifications:
- * 
- * 1. INPUT-DRIVEN (has Input<T>)
- *    - Spec: Module<Registry, Output<Data>, Input<SensorData>>
- *    - Execution: Blocked on input's receive() - data arrival drives execution
- *    - Use case: Data processing pipelines, sensor fusion
- * 
- * 2. TIMER-DRIVEN (has Period<D>, no Input)
- *    - Spec: Module<Registry, Output<Data>, Period<Milliseconds(100)>>
- *    - Execution: Sleep for period duration between iterations
- *    - Use case: Control loops, periodic polling, heartbeat generators
- * 
- * 3. LOOP-DRIVEN (no Input, no Period - AUTO-INFERRED)
- *    - Spec: Module<Registry, Output<Data>>
- *    - Execution: Continuous loop (maximum throughput, no sleep)
- *    - Use case: Maximum throughput processing
- * 
- * Constraints:
- * - At most ONE Input<T> (primary continuous input)
- * - At most ONE Period<D>
- * - Input<T> and Period<D> are mutually exclusive
- * - Multiple SyncedInput<T> allowed (secondary pull-model inputs)
- * - Multiple Output<T> allowed
+ * Constraints: At most one Input<T>, one Period<D>, mutually exclusive.
+ * Multiple Output<T> and SyncedInput<T> allowed.
  */
 
 #include "commrat/module/io/input/cmd_input.hpp"

@@ -1,13 +1,9 @@
 /**
  * @file type_name.hpp
- * @brief Compile-time type name extraction using reflect-cpp
+ * @brief Compile-time type name extraction and mailbox name formatting
  * 
- * Provides human-readable type names at compile time for debugging and logging.
- * Used to generate readable mailbox names like "SensorA:10:1:CMD" instead of
- * mangled names like "7SensorA_cmd_18088192".
- * 
- * @author CommRaT Development Team
- * @date February 15, 2026
+ * @note TODO: Move string utilities (EnumName, TypeName, TypeNames,
+ *       get_type_name, uint8_to_fixed_string) to SeRTial as StringUtility.
  */
 
 #pragma once
@@ -22,10 +18,7 @@
 
 namespace commrat {
 
-/**
-* @brief Get max length of an enum-member string at compile time
-* TODO move to SeRTial as StringUtility
-*/
+/** @brief Get max length of an enum-member string at compile time */
 template<typename EnumType> requires std::is_enum_v<EnumType>
 struct EnumName {
     static constexpr std::size_t max_size_v = []() -> std::size_t {  
@@ -61,21 +54,7 @@ struct EnumName {
 };
 
 
-/**
- * @brief Compile-time type name extraction
- * 
- * Provides clean, unmangled type names at compile time using reflect-cpp.
- * Returns a fixed_string that can be used in constexpr contexts.
- * 
- * Example:
- * @code
- * struct SensorData {};
- * constexpr auto name = TypeName<SensorData>::value;  // "SensorData"
- * auto name_view = TypeName<SensorData>::get();       // Returns string_view
- * @endcode
- * 
- * TODO move to SeRTial as StringUtility
- */
+/** @brief Compile-time type name extraction via reflect-cpp */
 template<typename T>
 struct TypeName {
     static constexpr auto value = sertial::make_fixed(rfl::internal::get_type_name<T>());
@@ -85,21 +64,7 @@ struct TypeName {
     }
 };
 
-/**
- * @brief Multiple type names with unified max size
- * 
- * Computes the maximum length among multiple type names and provides
- * fixed_string instances sized to hold any of them.
- * 
- * Example:
- * @code
- * using Names = TypeNames<SensorData, ActuatorCommand, int>;
- * static_assert(Names::max_size_v == 15);  // "ActuatorCommand" is longest
- * auto name = Names::get<SensorData>();    // Returns fixed_string<15>
- * @endcode
- * 
- * TODO move to SeRTial as StringUtility
- */
+/** @brief Multiple type names with unified max size */
 template<typename... Types>
 struct TypeNames {
     static constexpr std::size_t max_size_v = []() {
@@ -116,28 +81,13 @@ struct TypeNames {
     }
 };
 
-/**
- * @brief Helper function for getting type name as string_view
- * 
- * Provides a convenient function interface for type name extraction.
- * 
- * Example:
- * @code
- * auto name = get_type_name<SensorData>();  // Returns string_view "SensorData"
- * @endcode
- * 
- * TODO move to SeRTial as StringUtility
- */
+/** @brief Get type name as string_view */
 template<typename T>
 constexpr std::string_view get_type_name() {
     return std::string_view(TypeName<T>::value);
 }
 
-/**
- * @brief Constexpr helper to convert uint8_t to decimal string at compile time
- * 
- * TODO move to SeRTial as StringUtility
- */
+/** @brief Constexpr uint8_t to decimal string conversion */
 constexpr auto uint8_to_fixed_string(uint8_t value) {
     sertial::fixed_string<4> result;  // Max "255" + null = 4
     

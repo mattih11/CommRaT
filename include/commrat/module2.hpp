@@ -68,66 +68,16 @@ struct SelectProcessorBase {
 };
 
 /**
- * @brief Modern Module using I/O tuple architecture
+ * @brief Module using I/O tuple architecture
  * 
  * @tparam Registry Message registry (MessageRegistry<...>)
  * @tparam IOSpecs I/O specifications (Output<T>, Input<T>, Period<D>, SyncedInput<T>)
  * 
- * Automatically inherits appropriate processor base class based on I/O configuration:
- * - NoInputProcessor<OutputTuple> for timer/loop modules (no inputs)
- * - InputProcessor<InputTuple, OutputTuple> for modules with inputs
- * 
- * Process signatures (automatically determined by ProcessParam trait):
- * - No inputs: void process(O1& out1, O2& out2, ...)
- * - Continuous inputs: void process(const I1& in1, const I2& in2, ..., O1& out1, O2& out2, ...)
- * - Synced inputs: void process(const std::optional<I1>& in1, ..., O1& out1, ...)
- * - Mixed: void process(const I1& continuous, const std::optional<I2>& synced, O1& out1, ...)
- * 
- * ProcessParam trait mapping:
- * - ContinuousInput<Registry, T> -> const T& (unwrapped, always available)
- * - SyncedInput<Registry, T> -> const std::optional<T>& (may be empty if sync failed)
- * 
- * Example:
- * @code
- * // Input-driven module (inherits ContinuousInputProcessor<tuple<SensorData>, tuple<FilteredData>>)
- * class FilterModule : public Module2<MyRegistry, 
- *     Output<FilteredData>,
- *     Input<SensorData>
- * > {
- * protected:
- *     void process(const SensorData& input, FilteredData& output) override {
- *         output = apply_filter(input);
- *     }
- * };
- * 
- * // Timer-driven module (inherits NoInputProcessor<tuple<SensorData>>)
- * class SensorModule : public Module2<MyRegistry,
- *     Output<SensorData>,
- *     Period<Milliseconds(10)>  // 100Hz
- * > {
- * protected:
- *     void process(SensorData& output) override {
- *         output = read_sensor();
- *     }
- * };
- * 
- * // Multi-input sensor fusion with synced inputs
- * class FusionModule : public Module2<MyRegistry,
- *     Output<FusedData>,
- *     Input<IMUData>,          // Primary (continuous) -> const IMUData&
- *     SyncedInput<GPSData>     // Secondary (synced) -> const std::optional<GPSData>&
- * > {
- * protected:
- *     void process(const IMUData& imu, const std::optional<GPSData>& gps, FusedData& output) override {
- *         // Check if GPS sync succeeded
- *         if (gps) {
- *             output = fuse_with_gps(imu, *gps);
- *         } else {
- *             output = dead_reckoning(imu);
- *         }
- *     }
- * };
- * @endcode
+ * Inherits appropriate processor base class based on I/O configuration.
+ * Process signature auto-determined by ProcessParam trait:
+ * - No inputs: void process(O1& out1, ...)
+ * - Continuous: void process(const I1& in1, ..., O1& out1, ...)
+ * - Synced: void process(const I1& in1, const std::optional<I2>& synced, ..., O1& out1, ...)
  */
 template<typename Registry, typename... IOSpecs>
 class Module2 
