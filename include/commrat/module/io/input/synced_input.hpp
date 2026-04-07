@@ -125,11 +125,11 @@ public:
         // Build request
         TimsMessage<GetDataReqPayload> request{
             .header = {
+                .msg_type = Registry::template get_message_id<GetDataReqPayload>(),
                 .timestamp = Time::now(),
                 .seq_number = 0,
-                .msg_type = Registry::template get_message_id<GetDataReqPayload>(),
-                .src_address = 0,  // Will be filled by mailbox
-                .dest_address = 0  // Will be filled by mailbox
+                .dest = 0,  // Will be filled by mailbox
+                .src  = 0   // Will be filled by mailbox
             },
             .payload = {
                 .target_timestamp = timestamp,
@@ -159,8 +159,8 @@ public:
         last_message_.header.timestamp = reply.payload.data_timestamp;
         last_message_.header.seq_number = 0;  // Producer's seq number (could pass through)
         last_message_.header.msg_type = Registry::template get_message_id<OutputType>();
-        last_message_.header.src_address = reply.header.src_address;
-        last_message_.header.dest_address = reply.header.dest_address;
+        last_message_.header.src  = reply.header.src;
+        last_message_.header.dest = reply.header.dest;
         last_message_.payload = reply.payload.data;
         
         msg = &last_message_;
@@ -189,11 +189,11 @@ public:
         // Build request
         TimsMessage<GetNextDataReqPayload> request{
             .header = {
+                .msg_type = Registry::template get_message_id<GetNextDataReqPayload>(),
                 .timestamp = Time::now(),
                 .seq_number = 0,
-                .msg_type = Registry::template get_message_id<GetNextDataReqPayload>(),
-                .src_address = 0,  // Will be filled by mailbox
-                .dest_address = 0  // Will be filled by mailbox
+                .dest = 0,  // Will be filled by mailbox
+                .src  = 0   // Will be filled by mailbox
             },
             .payload = {}  // Empty
         };
@@ -219,8 +219,8 @@ public:
         last_message_.header.timestamp = reply.payload.data_timestamp;
         last_message_.header.seq_number = 0;
         last_message_.header.msg_type = Registry::template get_message_id<OutputType>();
-        last_message_.header.src_address = reply.header.src_address;
-        last_message_.header.dest_address = reply.header.dest_address;
+        last_message_.header.src  = reply.header.src;
+        last_message_.header.dest = reply.header.dest;
         last_message_.payload = reply.payload.data;
         
         msg = &last_message_;

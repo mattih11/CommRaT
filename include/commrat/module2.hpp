@@ -404,7 +404,7 @@ private:
         MailboxConfig work_config{
             .mailbox_id = work_addr,
             .message_slots = config_.cmd_message_slots.value(),  // Extract from rfl::DefaultVal
-            .max_message_size = WorkMailbox::max_message_size,  // Optimized for SystemRegistry messages
+            .max_message_size = Registry::max_message_size,  // Full registry max (unrestricted mailbox)
             .send_priority = static_cast<uint8_t>(config_.priority),
             .realtime = config_.realtime
         };

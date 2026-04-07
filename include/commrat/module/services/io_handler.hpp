@@ -163,8 +163,33 @@ protected:
     template<size_t... InputIndices>
     bool fetch_inputs(std::index_sequence<InputIndices...>) {
         if constexpr (sizeof...(InputIndices) == 0) return true;
-        std::array<bool, sizeof...(InputIndices)> results{fetch_single_input<InputIndices>()...};
-        return results[0];  // Primary input is always index 0
+
+        // Step 1: Poll primary input (always index 0, a ContinuousInput)
+        bool primary_got_data = get_input<0>().poll_data();
+        if (!primary_got_data) return false;
+
+        // Step 2: For each synced input, call get_data with primary timestamp
+        if constexpr (num_synced_inputs > 0) {
+            Timestamp primary_ts = get_input<0>().get_timestamp();
+            (fetch_synced_if_needed<InputIndices>(primary_ts), ...);
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Call get_data on synced input; no-op for continuous / primary
+     */
+    template<size_t InputIndex>
+    void fetch_synced_if_needed(Timestamp primary_ts) {
+        auto& input = get_input<InputIndex>();
+        using InputWrapper = std::decay_t<decltype(input)>;
+        if constexpr (!is_continuous_input_v<InputWrapper> && InputIndex != 0) {
+            using SyncedT = decltype(input.get_payload());  // Synced<T>
+            using DataT   = typename SyncedT::value_type;
+            const TimsMessage<DataT>* msg_ptr = nullptr;
+            input.get_data(primary_ts, msg_ptr);
+        }
     }
     
     /**

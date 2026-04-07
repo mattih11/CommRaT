@@ -39,12 +39,45 @@ protected:
     // ========================================================================
     
     /**
+     * @brief Detect if type is GetDataRequestPayload<T>
+     */
+    template<typename T>
+    struct is_get_data_request_payload : std::false_type {};
+    
+    template<typename T>
+    struct is_get_data_request_payload<GetDataRequestPayload<T>> : std::true_type {
+        using DataType = T;
+    };
+    
+    /**
+     * @brief Detect if type is GetNextDataRequestPayload<T>
+     */
+    template<typename T>
+    struct is_get_next_data_request_payload : std::false_type {};
+    
+    template<typename T>
+    struct is_get_next_data_request_payload<GetNextDataRequestPayload<T>> : std::true_type {
+        using DataType = T;
+    };
+    
+    /**
      * @brief Get system commands (always included)
      * 
      * Returns tuple<SubscribeRequestPayload, UnsubscribeRequestPayload>
      * System messages from subscription protocol.
+     * Note: GetDataRequestPayload<T> and GetNextDataRequestPayload<T> are templates
+     * and cannot be listed here; they are detected via is_get_data_request_payload<T>.
      */
     using SystemCommands = std::tuple<SubscribeRequestPayload, UnsubscribeRequestPayload>;
+
+    /**
+     * @brief Detect if a type is any system command (fixed or template-based)
+     */
+    template<typename T>
+    static constexpr bool is_system_command_v =
+        is_in_tuple_v<T, SystemCommands> ||
+        is_get_data_request_payload<T>::value ||
+        is_get_next_data_request_payload<T>::value;
     
     /**
      * @brief Get tuple index for logical output index (compile-time helper)
@@ -79,8 +112,9 @@ protected:
     bool visit_system_command(Output& output, ReceivedMsg&& received_msg) {
         using CmdType = typename std::decay_t<decltype(received_msg)>::payload_type;
         
-        // Simple tuple membership check
-        if constexpr (is_in_tuple_v<CmdType, SystemCommands>) {
+        // Covers: SubscribeRequestPayload, UnsubscribeRequestPayload,
+        //         GetDataRequestPayload<T>, GetNextDataRequestPayload<T>
+        if constexpr (is_system_command_v<CmdType>) {
             handle_system_command<OutputIndex>(output, received_msg);
             return true;
         }
@@ -141,28 +175,6 @@ private:
     // ========================================================================
     
     /**
-     * @brief Detect if type is GetDataRequestPayload<T>
-     */
-    template<typename T>
-    struct is_get_data_request_payload : std::false_type {};
-    
-    template<typename T>
-    struct is_get_data_request_payload<GetDataRequestPayload<T>> : std::true_type {
-        using DataType = T;
-    };
-    
-    /**
-     * @brief Detect if type is GetNextDataRequestPayload<T>
-     */
-    template<typename T>
-    struct is_get_next_data_request_payload : std::false_type {};
-    
-    template<typename T>
-    struct is_get_next_data_request_payload<GetNextDataRequestPayload<T>> : std::true_type {
-        using DataType = T;
-    };
-    
-    /**
      * @brief Handle specific system command
      * 
      * Dispatches to ModuleOutput's handler methods and sends replies.
@@ -189,14 +201,21 @@ private:
             cmd_mailbox.send_reply(received_msg, reply_payload);
         }
         else if constexpr (is_get_data_request_payload<CmdType>::value) {
-            // GetDataRequestPayload<T> - timestamp-synchronized query
-            auto reply_payload = output.handle_get_data_request(received_msg.payload);
-            cmd_mailbox.send_reply(received_msg, reply_payload);
+            // GetDataRequestPayload<DataT> - timestamp-synchronized query.
+            // Guard: only compile when request data type matches this output's type.
+            using RequestDataType = typename is_get_data_request_payload<CmdType>::DataType;
+            if constexpr (std::is_same_v<RequestDataType, typename std::decay_t<Output>::Type>) {
+                auto reply_payload = output.handle_get_data_request(received_msg.payload);
+                cmd_mailbox.send_reply(received_msg, reply_payload);
+            }
         }
         else if constexpr (is_get_next_data_request_payload<CmdType>::value) {
-            // GetNextDataRequestPayload<T> - latest data query
-            auto reply_payload = output.handle_get_next_data_request(received_msg.payload);
-            cmd_mailbox.send_reply(received_msg, reply_payload);
+            // GetNextDataRequestPayload<DataT> - latest data query.
+            using RequestDataType = typename is_get_next_data_request_payload<CmdType>::DataType;
+            if constexpr (std::is_same_v<RequestDataType, typename std::decay_t<Output>::Type>) {
+                auto reply_payload = output.handle_get_next_data_request(received_msg.payload);
+                cmd_mailbox.send_reply(received_msg, reply_payload);
+            }
         }
     }
 };
