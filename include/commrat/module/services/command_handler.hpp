@@ -139,8 +139,8 @@ protected:
      * 
      * @return true if message was a user command (handled), false otherwise
      */
-    template<size_t OutputIndex, typename ReceivedMsg, typename DerivedModule>
-    bool visit_user_command(ReceivedMsg&& received_msg, DerivedModule* derived) {
+    template<size_t OutputIndex, typename Output, typename ReceivedMsg, typename DerivedModule>
+    bool visit_user_command(Output& output, ReceivedMsg&& received_msg, DerivedModule* derived) {
         using CmdType = typename std::decay_t<decltype(received_msg)>::payload_type;
         using UserCommands = UserCommandsFor<OutputIndex>;
         
@@ -148,11 +148,13 @@ protected:
         if constexpr (has_reply_type_v<CmdType>) {
             // Simple tuple membership check
             if constexpr (is_in_tuple_v<CmdType, UserCommands>) {
-                // TODO: Check if user implemented on_command<OutputIndex, CmdType>()
-                // For now, assume implemented (CRTP will enforce at compile time)
-                typename CmdType::Reply reply;
+                // CRTP: derived module must implement on_command<OutputIndex>(cmd, reply)
+                typename CmdType::Reply reply{};
                 derived->template on_command<OutputIndex>(received_msg.payload, reply);
-                // TODO: Send reply via CMD mailbox
+                
+                // Send reply via CMD mailbox (same pattern as system commands)
+                auto& cmd_mailbox = output.get_cmd_mailbox();
+                cmd_mailbox.send_reply(received_msg, reply);
                 return true;
             }
         }

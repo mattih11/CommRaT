@@ -459,7 +459,8 @@ private:
      */
     template<size_t OutputIndex, typename ReceivedMsg>
     bool visit_user_commands(ReceivedMsg&& received_msg) {
-        return CmdService::template visit_user_command<OutputIndex>(received_msg, this);
+        auto& output = this->template get_output<OutputIndex>();
+        return CmdService::template visit_user_command<OutputIndex>(output, received_msg, this);
     }
     
     /**

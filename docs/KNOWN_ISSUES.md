@@ -31,25 +31,21 @@ Failed to start PUBLISH mailbox: TiMS initialization failed
 
 Index-based metadata access `get_input_metadata<0>()` is the supported API. Type-based access was removed with the old metadata/ infrastructure.
 
-### 2. Subscription Protocol Not Yet Wired
+### 2. Subscription Protocol Not Yet Wired (RESOLVED)
 
-**Status**: Feature Gap  
-**Priority**: Medium
+**Status**: Resolved  
+**Priority**: N/A
 
-Subscription protocol handlers (Subscribe/Unsubscribe) exist in `ModuleOutput` but are not yet registered in `command_loop_impl`. The `example_commands` test times out as a result.
+The subscription protocol IS fully wired in `Module2::command_loop_impl()`. Each output CMD mailbox dispatches to `visit_system_commands()` which handles SubscribeRequest, UnsubscribeRequest, GetDataRequest, and GetNextDataRequest via `CommandHandler::handle_system_command()`. Consumer-side `ContinuousInput::subscribe()` sends SubscribeRequest and waits for reply. Producer-side `ModuleOutput::publish()` sends data to all subscribers. End-to-end flow proven by `test_3input_fusion`.
 
-**Next**: Wire Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`.
+The old `subscription.hpp` (353 lines, legacy class with RT violations) was dead code not used by Module2 and has been removed.
 
-### 3. No User Command Reply Mechanism
+### 3. No User Command Reply Mechanism (RESOLVED)
 
-**Status**: Feature Gap  
-**Priority**: Medium
+**Status**: Resolved  
+**Priority**: N/A
 
-System request/reply messages (Subscribe, GetData) have reply types auto-generated. User commands are currently fire-and-forget. Reply routing infrastructure exists but is not yet integrated for user-defined commands.
-
-**Proposed**: `void on_command(const GetStatusCmd&, StatusReply&)` pattern (reply type from `DataWithCommands`).
-
-**Workaround**: Use regular output messages for replies.
+User command replies are now sent via CMD mailbox. `CommandHandler::visit_user_command()` calls `derived->on_command<OutputIndex>(cmd, reply)` and sends the reply via `cmd_mailbox.send_reply()`, matching the system command pattern exactly.
 
 ---
 

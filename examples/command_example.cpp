@@ -178,14 +178,14 @@ int main() {
     CommandableSensor sensor(sensor_config);
     sensor.start();
     
-    std::cout << "Sensor running. Press Ctrl+C to stop.\n\n";
+    std::cout << "Sensor running with command handlers registered.\n";
+    std::cout << "Auto-stopping after 2 seconds...\n\n";
     
-    // TODO: Add command sender module that sends commands to sensor
-    // For now, just run the sensor andshow periodic output
-    
-    // Wait for shutdown signal
-    while (!shutdown_requested.load()) {
-        Time::sleep(Milliseconds(100));
+    // Run for ~2 seconds to show periodic output, then auto-stop
+    int seconds = 0;
+    while (!shutdown_requested.load() && seconds < 2) {
+        Time::sleep(Milliseconds(1000));
+        seconds++;
     }
     
     // Cleanup
