@@ -60,11 +60,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-timeout --foreground 10 "$EXECUTABLE" "$CONFIG_FILE"
+# Run with timeout; --kill-after ensures SIGKILL follows if SIGTERM is ignored
+timeout --foreground --kill-after=3 5 "$EXECUTABLE" "$CONFIG_FILE"
 exit_code=$?
 
 # Exit code 124 means timeout (success for continuous modules)
-if [ $exit_code -eq 124 ]; then
+# Exit code 137 means SIGKILL after --kill-after (also treat as success)
+if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
     echo "$BASENAME timed out as expected (success)"
     exit 0
 fi

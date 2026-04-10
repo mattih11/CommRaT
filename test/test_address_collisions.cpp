@@ -191,7 +191,7 @@ bool test_1_identical_type_system_instance() {
         consumer.start();
         std::cout << "  [OK] Consumer started and subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t received = consumer.received_count_.load();
         std::cout << "  [INFO] Consumer received " << received << " messages\n";
@@ -280,7 +280,7 @@ bool test_2_different_type_same_system_instance() {
         consumerB.start();
         std::cout << "  [OK] ConsumerB subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t countA = consumerA.received_count_.load();
         uint32_t countB = consumerB.received_count_.load();
@@ -368,7 +368,7 @@ bool test_3_same_type_different_instance() {
         consumer2.start();
         std::cout << "  [OK] Consumer2 subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t count1 = consumer1.received_count_.load();
         uint32_t count2 = consumer2.received_count_.load();
@@ -496,7 +496,7 @@ bool test_5_multi_output_same_type_different_address() {
         consumer2.start();
         std::cout << "  [OK] Consumer2 subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t count1 = consumer1.received_count_.load();
         uint32_t count2 = consumer2.received_count_.load();
@@ -632,7 +632,7 @@ bool test_7_multi_output_different_types_same_sysid() {
         consumerC.start();
         std::cout << "  [OK] ConsumerC subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t countA = consumerA.received_count_.load();
         uint32_t countC = consumerC.received_count_.load();
@@ -663,13 +663,17 @@ bool test_7_multi_output_different_types_same_sysid() {
 
 bool test_8_stress_test_many_instances() {
     std::cout << "\n========================================\n";
-    std::cout << "Test 8: Stress test - 10 instances of same type\n";
+    std::cout << "Test 8: Stress test - 9 instances of same type\n";
     std::cout << "  Verify consumer can subscribe to one of many instances\n";
+    std::cout << "  (limited to 9 to stay under TiMS 32-connection limit)\n";
     std::cout << "========================================\n";
     
     std::vector<std::unique_ptr<ProducerA>> producers;
     
-    for (int i = 0; i < 10; i++) {
+    // 9 producers x 3 mailboxes = 27 connections
+    // + 1 consumer x 4 mailboxes = 4 connections
+    // Total: 31 connections (TiMS hard limit is 32)
+    for (int i = 0; i < 9; i++) {
         try {
             ModuleConfig config{
                 .name = "Producer_" + std::to_string(i),
@@ -689,7 +693,7 @@ bool test_8_stress_test_many_instances() {
         }
     }
     
-    std::cout << "  [OK] Created 10 producer instances successfully\n";
+    std::cout << "  [OK] Created 9 producer instances successfully\n";
     
     // Create consumer subscribing to instance 5 (use different system_id to avoid collision)
     ModuleConfig consumer_config{
@@ -705,7 +709,7 @@ bool test_8_stress_test_many_instances() {
         consumer.start();
         std::cout << "  [OK] Consumer subscribed\n";
         
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(200ms);
         
         uint32_t count = consumer.received_count_.load();
         std::cout << "  [INFO] Consumer received " << count << " messages\n";
@@ -718,7 +722,7 @@ bool test_8_stress_test_many_instances() {
         }
         
         if (count > 0) {
-            std::cout << "\nPASS: Test 8 - 10 instances no collisions, subscription works\n";
+            std::cout << "\nPASS: Test 8 - 9 instances no collisions, subscription works\n";
             return true;
         } else {
             std::cout << "\nFAIL: Test 8 - Producers created but no data flow (received: " << count << ")\n";
@@ -749,27 +753,28 @@ int main() {
     int passed = 0;
     int total = 8;
     
-    // Run all tests with delays between them
+    // Run all tests with brief delays between them
+    // (shorter delays to stay well within 30s CTest timeout)
     if (test_1_identical_type_system_instance()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_2_different_type_same_system_instance()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_3_same_type_different_instance()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_4_multi_output_same_type_same_address()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_5_multi_output_same_type_different_address()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_6_multi_output_partial_collision()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_7_multi_output_different_types_same_sysid()) passed++;
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(100ms);
     
     if (test_8_stress_test_many_instances()) passed++;
     

@@ -6,11 +6,6 @@ This document tracks planned features, improvements, and long-term ideas for Com
 
 ## Current Focus
 
-### Subscription Protocol Integration (In Progress)
-- Wire Subscribe/Unsubscribe handlers in `ModuleOutput::command_loop_impl`
-- Enable end-to-end data flow via subscription protocol
-- See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) Issue 2
-
 ### Documentation Update (In Progress)
 - Update USER_GUIDE.md, API_REFERENCE.md for Module2 API
 - Fix outdated code examples throughout docs
@@ -218,6 +213,8 @@ For full history, see `docs/internal/phase_history/` and `docs/internal/refactor
 - Zero-copy workspace API
 - Introspection system (JSON/YAML/TOML/XML export)
 - Timestamp metadata accessors (`get_input_timestamp<N>()`, etc.)
+- Subscription protocol integration (Subscribe/Unsubscribe/GetData dispatch in command_loop)
+- User command reply mechanism (on_command reply sent via CMD mailbox)
 
 ## Contributing Ideas
 

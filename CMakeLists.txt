@@ -206,6 +206,7 @@ add_executable(test_address_collisions test/test_address_collisions.cpp)
 target_link_libraries(test_address_collisions PRIVATE commrat)
 target_include_directories(test_address_collisions PRIVATE /usr/local/include/rack)
 add_test(NAME test_address_collisions COMMAND test_address_collisions)
+set_tests_properties(test_address_collisions PROPERTIES TIMEOUT 45)
 
 # GetData auto-registration test
 add_executable(test_getdata_registration test/test_getdata_registration.cpp)
