@@ -136,7 +136,7 @@ int main() {
         producer.start();
         
         // Give threads time to start and mailboxes to initialize
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        commrat::Time::sleep(commrat::Milliseconds(100));
         
         consumer.start();  // This triggers automatic subscription
         
@@ -144,7 +144,7 @@ int main() {
         
         // Run until shutdown signal
         while (!shutdown_requested.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            commrat::Time::sleep(commrat::Milliseconds(100));
         }
         
         std::cout << "\n\nShutdown requested...\n";

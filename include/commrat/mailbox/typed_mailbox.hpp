@@ -268,7 +268,7 @@ public:
      * @note Zero-copy: Message deserialized directly into provided reference
      */
     template<typename PayloadT>
-    bool receive(TimsMessage<PayloadT>& message, std::chrono::milliseconds timeout) {
+    bool receive(TimsMessage<PayloadT>& message, Duration timeout) {
         static_assert(is_allowed_type<PayloadT>,
                       "Message type not allowed in this typed mailbox. "
                       "Check that PayloadT is in the AllowedPayloadTypes list.");
@@ -337,7 +337,7 @@ public:
      * @return Success or error
      */
     template<size_t BufferSize = max_message_size, typename Visitor>
-    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
+    auto receive_any_for(Duration timeout, Visitor&& visitor) -> MailboxResult<void> {
         return mailbox_.template receive_any_for<BufferSize>(timeout, std::forward<Visitor>(visitor));
     }
     

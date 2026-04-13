@@ -14,7 +14,6 @@
 #include <commrat/commrat.hpp>
 #include <iostream>
 #include <atomic>
-#include <thread>
 #include <chrono>
 
 using namespace commrat;
@@ -133,7 +132,7 @@ bool try_create_module(const ModuleConfig& config, const std::string& test_name)
         module.start();
         std::cout << "  [OK] Module started successfully\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         module.stop();
         
         return true;
@@ -184,14 +183,14 @@ bool test_1_identical_type_system_instance() {
         producer.start();
         std::cout << "  [OK] Producer started\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         
         std::cout << "[Test1] Creating consumer subscribing to producer\n";
         ConsumerA consumer(consumer_config);
         consumer.start();
         std::cout << "  [OK] Consumer started and subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t received = consumer.received_count_.load();
         std::cout << "  [INFO] Consumer received " << received << " messages\n";
@@ -268,7 +267,7 @@ bool test_2_different_type_same_system_instance() {
         producerB.start();
         std::cout << "  [OK] ProducerB started (no collision!)\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         
         std::cout << "[Test2] Creating ConsumerA (subscribes to SensorA)\n";
         ConsumerA consumerA(consumerA_config);
@@ -280,7 +279,7 @@ bool test_2_different_type_same_system_instance() {
         consumerB.start();
         std::cout << "  [OK] ConsumerB subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t countA = consumerA.received_count_.load();
         uint32_t countB = consumerB.received_count_.load();
@@ -356,7 +355,7 @@ bool test_3_same_type_different_instance() {
         producer2.start();
         std::cout << "  [OK] Producer2 started (no collision!)\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         
         std::cout << "[Test3] Creating Consumer1 (subscribes to instance 1)\n";
         ConsumerA consumer1(consumer1_config);
@@ -368,7 +367,7 @@ bool test_3_same_type_different_instance() {
         consumer2.start();
         std::cout << "  [OK] Consumer2 subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t count1 = consumer1.received_count_.load();
         uint32_t count2 = consumer2.received_count_.load();
@@ -422,7 +421,7 @@ bool test_4_multi_output_same_type_same_address() {
         producer1.start();
         std::cout << "  [OK] First module started\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         std::cout << "\n[Test4] Creating SECOND multi-output with SAME address\n";
         MultiProducer producer2(config2);
@@ -484,7 +483,7 @@ bool test_5_multi_output_same_type_different_address() {
         multi2.start();
         std::cout << "  [OK] MultiProducer B started (no collision!)\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         
         std::cout << "[Test5] Creating Consumer1 (subscribes to Multi A's SensorA)\n";
         ConsumerA consumer1(consumer1_config);
@@ -496,7 +495,7 @@ bool test_5_multi_output_same_type_different_address() {
         consumer2.start();
         std::cout << "  [OK] Consumer2 subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t count1 = consumer1.received_count_.load();
         uint32_t count2 = consumer2.received_count_.load();
@@ -551,7 +550,7 @@ bool test_6_multi_output_partial_collision() {
         multi.start();
         std::cout << "  [OK] Multi-output started\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         // ProducerA should collide with MultiProducer's SensorA output
         std::cout << "\n[Test6] Creating ProducerA with SAME [sys][inst]\n";
@@ -620,7 +619,7 @@ bool test_7_multi_output_different_types_same_sysid() {
         producerC.start();
         std::cout << "  [OK] ProducerC started (no collision - different type!)\n";
         
-        std::this_thread::sleep_for(100ms);
+        Time::sleep(Milliseconds(100));
         
         std::cout << "[Test7] Creating ConsumerA (subscribes to SensorA)\n";
         ConsumerA consumerA(consumerA_config);
@@ -632,7 +631,7 @@ bool test_7_multi_output_different_types_same_sysid() {
         consumerC.start();
         std::cout << "  [OK] ConsumerC subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t countA = consumerA.received_count_.load();
         uint32_t countC = consumerC.received_count_.load();
@@ -709,7 +708,7 @@ bool test_8_stress_test_many_instances() {
         consumer.start();
         std::cout << "  [OK] Consumer subscribed\n";
         
-        std::this_thread::sleep_for(200ms);
+        Time::sleep(Milliseconds(200));
         
         uint32_t count = consumer.received_count_.load();
         std::cout << "  [INFO] Consumer received " << count << " messages\n";
@@ -756,25 +755,25 @@ int main() {
     // Run all tests with brief delays between them
     // (shorter delays to stay well within 30s CTest timeout)
     if (test_1_identical_type_system_instance()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_2_different_type_same_system_instance()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_3_same_type_different_instance()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_4_multi_output_same_type_same_address()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_5_multi_output_same_type_different_address()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_6_multi_output_partial_collision()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_7_multi_output_different_types_same_sysid()) passed++;
-    std::this_thread::sleep_for(100ms);
+    Time::sleep(Milliseconds(100));
     
     if (test_8_stress_test_many_instances()) passed++;
     

@@ -250,7 +250,7 @@ int main() {
             {.system_id = 10, .instance_id = 1}   // PressureData output
         }},
         .inputs = commrat::NoInputConfig{},
-        .period = commrat::Milliseconds(100)  // 10Hz data generation
+        .period = std::chrono::milliseconds(100)  // 10Hz data generation
     };
     
     // ========================================================================
@@ -291,7 +291,7 @@ int main() {
     station.start();
     
     // Give producer time to initialize
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    commrat::Time::sleep(commrat::Milliseconds(100));
     
     std::cout << "Starting consumers...\n";
     temp_monitor.start();
@@ -304,7 +304,7 @@ int main() {
     std::cout << "\nRunning weather monitoring... (Press Ctrl+C to stop)\n\n";
     
     while (!shutdown_requested.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        commrat::Time::sleep(commrat::Milliseconds(100));
     }
     
     // ========================================================================

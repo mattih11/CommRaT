@@ -353,7 +353,7 @@ protected:
                 data_config,
                 src_sys_id,
                 src_inst_id,
-                Milliseconds::zero(),   // Requested period
+                Duration::zero(),       // Requested period
                 Milliseconds(100),      // Poll timeout
                 Milliseconds(1000)      // Command timeout
             );
@@ -419,7 +419,7 @@ protected:
         // Only ContinuousInput needs subscription (SyncedInput uses get_data)
         using InputWrapper = std::decay_t<decltype(input)>;
         if constexpr (is_continuous_input_v<InputWrapper>) {
-            Milliseconds actual_period;
+            Duration actual_period;
             if (!input.subscribe(actual_period)) {
                 // TODO: Handle subscription failure
             }

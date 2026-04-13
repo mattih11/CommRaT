@@ -19,7 +19,6 @@
 #include "commrat/commrat.hpp"
 #include <iostream>
 #include <chrono>
-#include <thread>
 #include <csignal>
 
 // ============================================================================
@@ -180,7 +179,7 @@ int main() {
         std::cout << "[Main] Started SensorProducer\n";
 
         // Give producer time to initialize
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        commrat::Time::sleep(commrat::Milliseconds(200));
 
         // Create temperature receiver
         commrat::ModuleConfig temp_receiver_config{
@@ -195,7 +194,7 @@ int main() {
         std::cout << "[Main] TempReceiver subscribing to producer...\n";
 
         // Give subscription time to complete
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        commrat::Time::sleep(commrat::Milliseconds(200));
 
         // Create pressure receiver
         // NEW: Auto-inference handles multi-output - uses InputData type (PressureData)
@@ -211,7 +210,7 @@ int main() {
         std::cout << "[Main] PressureReceiver subscribing to producer (auto-infers PressureData type)...\n\n";
 
         // Wait for subscriptions to stabilize
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        commrat::Time::sleep(commrat::Milliseconds(300));
 
         std::cout << "=== Multi-Output System Running ===\n\n";
 
@@ -230,7 +229,7 @@ int main() {
                           << "ms)\n";
             }
             iteration++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            commrat::Time::sleep(commrat::Milliseconds(100));
         }
 
         std::cout << "\n=== Multi-Output Runtime Test Complete ===\n";

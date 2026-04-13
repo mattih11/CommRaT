@@ -183,7 +183,7 @@ void test_periodic_timestamps() {
         .name = "PeriodicProducer",
         .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = Milliseconds{100},
+        .period = std::chrono::milliseconds{100},
         .message_slots = 10,
         .max_subscribers = 4
     };
@@ -219,7 +219,7 @@ void test_continuous_propagation() {
         .name = "Producer",
         .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = Milliseconds{100},
+        .period = std::chrono::milliseconds{100},
         .message_slots = 10,
         .max_subscribers = 4
     };

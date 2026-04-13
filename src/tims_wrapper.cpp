@@ -1,6 +1,5 @@
 #include "commrat/platform/tims_wrapper.hpp"
 #include <cstring>
-#include <chrono>
 
 namespace commrat {
 
@@ -121,19 +120,19 @@ TimsResult TimsWrapper::send_raw(const void* data, size_t size, uint32_t dest_ma
 }
 
 ssize_t TimsWrapper::receive_raw(void* buffer, size_t buffer_size, 
-                                  std::chrono::milliseconds timeout,
+                                  Duration timeout,
                                   TimsMetadata* metadata) {
     if (!is_initialized_ || tims_fd_ < 0) {
         return -1;
     }
     
     // Convert timeout to nanoseconds for TIMS
-    // Special case: -1ms means non-blocking (TIMS_NONBLOCK = -1ns)
+    // Special case: negative means non-blocking (TIMS_NONBLOCK = -1ns)
     int64_t timeout_ns;
-    if (timeout.count() == -1) {
+    if (timeout.is_negative()) {
         timeout_ns = -1;  // TIMS_NONBLOCK
     } else {
-        timeout_ns = timeout.count() * 1000000;  // ms to ns
+        timeout_ns = timeout.count_ns();
     }
     
     tims_msg_head head;

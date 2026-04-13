@@ -1,11 +1,11 @@
 #pragma once
 
 #include <string>
-#include <chrono>
 #include <optional>
 #include <vector>
 #include <rfl.hpp>
 #include "commrat/mailbox/mailbox_type.hpp"
+#include "commrat/platform/timestamp.hpp"
 
 namespace commrat {
 
@@ -197,13 +197,13 @@ struct ModuleConfig {
         return multi->sources;
     }
     
-    /// Get sync_tolerance (MultiInput only)
-    [[nodiscard]] std::chrono::milliseconds sync_tolerance() const {
+    /// Get sync_tolerance (MultiInput only) - returns Duration
+    [[nodiscard]] Duration sync_tolerance() const {
         auto* multi = rfl::get_if<MultiInputConfig>(&inputs.variant());
         if (!multi) {
             throw std::logic_error("sync_tolerance() only valid for MultiInputConfig");
         }
-        return multi->sync_tolerance;
+        return Duration::from_chrono(multi->sync_tolerance);
     }
     
     /// Get history_buffer_size (MultiInput only)

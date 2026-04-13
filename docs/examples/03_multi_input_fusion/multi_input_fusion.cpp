@@ -383,7 +383,7 @@ int main() {
         .name = "IMU",
         .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = commrat::Milliseconds(10)  // 100Hz
+        .period = std::chrono::milliseconds(10)  // 100Hz
     };
     
     // GPS: 10Hz (100ms period)
@@ -391,7 +391,7 @@ int main() {
         .name = "GPS",
         .outputs = commrat::SimpleOutputConfig{.system_id = 11, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = commrat::Milliseconds(100)  // 10Hz
+        .period = std::chrono::milliseconds(100)  // 10Hz
     };
     
     // ========================================================================
@@ -439,14 +439,14 @@ int main() {
     
     // Give sensors time to initialize and build up data
     std::cout << "Waiting for producers to publish data...\n";
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    commrat::Time::sleep(commrat::Milliseconds(500));
     
     std::cout << "Starting fusion...\n";
     fusion.start();
     
     // Wait for secondary input threads to populate buffers
     std::cout << "Waiting for fusion buffers to fill...\n";
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    commrat::Time::sleep(commrat::Milliseconds(500));
     
     std::cout << "Starting monitor...\n";
     monitor.start();
@@ -458,7 +458,7 @@ int main() {
     std::cout << "\nRunning sensor fusion... (Press Ctrl+C to stop)\n\n";
     
     while (!shutdown_requested.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        commrat::Time::sleep(commrat::Milliseconds(100));
     }
     
     // ========================================================================

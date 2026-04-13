@@ -11,7 +11,6 @@
 
 #include <commrat/commrat.hpp>
 #include <chrono>
-#include <thread>
 #include <iostream>
 
 using namespace commrat;
@@ -145,7 +144,7 @@ int main() {
     std::cout << "TEST 2: ModuleConfig with input_sources compiles ✓\n";
     std::cout << "  - input_sources.size() = " << fusion_config.input_sources().size() << "\n";
     std::cout << "  - history_buffer_size = " << fusion_config.history_buffer_size() << "\n";
-    std::cout << "  - sync_tolerance = " << fusion_config.sync_tolerance().count() << " ms\n";
+    std::cout << "  - sync_tolerance = " << fusion_config.sync_tolerance().count_ms() << " ms\n";
     
     // Test 3: Single-input modules still work (backward compatibility)
     ModuleConfig imu_config{

@@ -65,7 +65,7 @@ int main() {
         .name = "Producer",
         .outputs = SimpleOutputConfig{.system_id = 10, .instance_id = 1},
         .inputs = NoInputConfig{},
-        .period = Milliseconds(100)  // 10Hz via config
+        .period = std::chrono::milliseconds(100)  // 10Hz via config
     };
     
     ModuleConfig consumer_config{

@@ -79,7 +79,7 @@ public:
      * @param default_tolerance Default tolerance for timestamp matching (ms)
      */
     explicit OutputBuffer(
-        std::chrono::milliseconds default_tolerance = std::chrono::milliseconds(50)
+        Duration default_tolerance = Milliseconds(50)
     ) : default_tolerance_(default_tolerance) {}
     
     // ========================================================================
@@ -267,7 +267,7 @@ public:
      */
     const T* get_data(
         uint64_t timestamp,
-        std::chrono::milliseconds tolerance = std::chrono::milliseconds(-1),
+        Duration tolerance = Duration::milliseconds(-1),
         InterpolationMode mode = InterpolationMode::NEAREST
     ) const {
         SharedLock lock(mutex_);
@@ -277,12 +277,12 @@ public:
         }
         
         // Use default tolerance if not specified
-        if (tolerance.count() < 0) {
+        if (tolerance.is_negative()) {
             tolerance = default_tolerance_;
         }
         
-        // Convert tolerance from milliseconds to nanoseconds
-        uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count()) * 1'000'000ULL;
+        // Convert tolerance to nanoseconds
+        uint64_t tolerance_ns = static_cast<uint64_t>(tolerance.count_ns());
         
         // Quick bounds check
         uint64_t oldest_ts = TimestampAccessor<T>::get(buffer_.front());
@@ -415,7 +415,7 @@ private:
     
     mutable SharedMutex mutex_;                 ///< Thread synchronization
     sertial::RingBuffer<T, MaxSize> buffer_;    ///< Underlying circular buffer
-    std::chrono::milliseconds default_tolerance_;  ///< Default tolerance for get_data
+    Duration default_tolerance_;  ///< Default tolerance for get_data
 };
 
 } // namespace commrat

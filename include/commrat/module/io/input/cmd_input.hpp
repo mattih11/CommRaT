@@ -75,7 +75,7 @@ public:
     void initialize(typename Registry::System::WorkMailbox& work_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Milliseconds cmd_timeout = Milliseconds(100)) {
+                    Duration cmd_timeout = Milliseconds(100)) {
         work_mbx_ = &work_mbx;
         producer_system_id_ = producer_system_id;
         producer_instance_id_ = producer_instance_id;
@@ -94,7 +94,7 @@ public:
     CmdInput(MailboxFor<Registry>& work_mbx,
              uint8_t producer_system_id,
              uint8_t producer_instance_id,
-             Milliseconds cmd_timeout = Milliseconds(100))
+             Duration cmd_timeout = Milliseconds(100))
         : work_mbx_(&work_mbx)
         , producer_system_id_(producer_system_id)
         , producer_instance_id_(producer_instance_id)
@@ -122,9 +122,9 @@ public:
     template<typename CmdType, typename ReplyType>
     bool send_command(const TimsMessage<CmdType>& command, 
                      TimsMessage<ReplyType>& reply,
-                     Milliseconds timeout = Milliseconds::zero()) {
+                     Duration timeout = Duration::zero()) {
         // Use constructor default if not specified
-        if (timeout == Milliseconds::zero()) {
+        if (timeout == Duration::zero()) {
             timeout = cmd_timeout_;
         }
         
@@ -141,11 +141,11 @@ public:
         Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
         while (Time::now() < deadline) {
             TimsMessage<ReplyType> received;
-            auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::nanoseconds(deadline - Time::now()));
+            auto remaining_ns = static_cast<int64_t>(deadline - Time::now());
+            Duration remaining = Duration::nanoseconds(remaining_ns > 0 ? remaining_ns : 0);
             bool got_msg = work_mbx_->receive(
                 received,
-                Milliseconds(remaining)
+                remaining
             );
             
             if (!got_msg) {
@@ -174,7 +174,7 @@ protected:
     uint8_t producer_system_id_;                        ///< Producer's system ID
     uint8_t producer_instance_id_;                      ///< Producer's instance ID
     uint32_t producer_cmd_address_;                     ///< Producer's CMD mailbox address
-    Milliseconds cmd_timeout_;                          ///< Default timeout for commands
+    Duration cmd_timeout_;                          ///< Default timeout for commands
 };
 
 } // namespace commrat

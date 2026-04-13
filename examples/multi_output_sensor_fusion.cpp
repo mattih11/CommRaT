@@ -25,7 +25,6 @@
 #include "commrat/commrat.hpp"
 #include <iostream>
 #include <chrono>
-#include <thread>
 #include <csignal>
 #include <cmath>
 
@@ -290,7 +289,7 @@ int main() {
         std::cout << "[Main] Created SensorFusion (system_id=10, instance_id=1)\n";
         fusion.start();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        commrat::Time::sleep(commrat::Milliseconds(200));
 
         // NEW: Auto-inference handles multi-output - no primary_type_id needed!
 
@@ -305,7 +304,7 @@ int main() {
         std::cout << "[Main] Created RawLogger (subscribes to RawSensorData)\n";
         raw_logger.start();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        commrat::Time::sleep(commrat::Milliseconds(200));
 
         // Create filter consumer
         commrat::ModuleConfig filter_config{
@@ -318,7 +317,7 @@ int main() {
         std::cout << "[Main] Created FilterConsumer (subscribes to FilteredData)\n";
         filter_consumer.start();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        commrat::Time::sleep(commrat::Milliseconds(200));
 
         // Create diagnostics monitor
         commrat::ModuleConfig diag_config{
@@ -331,7 +330,7 @@ int main() {
         std::cout << "[Main] Created DiagnosticsMonitor (subscribes to DiagnosticsData)\n";
         diag_monitor.start();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        commrat::Time::sleep(commrat::Milliseconds(300));
 
         std::cout << "\n=== Sensor Fusion System Running ===\n\n";
 
@@ -343,7 +342,7 @@ int main() {
                 std::cout << "\n[Main] 10 seconds elapsed, stopping...\n";
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            commrat::Time::sleep(commrat::Milliseconds(100));
         }
 
         std::cout << "\n=== Sensor Fusion Demo Complete ===\n";

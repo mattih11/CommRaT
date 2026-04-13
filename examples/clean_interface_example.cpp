@@ -131,13 +131,13 @@ int main() {
     std::cout << "Starting modules...\n";
     producer.start();
     
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    commrat::Time::sleep(commrat::Milliseconds(500));
     
     consumer.start();
     
     // Run for 5 seconds
     std::cout << "\nRunning for 5 seconds...\n\n";
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    commrat::Time::sleep(commrat::Seconds(5));
     
     // Stop modules
     std::cout << "\nStopping modules...\n";

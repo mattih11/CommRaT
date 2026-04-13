@@ -210,7 +210,7 @@ int main() {
             .instance_id = 1                      // Instance within system
         },
         .inputs = commrat::NoInputConfig{},       // No inputs (periodic generator)
-        .period = commrat::Milliseconds(100)      // Generate message every 100ms (10Hz)
+        .period = std::chrono::milliseconds(100)   // Generate message every 100ms (10Hz)
     };
     
     //-------------------------------------------------------------------------
@@ -245,7 +245,7 @@ int main() {
     counter.start();  // Begins generating counter values
     
     // Give producer time to initialize before consumer subscribes
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    commrat::Time::sleep(commrat::Milliseconds(100));
     
     display.start();  // Subscribes to counter and begins receiving
     
@@ -256,7 +256,7 @@ int main() {
     
     int seconds = 0;
     while (!shutdown_requested.load() && seconds < 3) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        commrat::Time::sleep(commrat::Seconds(1));
         seconds++;
     }
     
