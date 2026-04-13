@@ -13,8 +13,9 @@ C++20 real-time messaging built on TiMS with compile-time type safety.
 6. [Subscription Protocol](#subscription-protocol)
 7. [Timestamp Management](#timestamp-management)
 8. [Message ID System](#message-id-system)
-9. [Memory and Error Handling](#memory-and-error-handling)
-10. [Design Decisions](#design-decisions)
+9. [Platform Abstraction Layer](#platform-abstraction-layer)
+10. [Memory and Error Handling](#memory-and-error-handling)
+11. [Design Decisions](#design-decisions)
 
 ---
 
@@ -244,7 +245,7 @@ Each module runs **1 + N** threads (N = number of outputs):
 
 **1 data_thread** -- Runs `process()` based on execution mode:
 - Input-driven: blocks on `ContinuousInput::receive()`, calls process, publishes
-- Timer-driven: sleeps for period, calls process, publishes
+- Timer-driven: sleeps for period via `Time::sleep()`, calls process, publishes
 - Loop-driven: calls process, publishes, repeats immediately
 
 **N command_threads** -- One per output. Each blocks on its CMD mailbox:
@@ -254,6 +255,10 @@ Each module runs **1 + N** threads (N = number of outputs):
 - 0% CPU when no commands arrive
 
 No work_thread -- WORK mailbox is send-only (used from data_thread or startup).
+
+All threading primitives (`Thread`, `Mutex`, `SharedMutex`, `ConditionVariable`) are
+platform-abstracted. The active backend is selected at compile time via CMake.
+See [Platform Abstraction Layer](#platform-abstraction-layer) for details.
 
 ---
 
@@ -349,13 +354,20 @@ Automatic assignment based on execution mode:
 - **Input-driven**: `timestamp = input.header.timestamp` (propagated)
 - **Multi-input**: `timestamp = primary_input.header.timestamp` (sync point)
 
-Abstractions from `include/commrat/platform/timestamp.hpp`:
+Abstractions from `include/commrat/platform/`:
 
 ```cpp
-Timestamp ts = Time::now();
-Duration timeout = Milliseconds(100);
-Time::sleep(Milliseconds(10));
+#include <commrat/platform/timestamp.hpp>
+#include <commrat/platform/duration.hpp>
+
+Timestamp ts = Time::now();           // Platform-selected clock
+Duration timeout = Milliseconds(100); // Milliseconds() returns Duration
+Time::sleep(Milliseconds(10));        // Platform-selected sleep
 ```
+
+`Duration` is a custom structural type (constexpr, NTTP-compatible) that replaces
+raw `std::chrono` types. `Milliseconds()`, `Seconds()`, etc. are free functions
+returning `Duration`, not type aliases. See [Platform Abstraction Layer](#platform-abstraction-layer).
 
 ---
 
@@ -380,6 +392,64 @@ System messages are auto-included in every registry (Subscribe, Unsubscribe, Get
 
 Defined in `include/commrat/messaging/message_id.hpp`
 and `include/commrat/messaging/message_registry.hpp`.
+
+---
+
+## Platform Abstraction Layer
+
+CommRaT uses a compile-time platform abstraction to support multiple backends.
+All threading, timing, and synchronization primitives are wrapped behind a unified
+C++ API. The backend is selected via CMake option:
+
+| CMake Option | Backend | Use Case |
+|---|---|---|
+| `COMMRAT_PLATFORM_STD` | `std::thread`, `std::mutex`, `std::chrono` | Default Linux, development, testing |
+| `COMMRAT_PLATFORM_EVL` | libevl / Xenomai 4 | Hard real-time, out-of-band scheduling |
+
+### Abstraction Mapping
+
+| CommRaT Type | std:: Backend | EVL Backend |
+|---|---|---|
+| `Thread` | `std::thread` | `pthread_create` + `evl_attach_self()` |
+| `Mutex` | `std::mutex` | `evl_mutex` (priority inheritance) |
+| `SharedMutex` | `std::shared_mutex` | `evl_rwlock` |
+| `ConditionVariable` | `std::condition_variable` | `evl_event` |
+| `Time::now()` | `steady_clock::now()` | `evl_read_clock(EVL_CLOCK_MONOTONIC)` |
+| `Time::sleep()` | `this_thread::sleep_for` | `evl_usleep()` / `evl_sleep_until()` |
+
+### Duration Type
+
+`Duration` is a custom structural type storing nanoseconds as `int64_t`. It replaces
+raw `std::chrono` duration types throughout the framework. Key properties:
+
+- **Constexpr**: All operations are compile-time evaluable
+- **NTTP-compatible**: Can be used as a non-type template parameter (e.g., `Period<Milliseconds(100)>`)
+- **Arithmetic**: Supports `+`, `-`, `*`, `/`, comparisons
+- **Conversion**: `to_chrono()` converts to `std::chrono::nanoseconds` for interop
+
+Free function constructors: `Nanoseconds()`, `Microseconds()`, `Milliseconds()`,
+`Seconds()`, `Minutes()`, `Hours()`. These are functions returning `Duration`,
+not type aliases.
+
+### File Structure
+
+```
+include/commrat/platform/
+  duration.hpp              # Duration type (platform-independent)
+  platform.hpp              # Backend detection macros
+  threading.hpp             # Thread, Mutex, Lock type aliases
+  timestamp.hpp             # Time, Timestamp, clock selection
+  std/
+    threading_impl.hpp      # std:: backend implementations
+    timestamp_impl.hpp      # std::chrono backend
+  evl/
+    threading_impl.hpp      # libevl backend (skeleton)
+    timestamp_impl.hpp      # EVL clock backend (skeleton)
+```
+
+Config structs (e.g., `ModuleConfig`) retain `std::chrono::milliseconds` fields
+for rfl serialization compatibility. Accessor methods convert to `Duration` at
+the API boundary.
 
 ---
 

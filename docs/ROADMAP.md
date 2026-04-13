@@ -72,9 +72,8 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Complete transition to platform wrappers (threading, timing, etc.)
 - Enable compilation against libevl for hard real-time guarantees
 - Swap platform layer without changing application code
-- Already started: Thread, Mutex, Timestamp abstractions
-- Status: Planned
-- Priority: High
+- Duration type, free function constructors, std::/EVL backends
+- Status: **COMPLETED** (std:: backend fully operational, EVL skeleton in place)
 - Details: See `docs/work/PLATFORM_ABSTRACTION_LAYER.md`
 
 **Unified ModuleType Definition**
@@ -215,6 +214,7 @@ For full history, see `docs/internal/phase_history/` and `docs/internal/refactor
 - Timestamp metadata accessors (`get_input_timestamp<N>()`, etc.)
 - Subscription protocol integration (Subscribe/Unsubscribe/GetData dispatch in command_loop)
 - User command reply mechanism (on_command reply sent via CMD mailbox)
+- Platform abstraction layer (Duration type, Thread/Mutex/Time wrappers, std::/EVL backends)
 
 ## Contributing Ideas
 

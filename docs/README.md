@@ -1,6 +1,6 @@
 # CommRaT Documentation
 
-**Last Updated**: April 7, 2026
+**Last Updated**: April 13, 2026
 
 ---
 
@@ -45,6 +45,12 @@ DATA mailbox: per-input   - Receive continuous data streams (blocking receive)
 - `MessageSchema<T, Registry>` combining CommRaT + SeRTial metadata
 - Export as JSON, YAML, TOML, XML via rfl Writer types
 - `IntrospectionHelper<Registry>` for registry-wide schema export
+
+### Platform Abstraction
+- `Duration` structural type with constexpr arithmetic (NTTP-compatible)
+- `Thread`, `Mutex`, `SharedMutex`, `ConditionVariable` wrappers
+- `Time::now()`, `Time::sleep()` with platform-selected backend
+- Compile-time backend selection: `COMMRAT_PLATFORM_STD` (default) or `COMMRAT_PLATFORM_EVL`
 
 ---
 

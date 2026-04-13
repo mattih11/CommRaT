@@ -138,6 +138,11 @@ For a module with N outputs and M inputs:
 
 Total: N + 1 threads per module.
 
+All threading and timing primitives (`Thread`, `Mutex`, `Time::sleep()`, etc.) are
+platform-abstracted. The backend is selected at compile time via CMake:
+`COMMRAT_PLATFORM_STD` (default) or `COMMRAT_PLATFORM_EVL` (libevl/Xenomai 4).
+See [Architecture: Platform Abstraction](ARCHITECTURE.md#platform-abstraction-layer).
+
 ### 2.6 Compile-Time Guarantees
 
 ```cpp
@@ -242,11 +247,11 @@ int main() {
     TemperatureFilter filter(filter_config);
 
     sensor.start();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    commrat::Time::sleep(commrat::Milliseconds(100));
     filter.start();
 
     // Run for 5 seconds
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    commrat::Time::sleep(commrat::Seconds(5));
 
     // Stop in reverse order
     filter.stop();
