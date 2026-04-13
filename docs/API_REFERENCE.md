@@ -1,7 +1,7 @@
 # CommRaT API Reference
 
-**Version**: 2.0.0
-**Last Updated**: April 7, 2026
+**Version**: 2.1.0
+**Last Updated**: April 13, 2026
 
 Accurate API reference derived from header files. For Doxygen docs, run `make docs`.
 
@@ -20,9 +20,11 @@ Accurate API reference derived from header files. For Doxygen docs, run `make do
 9. [Message Definitions (MessageDefinition, Message::Data, etc.)](#message-definitions)
 10. [Message Registry](#message-registry)
 11. [Module Configuration](#module-configuration)
-12. [Timestamp / Time](#timestamp--time)
-13. [Threading Abstractions](#threading-abstractions)
-14. [Introspection](#introspection)
+12. [Duration](#duration)
+13. [Timestamp / Time](#timestamp--time)
+14. [Threading Abstractions](#threading-abstractions)
+15. [Platform Selection](#platform-selection)
+16. [Introspection](#introspection)
 
 ---
 
@@ -386,13 +388,13 @@ using PublishMailbox = TypedMailbox<CommratApp, T>;
 ```cpp
 ModuleOutput();  // Default (uninitialized, must call initialize())
 ModuleOutput(SystemId system_id, InstanceId instance_id,
-             Milliseconds default_tolerance = Milliseconds(50));
+             Duration default_tolerance = Milliseconds(50));
 ```
 
 ### Lifecycle
 
 ```cpp
-void initialize(uint8_t sys_id, uint8_t inst_id, Milliseconds tolerance);  // Allocation phase
+void initialize(uint8_t sys_id, uint8_t inst_id, Duration tolerance);  // Allocation phase
 void start();  // Activate mailboxes
 void stop();   // Deactivate mailboxes
 ```
@@ -410,7 +412,7 @@ void publish_workspace(Timestamp timestamp);         // Move workspace into buff
 
 ```cpp
 const TimsMessage<T>* get_data(uint64_t timestamp,
-                                Milliseconds tolerance = Milliseconds(-1),
+                                Duration tolerance = Duration::milliseconds(-1),
                                 InterpolationMode mode = InterpolationMode::NEAREST) const;
 std::pair<uint64_t, uint64_t> get_timestamp_range() const;
 std::size_t buffer_size() const;
@@ -829,7 +831,7 @@ bool has_multi_output_config() const;
 uint8_t source_system_id() const;                // SingleInput
 uint8_t source_instance_id() const;              // SingleInput
 const std::vector<MultiInputConfig::InputSource>& input_sources() const;  // MultiInput
-std::chrono::milliseconds sync_tolerance() const;                         // MultiInput
+Duration sync_tolerance() const;                                          // MultiInput
 size_t history_buffer_size() const;                                       // MultiInput
 uint8_t input_system_id(size_t index) const;                              // MultiInput
 uint8_t input_instance_id(size_t index) const;                            // MultiInput
@@ -871,20 +873,112 @@ using InputConfig = rfl::TaggedUnion<"input_type", NoInputConfig, SingleInputCon
 
 ---
 
+## Duration
+
+**Header:** `<commrat/platform/duration.hpp>`
+
+Fixed-precision duration type backed by nanoseconds. Structural type (public `int64_t ns_` member) for C++20 NTTP compatibility with `Period<Milliseconds(100)>`.
+
+Replaces the old `using Milliseconds = std::chrono::milliseconds` type aliases.
+`Milliseconds()`, `Seconds()`, etc. are now **constexpr free functions** returning `Duration`.
+
+### Duration Class
+
+```cpp
+class Duration {
+public:
+    int64_t ns_ = 0;  // Public for structural type / NTTP
+
+    constexpr Duration() noexcept = default;
+    constexpr explicit Duration(int64_t nanoseconds) noexcept;
+
+    // Named factory methods
+    static constexpr Duration nanoseconds(int64_t v) noexcept;
+    static constexpr Duration microseconds(int64_t v) noexcept;
+    static constexpr Duration milliseconds(int64_t v) noexcept;
+    static constexpr Duration seconds(int64_t v) noexcept;
+    static constexpr Duration minutes(int64_t v) noexcept;
+    static constexpr Duration hours(int64_t v) noexcept;
+    static constexpr Duration zero() noexcept;
+
+    // Accessors
+    constexpr int64_t count_ns() const noexcept;
+    constexpr int64_t count_us() const noexcept;
+    constexpr int64_t count_ms() const noexcept;
+    constexpr int64_t count_s() const noexcept;
+
+    // Predicates
+    constexpr bool is_zero() const noexcept;
+    constexpr bool is_negative() const noexcept;
+    constexpr bool is_positive() const noexcept;
+
+    // Arithmetic: +, -, unary -, +=, -=, *, /, %
+    // Comparison: C++20 three-way (<=>) and ==
+
+    // Chrono interop
+    constexpr std::chrono::nanoseconds to_chrono_ns() const noexcept;
+    constexpr std::chrono::milliseconds to_chrono_ms() const noexcept;
+    template<typename Rep, typename Period>
+    static constexpr Duration from_chrono(std::chrono::duration<Rep, Period> d) noexcept;
+
+    // POSIX interop
+    constexpr struct timespec to_timespec() const noexcept;
+    static constexpr Duration from_timespec(const struct timespec& ts) noexcept;
+};
+```
+
+### Free Function Constructors
+
+```cpp
+constexpr Duration Nanoseconds(int64_t v) noexcept;
+constexpr Duration Microseconds(int64_t v) noexcept;
+constexpr Duration Milliseconds(int64_t v) noexcept;
+constexpr Duration Seconds(int64_t v) noexcept;
+constexpr Duration Minutes(int64_t v) noexcept;
+constexpr Duration Hours(int64_t v) noexcept;
+```
+
+These are functions, not types. Use `Duration` whenever you need a type name:
+
+```cpp
+// Type for variables/parameters/members:
+Duration timeout = Milliseconds(100);
+
+// Template NTTP (structural type):
+class MySensor : public MyApp::Module2<Output<Data>, Period<Milliseconds(100)>> { ... };
+```
+
+### User-Defined Literals
+
+```cpp
+namespace commrat::literals {
+    constexpr Duration operator""_ns(unsigned long long v) noexcept;
+    constexpr Duration operator""_us(unsigned long long v) noexcept;
+    constexpr Duration operator""_ms(unsigned long long v) noexcept;
+    constexpr Duration operator""_s(unsigned long long v) noexcept;
+}
+```
+
+Usage:
+```cpp
+using namespace commrat::literals;
+auto timeout = 100_ms;
+auto delay = 50_us;
+auto period = 1_s;
+```
+
+---
+
 ## Timestamp / Time
 
 **Header:** `<commrat/platform/timestamp.hpp>`
 
-### Types
+Timestamp and time utilities. Backend selected at compile time (std:: or EVL).
+
+### Timestamp Type
 
 ```cpp
-using Timestamp    = uint64_t;                    // Nanoseconds since epoch
-using Nanoseconds  = std::chrono::nanoseconds;
-using Microseconds = std::chrono::microseconds;
-using Milliseconds = std::chrono::milliseconds;
-using Seconds      = std::chrono::seconds;
-using Minutes      = std::chrono::minutes;
-using Hours        = std::chrono::hours;
+using Timestamp = uint64_t;  // Nanoseconds since epoch
 ```
 
 ### Time Class
@@ -895,40 +989,38 @@ public:
     enum class ClockSource { SYSTEM_CLOCK, STEADY_CLOCK, HIGH_RES_CLOCK,
                              REALTIME_CLOCK, MONOTONIC_CLOCK };
 
+    // Current time
     static Timestamp now() noexcept;
     static Timestamp get_timestamp(ClockSource source = ClockSource::STEADY_CLOCK) noexcept;
-    static void set_clock_source(ClockSource source) noexcept;  // Not thread-safe, call once
+    static void set_clock_source(ClockSource source) noexcept;
 
     // Conversions
-    template<typename Rep, typename Period>
-    static constexpr Timestamp to_nanoseconds(std::chrono::duration<Rep, Period> d) noexcept;
-    template<typename Duration>
+    static constexpr Timestamp to_nanoseconds(Duration duration) noexcept;
     static constexpr Duration from_nanoseconds(Timestamp ns) noexcept;
     static constexpr Timestamp milliseconds_to_ns(uint64_t ms) noexcept;
-    static constexpr Timestamp microseconds_to_ns(uint64_t us) noexcept;
     static constexpr uint64_t ns_to_milliseconds(Timestamp ns) noexcept;
-    static constexpr uint64_t ns_to_microseconds(Timestamp ns) noexcept;
 
     // Comparison
     static constexpr Timestamp diff(Timestamp t1, Timestamp t2) noexcept;
-    static constexpr bool is_within_tolerance(Timestamp ts, Timestamp target, Timestamp tol_ns) noexcept;
+    static constexpr bool is_within_tolerance(Timestamp ts, Timestamp target,
+                                              Timestamp tol_ns) noexcept;
 
     // Sleep
+    static void sleep(Duration duration) noexcept;
     static void sleep_ns(Timestamp ns) noexcept;
-    template<typename Rep, typename Period>
-    static void sleep(std::chrono::duration<Rep, Period> duration) noexcept;
+    static void sleep_until(Timestamp target) noexcept;
+    static void yield() noexcept;
 };
 ```
 
-### User-Defined Literals
+### Usage
 
 ```cpp
-namespace commrat::literals {
-    constexpr Timestamp operator""_ns(unsigned long long ns) noexcept;
-    constexpr Timestamp operator""_us(unsigned long long us) noexcept;
-    constexpr Timestamp operator""_ms(unsigned long long ms) noexcept;
-    constexpr Timestamp operator""_s(unsigned long long s) noexcept;
-}
+Timestamp ts = Time::now();
+Time::sleep(Milliseconds(100));
+Time::sleep(Seconds(1));
+Time::sleep_until(ts + Time::to_nanoseconds(Milliseconds(500)));
+Time::yield();
 ```
 
 ---
@@ -937,11 +1029,17 @@ namespace commrat::literals {
 
 **Header:** `<commrat/platform/threading.hpp>`
 
+Thread and synchronization primitives. Backend selected at compile time (std:: or EVL).
+
+All CommRaT code uses these abstractions instead of `std::thread`, `std::mutex`, etc.
+This enables swapping to a hard real-time backend (libevl/Xenomai 4) without changing application code.
+
 ### Enums
 
 ```cpp
 enum class ThreadPriority   { IDLE = 0, LOW = 10, NORMAL = 50, HIGH = 75, REALTIME = 99 };
 enum class SchedulingPolicy { NORMAL, FIFO, ROUND_ROBIN, DEADLINE };
+enum class CvStatus         { NO_TIMEOUT, TIMEOUT };
 ```
 
 ### ThreadConfig
@@ -961,20 +1059,17 @@ struct ThreadConfig {
 ```cpp
 class Thread {
 public:
-    Thread();                                    // Default (no thread)
-    template<typename Func> explicit Thread(Func&& func);  // Start with default config
+    Thread();                                                    // Default (no thread)
+    template<typename Func> explicit Thread(Func&& func);        // Start immediately
     template<typename Func> Thread(const ThreadConfig& config, Func&& func);
-    explicit Thread(const ThreadConfig& config); // Config only, call start() later
-    ~Thread();                                   // Joins if joinable
-
-    Thread(Thread&&) = default;
-    Thread& operator=(Thread&&) = default;
+    explicit Thread(const ThreadConfig& config);                 // Config only, start() later
+    ~Thread();                                                   // Joins if joinable
 
     template<typename Func> void start(Func&& func);
     void join();
     void detach();
     bool joinable() const noexcept;
-    std::thread::native_handle_type native_handle();
+    auto native_handle();
     std::thread::id get_id() const noexcept;
     const ThreadConfig& config() const noexcept;
 };
@@ -988,7 +1083,6 @@ public:
     void lock();
     bool try_lock();
     void unlock();
-    std::mutex& native();
 };
 
 class SharedMutex {
@@ -999,24 +1093,28 @@ public:
     bool try_lock_shared();
     void unlock();
     void unlock_shared();
-    std::shared_mutex& native();
 };
-
-using Lock             = std::lock_guard<Mutex>;
-using UniqueLock       = std::unique_lock<Mutex>;
-using SharedLock       = std::shared_lock<SharedMutex>;
-using UniqueLockShared = std::unique_lock<SharedMutex>;
 
 class ConditionVariable {
 public:
     void notify_one() noexcept;
     void notify_all() noexcept;
-    void wait(std::unique_lock<std::mutex>& lock);
-    template<typename Predicate> void wait(std::unique_lock<std::mutex>& lock, Predicate pred);
-    template<typename Rep, typename Period>
-    std::cv_status wait_for(std::unique_lock<std::mutex>& lock,
-                            const std::chrono::duration<Rep, Period>& rel_time);
+    void wait(UniqueLock& lock);
+    template<typename Predicate>
+    void wait(UniqueLock& lock, Predicate pred);
+    CvStatus wait_for(UniqueLock& lock, Duration timeout);
+    template<typename Predicate>
+    bool wait_for(UniqueLock& lock, Duration timeout, Predicate pred);
 };
+```
+
+### Lock Type Aliases
+
+```cpp
+using Lock             = std::lock_guard<Mutex>;
+using UniqueLock       = std::unique_lock<Mutex>;
+using SharedLock       = std::shared_lock<SharedMutex>;
+using UniqueLockShared = std::unique_lock<SharedMutex>;
 ```
 
 ### Convenience Macros
@@ -1025,6 +1123,46 @@ public:
 Synchronized(mutex) { /* exclusive critical section */ }
 ReadLocked(mutex)    { /* shared read section */ }
 WriteLocked(mutex)   { /* exclusive write section */ }
+```
+
+---
+
+## Platform Selection
+
+**Header:** `<commrat/platform/platform.hpp>`
+
+Compile-time backend selection via CMake define:
+
+| Define | Backend | Description |
+|--------|---------|-------------|
+| `COMMRAT_PLATFORM_STD` | Standard Linux | `std::thread`, `std::mutex`, `std::chrono` (default) |
+| `COMMRAT_PLATFORM_EVL` | Hard real-time | libevl/Xenomai 4, out-of-band scheduling |
+
+If neither is defined, defaults to `COMMRAT_PLATFORM_STD`.
+Defining both is a compile error.
+
+### Feature Detection Macros
+
+```cpp
+#ifdef COMMRAT_HAS_OOB          // EVL out-of-band execution available
+#ifdef COMMRAT_HAS_PI_MUTEX     // Priority-inheritance mutexes available
+#ifdef COMMRAT_HAS_SLEEP_UNTIL  // Hardware-precise sleep_until available
+```
+
+### Backend File Structure
+
+```
+include/commrat/platform/
+    duration.hpp              # Duration type (shared, no backend dependency)
+    platform.hpp              # Backend selection macros
+    threading.hpp             # Common types + backend dispatch
+    timestamp.hpp             # Timestamp typedef + backend dispatch
+    std/
+        threading_impl.hpp    # std:: backend (Thread, Mutex, SharedMutex, CV)
+        timestamp_impl.hpp    # std:: backend (Time class)
+    evl/
+        threading_impl.hpp    # EVL backend (skeleton)
+        timestamp_impl.hpp    # EVL backend (skeleton)
 ```
 
 ---
