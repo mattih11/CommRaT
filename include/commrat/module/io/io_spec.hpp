@@ -421,7 +421,7 @@ public:
         // Helper to extract period from a single spec
         template<typename Spec>
         struct PeriodExtractor {
-            static constexpr Milliseconds value = Milliseconds(0);
+            static constexpr Duration value = Duration::zero();
         };
         
         template<auto DefaultPeriod>
@@ -440,12 +440,12 @@ public:
         template<typename First, typename... Rest>
         static constexpr auto find_period_impl() {
             constexpr auto first_period = PeriodExtractor<First>::value;
-            if constexpr (first_period.count() > 0) {
+            if constexpr (first_period > Duration::zero()) {
                 return first_period;
             } else if constexpr (sizeof...(Rest) > 0) {
                 return find_period_impl<Rest...>();
             } else {
-                return Milliseconds(0);
+                return Duration::zero();
             }
         }
         

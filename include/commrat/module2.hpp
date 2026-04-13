@@ -38,7 +38,6 @@
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/platform/threading.hpp"
 #include "commrat/platform/timestamp.hpp"
-#include <chrono>
 #include <tuple>
 #include <type_traits>
 
@@ -424,7 +423,7 @@ private:
         while (!should_stop_.load(std::memory_order_acquire)) {
             // Receive command with timeout (allows checking should_stop_ periodically)
             auto result = cmd_mailbox.receive_any_for(
-                std::chrono::milliseconds(100),
+                Milliseconds(100),
                 [&](auto&& received_msg) {
                     // Try system command visitor first
                     bool handled = visit_system_commands<OutputIndex>(received_msg);
@@ -495,11 +494,10 @@ private:
             // Step 4: Sleep if timer-driven (period - processing_time)
             if constexpr (IO::Meta::is_timer_driven) {
                 Timestamp now = Time::now();
-                Nanoseconds elapsed_ns(now - loop_start);
+                Duration elapsed = Duration::nanoseconds(static_cast<int64_t>(now - loop_start));
                 auto period = IO::Meta::period;
-                auto elapsed_ms = std::chrono::duration_cast<Milliseconds>(elapsed_ns);
-                if (elapsed_ms < period) {
-                    Time::sleep(period - elapsed_ms);
+                if (elapsed < period) {
+                    Time::sleep(period - elapsed);
                 }
                 // If processing took longer than period, skip sleep and continue immediately
             }

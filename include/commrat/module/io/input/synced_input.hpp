@@ -63,9 +63,9 @@ public:
     void initialize(typename Registry::System::WorkMailbox& work_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Milliseconds tolerance = Milliseconds(50),
+                    Duration tolerance = Milliseconds(50),
                     InterpolationMode interpolation = InterpolationMode::NEAREST,
-                    Milliseconds cmd_timeout = Milliseconds(100)) {
+                    Duration cmd_timeout = Milliseconds(100)) {
         // Initialize base class
         CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
         
@@ -88,9 +88,9 @@ public:
     SyncedInputImpl(MailboxFor<Registry>& work_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Milliseconds tolerance = Milliseconds(50),
+                    Duration tolerance = Milliseconds(50),
                     InterpolationMode interpolation = InterpolationMode::NEAREST,
-                    Milliseconds cmd_timeout = Milliseconds(100))
+                    Duration cmd_timeout = Milliseconds(100))
         : CmdInput<Registry, OutputType>(work_mbx, producer_system_id, producer_instance_id, cmd_timeout)
         , tolerance_(tolerance)
         , interpolation_(interpolation)
@@ -117,7 +117,7 @@ public:
      * @return True if data found within tolerance, false otherwise
      */
     bool get_data(const Timestamp& timestamp, const TimsMessage<OutputType>*& msg, 
-                 Milliseconds timeout = Milliseconds(0)) {
+                 Duration timeout = Duration::zero()) {
         // Type aliases for GetData messages (type-specific)
         using GetDataReqPayload = GetDataRequestPayload<OutputType>;
         using GetDataRepPayload = GetDataReplyPayload<OutputType>;
@@ -133,7 +133,7 @@ public:
             },
             .payload = {
                 .target_timestamp = timestamp,
-                .tolerance_ns = std::chrono::duration_cast<Nanoseconds>(tolerance_).count(),
+                .tolerance_ns = static_cast<uint64_t>(tolerance_.count_ns()),
                 .interpolation_mode = static_cast<uint8_t>(interpolation_)
             }
         };
@@ -181,7 +181,7 @@ public:
      * @param timeout RPC timeout
      * @return True if data received, false on timeout
      */
-    bool get_next_data(const TimsMessage<OutputType>*& msg, Milliseconds timeout = Milliseconds(0)) {
+    bool get_next_data(const TimsMessage<OutputType>*& msg, Duration timeout = Duration::zero()) {
         // Type aliases for GetNextData messages (type-specific)
         using GetNextDataReqPayload = GetNextDataRequestPayload<OutputType>;
         using GetNextDataRepPayload = GetNextDataReplyPayload<OutputType>;
@@ -288,7 +288,7 @@ public:
     }
     
 private:
-    Milliseconds tolerance_;                ///< Maximum time difference for matching
+    Duration tolerance_;                ///< Maximum time difference for matching
     InterpolationMode interpolation_;       ///< How to handle mismatches
     bool last_get_succeeded_;               ///< Did last get_data find data?
     bool last_get_was_fresh_;               ///< Was last get_data fresh or cached?

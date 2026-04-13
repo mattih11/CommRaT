@@ -5,7 +5,7 @@
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
 **Current Status**: Phase 2.0+ (Full subscription protocol, user command replies, dead code cleanup)  
-**Next**: Input buffering strategies, command ergonomics, documentation updates
+**Next**: Platform abstraction layer (libevl/Xenomai 4), input buffering, command ergonomics
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, type safety computed at compile time
@@ -111,6 +111,38 @@ Timestamp ts = Time::now();
 Duration timeout = Milliseconds(100);
 Time::sleep(Milliseconds(10));
 ```
+
+### Platform Abstraction Layer (libevl / Xenomai 4)
+
+CommRaT supports two platform backends selected at compile time via CMake:
+- `COMMRAT_PLATFORM_STD` (default): Standard Linux (`std::thread`, `std::mutex`, `std::chrono`)
+- `COMMRAT_PLATFORM_EVL`: Hard real-time via libevl/Xenomai 4 (out-of-band scheduling)
+
+**EVL Execution Model:**
+- EVL threads are regular POSIX threads that attach to the EVL core via `evl_attach_self()`
+- Once attached, threads can run **out-of-band (OOB)** with ultra-low latency guarantees
+- **Any glibc/kernel syscall from OOB context automatically demotes to in-band** (loses RT)
+- `malloc`, `std::cout`, `throw`, `new/delete`, `pthread_mutex_lock` are ALL forbidden in OOB context
+- Only `libevl` functions + `memcpy`/`strcpy`/`std::atomic` are safe in OOB context
+
+**CommRaT Abstraction to EVL Mapping:**
+
+| CommRaT | std:: backend | EVL backend |
+|---|---|---|
+| `Thread` | `std::thread` | `pthread_create` + `evl_attach_self()` |
+| `Mutex` | `std::mutex` | `evl_mutex` (PI by default) |
+| `SharedMutex` | `std::shared_mutex` | `evl_rwlock` (no PI, writer-biased) |
+| `ConditionVariable` | `std::condition_variable` | `evl_event` (paired with `evl_mutex`) |
+| `Time::now()` | `steady_clock::now()` | `evl_read_clock(EVL_CLOCK_MONOTONIC)` |
+| `Time::sleep()` | `this_thread::sleep_for` | `evl_usleep()` / `evl_sleep_until()` |
+| `ThreadPriority` | `pthread_setschedparam` | `evl_set_schedattr()` with `SCHED_FIFO` |
+
+**When implementing platform code:**
+- Detailed EVL API reference: `docs/work/EVL_API_REFERENCE.md`
+- Platform design doc: `docs/work/PLATFORM_ABSTRACTION_LAYER.md`
+- Header structure: `include/commrat/platform/{std,evl}/` backends selected via `platform.hpp`
+- EVL health monitoring: Enable `EVL_T_WOSS` to detect accidental in-band switches in RT loops
+- Periodic loops: Use `evl_sleep_until()` with absolute time for jitter-free timing
 
 ### Message Definitions
 
@@ -784,12 +816,13 @@ void process(const T& input) {
 - **Dead code removal** (legacy subscription.hpp removed, RT violations eliminated)
 
 ### In Progress
-- Input buffering (RingBuffer for historical data)
-- Command infrastructure integration
+- Platform abstraction layer (libevl/Xenomai 4 backend for hard-RT)
+- Input buffering strategies
+- Command ergonomics improvements
 
 ### Planned
-- Input buffering (RingBuffer for historical data)
-- Command infrastructure integration
+- System lifecycle commands (on/off/reset)
+- Parameter system (typed params with get/set/list/save)
 - ROS 2 adapter (separate repository)
 - Performance profiling tools
 

@@ -7,7 +7,6 @@
 #include "../messaging/message_id.hpp"
 #include "../platform/threading.hpp"
 #include <optional>
-#include <chrono>  // Keep for std::chrono::milliseconds in API
 #include <functional>
 #include <concepts>
 #include <span>
@@ -380,7 +379,7 @@ public:
      */
     template<typename T>
         requires is_registered<T>
-    bool receive(TimsMessage<T>& message, std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
+    bool receive(TimsMessage<T>& message, Duration timeout = Seconds(1)) {
         if (!running_) {
             return false;
         }
@@ -447,7 +446,7 @@ public:
         // Receive raw bytes with TIMS metadata
         std::array<std::byte, BufferSize> buffer;
         TimsWrapper::TimsMetadata tims_metadata;
-        auto bytes = tims_.receive_raw_bytes(buffer, std::chrono::seconds(1), &tims_metadata);
+        auto bytes = tims_.receive_raw_bytes(buffer, Seconds(1), &tims_metadata);
         
         if (bytes <= 0) {
             return MailboxError::NetworkError;
@@ -500,7 +499,7 @@ public:
      * @endcode
      */
     template<size_t BufferSize = Registry::max_message_size, typename Visitor>
-    auto receive_any_for(std::chrono::milliseconds timeout, Visitor&& visitor) -> MailboxResult<void> {
+    auto receive_any_for(Duration timeout, Visitor&& visitor) -> MailboxResult<void> {
         if (!running_) {
             return MailboxError::NotRunning;
         }
@@ -511,7 +510,7 @@ public:
         auto bytes = tims_.receive_raw_bytes(buffer, timeout, &tims_metadata);
         
         if (bytes <= 0) {
-            if (timeout.count() <= 0 || bytes == -1) {
+            if (!timeout.is_positive() || bytes == -1) {
                 return MailboxError::Timeout;
             }
             return MailboxError::NetworkError;
@@ -562,7 +561,7 @@ public:
         // Use largest message size from registry to handle any message type
         constexpr size_t buffer_size = Registry::max_message_size;
         std::array<std::byte, buffer_size> buffer;
-        while (tims_.receive_raw_bytes(buffer, std::chrono::milliseconds(10)) > 0) {
+        while (tims_.receive_raw_bytes(buffer, Milliseconds(10)) > 0) {
             // Discard messages
         }
         

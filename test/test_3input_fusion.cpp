@@ -272,21 +272,21 @@ int main() {
             .name = "IMU_Sensor",
             .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
             .inputs = commrat::NoInputConfig{},
-            .period = Milliseconds(10)  // 100Hz
+            .period = std::chrono::milliseconds(10)  // 100Hz
         };
         
         ModuleConfig gps_config{
             .name = "GPS_Sensor",
             .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
             .inputs = commrat::NoInputConfig{},
-            .period = Milliseconds(100)  // 10Hz
+            .period = std::chrono::milliseconds(100)  // 10Hz
         };
         
         ModuleConfig lidar_config{
             .name = "Lidar_Sensor",
             .outputs = commrat::SimpleOutputConfig{.system_id = 30, .instance_id = 1},
             .inputs = commrat::NoInputConfig{},
-            .period = Milliseconds(50)  // 20Hz
+            .period = std::chrono::milliseconds(50)  // 20Hz
         };
         
         // Fusion consumer config with multi-input sources
@@ -300,7 +300,7 @@ int main() {
                     {.system_id = 30, .instance_id = 1}   // Lidar
                 },
                 .history_buffer_size = 100,
-                .sync_tolerance = Milliseconds(200)  // Lenient tolerance for test
+                .sync_tolerance = std::chrono::milliseconds(200)  // Lenient tolerance for test
             }
         };
         

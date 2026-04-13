@@ -204,7 +204,7 @@ int main() {
         std::cout << "Watch the throughput numbers - they show iterations/sec.\n";
         std::cout << "Typical performance: 1-10 million iterations/sec depending on CPU.\n\n";
         
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        Time::sleep(Seconds(10));
         
         std::cout << "\nStopping modules...\n";
         counter.stop();

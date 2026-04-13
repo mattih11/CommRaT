@@ -45,10 +45,10 @@ public:
     ContinuousInput()
         : CmdInput<Registry, OutputType>()
         , data_mbx_(std::nullopt)
-        , requested_period_(Milliseconds::zero())
+        , requested_period_(Duration::zero())
         , poll_timeout_(Milliseconds(100))
         , subscribed_(false)
-        , actual_period_(Milliseconds::zero())
+        , actual_period_(Duration::zero())
     {}
     
     /**
@@ -70,9 +70,9 @@ public:
                     const MailboxConfig& data_mbx_config,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Milliseconds requested_period = Milliseconds::zero(),
-                    Milliseconds poll_timeout = Milliseconds(100),
-                    Milliseconds cmd_timeout = Milliseconds(1000)) {
+                    Duration requested_period = Duration::zero(),
+                    Duration poll_timeout = Milliseconds(100),
+                    Duration cmd_timeout = Milliseconds(1000)) {
         // Initialize base class
         CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
         
@@ -83,7 +83,7 @@ public:
         requested_period_ = requested_period;
         poll_timeout_ = poll_timeout;
         subscribed_ = false;
-        actual_period_ = Milliseconds::zero();
+        actual_period_ = Duration::zero();
     }
     
     /**
@@ -128,15 +128,15 @@ public:
                     MailboxFor<Registry>& data_mbx,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Milliseconds requested_period = Milliseconds::zero(),
-                    Milliseconds poll_timeout = Milliseconds(100),
-                    Milliseconds cmd_timeout = Milliseconds(1000))
+                    Duration requested_period = Duration::zero(),
+                    Duration poll_timeout = Milliseconds(100),
+                    Duration cmd_timeout = Milliseconds(1000))
         : CmdInput<Registry, OutputType>(work_mbx, producer_system_id, producer_instance_id, cmd_timeout)
         , data_mbx_(&data_mbx)
         , requested_period_(requested_period)
         , poll_timeout_(poll_timeout)
         , subscribed_(false)
-        , actual_period_(Milliseconds::zero())
+        , actual_period_(Duration::zero())
     {}
     
     /**
@@ -149,7 +149,7 @@ public:
      * @param timeout Subscription command timeout
      * @return True if subscription succeeded, false on error
      */
-    bool subscribe(Milliseconds& actual_period, Milliseconds timeout = Milliseconds::zero()) {
+    bool subscribe(Duration& actual_period, Duration timeout = Duration::zero()) {
         // Build subscribe request
         TimsMessage<SubscribeRequestPayload> request{
             .header = {
@@ -163,7 +163,7 @@ public:
             },
             .payload = {
                 .subscriber_addr = data_mbx_->mailbox_id(),
-                .requested_period_ms = std::chrono::duration_cast<Milliseconds>(requested_period_).count()
+                .requested_period_ms = requested_period_.count_ms()
             }
         };
         
@@ -191,7 +191,7 @@ public:
      * @param timeout Unsubscribe command timeout
      * @return True if unsubscribe succeeded, false on error
      */
-    bool unsubscribe(Milliseconds timeout = Milliseconds::zero()) {
+    bool unsubscribe(Duration timeout = Duration::zero()) {
         if (!subscribed_) {
             return true;  // Already unsubscribed
         }
@@ -313,14 +313,14 @@ public:
     /**
      * @brief Get actual update period from producer
      */
-    Milliseconds get_actual_period() const { return actual_period_; }
+    Duration get_actual_period() const { return actual_period_; }
     
 private:
     std::optional<DataMailbox> data_mbx_;       ///< Owned DATA mailbox for receiving stream (optional for two-phase init)
-    Milliseconds requested_period_;             ///< Requested update period
-    Milliseconds poll_timeout_;                 ///< Timeout for poll_data()
+    Duration requested_period_;             ///< Requested update period
+    Duration poll_timeout_;                 ///< Timeout for poll_data()
     bool subscribed_;                           ///< Currently subscribed?
-    Milliseconds actual_period_;                ///< Actual period from producer
+    Duration actual_period_;                ///< Actual period from producer
     TimsMessage<OutputType> last_message_{};    ///< Last received message (zero-copy storage)
     bool has_data_{false};                      ///< True if last_message_ valid
 };

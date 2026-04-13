@@ -78,19 +78,19 @@ int main() {
         buffer.push(TestMessage{.timestamp = t3, .value = 3, .data = 3.0f});
         
         // Get message at or before t2+50ms
-        auto result = buffer.get_data(t2 + 50'000'000, std::chrono::milliseconds(100), 
+        auto result = buffer.get_data(t2 + 50'000'000, Milliseconds(100), 
                                      InterpolationMode::BEFORE);
         assert(result);
         assert(result->timestamp == t2);  // Newest before query
         
         // Get message at or before t3+50ms
-        result = buffer.get_data(t3 + 50'000'000, std::chrono::milliseconds(100),
+        result = buffer.get_data(t3 + 50'000'000, Milliseconds(100),
                                InterpolationMode::BEFORE);
         assert(result);
         assert(result->timestamp == t3);  // Newest before query
         
         // Too far before (200ms before t1, only 50ms tolerance)
-        result = buffer.get_data(t1 - 200'000'000, std::chrono::milliseconds(50),
+        result = buffer.get_data(t1 - 200'000'000, Milliseconds(50),
                                InterpolationMode::BEFORE);
         assert(!result);  // No message within tolerance
         
@@ -112,19 +112,19 @@ int main() {
         buffer.push(TestMessage{.timestamp = t3, .value = 3, .data = 3.0f});
         
         // Get message at or after t1+50ms
-        auto result = buffer.get_data(t1 + 50'000'000, std::chrono::milliseconds(100),
+        auto result = buffer.get_data(t1 + 50'000'000, Milliseconds(100),
                                      InterpolationMode::AFTER);
         assert(result);
         assert(result->timestamp == t2);  // Oldest after query
         
         // Get message at or after t1-50ms
-        result = buffer.get_data(t1 - 50'000'000, std::chrono::milliseconds(100),
+        result = buffer.get_data(t1 - 50'000'000, Milliseconds(100),
                                InterpolationMode::AFTER);
         assert(result);
         assert(result->timestamp == t1);  // Oldest after query
         
         // Too far after (200ms after t3, only 50ms tolerance)
-        result = buffer.get_data(t3 + 200'000'000, std::chrono::milliseconds(50),
+        result = buffer.get_data(t3 + 200'000'000, Milliseconds(50),
                                InterpolationMode::AFTER);
         assert(!result);  // No message within tolerance
         
@@ -135,7 +135,7 @@ int main() {
     {
         std::cout << "Test 4: Tolerance handling\n";
         
-        OutputBuffer<TestMessage, 10> buffer(std::chrono::milliseconds(30));
+        OutputBuffer<TestMessage, 10> buffer(Milliseconds(30));
         
         // Use nanosecond timestamps (as expected by get_data implementation)
         uint64_t base_ns = 1000000000ULL;  // 1 second in nanoseconds
@@ -152,7 +152,7 @@ int main() {
         assert(!result);
         
         // Override tolerance (50ms within 100ms tolerance)
-        result = buffer.get_data(base_ns + 50'000'000, std::chrono::milliseconds(100));
+        result = buffer.get_data(base_ns + 50'000'000, Milliseconds(100));
         assert(result);  // Now within 100ms tolerance
         
         std::cout << "  PASS: Tolerance correctly enforced\n\n";
@@ -213,7 +213,7 @@ int main() {
                 buffer.push(TestMessage{.timestamp = static_cast<uint64_t>(1000 + i), 
                                         .value = i, 
                                         .data = static_cast<float>(i)});
-                std::this_thread::sleep_for(std::chrono::microseconds(10));
+                Time::sleep(Microseconds(10));
             }
             done = true;
         });
@@ -224,11 +224,11 @@ int main() {
             consumers.emplace_back([&, c]() {
                 while (!done) {
                     uint64_t timestamp = 1000 + (c * 100);
-                    auto result = buffer.get_data(timestamp, std::chrono::milliseconds(500));
+                    auto result = buffer.get_data(timestamp, Milliseconds(500));
                     if (result) {
                         successful_reads++;
                     }
-                    std::this_thread::sleep_for(std::chrono::microseconds(50));
+                    Time::sleep(Microseconds(50));
                 }
             });
         }

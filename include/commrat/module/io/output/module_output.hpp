@@ -78,7 +78,7 @@ public:
         , cmd_mailbox_(std::nullopt)  // Explicitly initialize as empty
         , publish_mailbox_(std::nullopt)  // Explicitly initialize as empty
         , buffer_(Milliseconds(50))  // Default tolerance
-        , default_tolerance_(Milliseconds(50))
+        , default_tolerance_(Milliseconds(50))  // Duration type
     {}
     
     /**
@@ -89,7 +89,7 @@ public:
      */
     ModuleOutput(SystemId system_id, 
                  InstanceId instance_id,
-                 Milliseconds default_tolerance = Milliseconds(50))
+                 Duration default_tolerance = Milliseconds(50))
         : system_id_(system_id)
         , instance_id_(instance_id)
         , cmd_address_(0)  // Set in initialize()
@@ -111,7 +111,7 @@ public:
      * @param inst_id Module's instance ID
      * @param tolerance Default tolerance for get_data queries
      */
-    void initialize(uint8_t sys_id, uint8_t inst_id, Milliseconds tolerance) {
+    void initialize(uint8_t sys_id, uint8_t inst_id, Duration tolerance) {
         system_id_ = sys_id;
         instance_id_ = inst_id;
         default_tolerance_ = tolerance;
@@ -314,11 +314,11 @@ public:
      */
     const TimsMessage<T>* get_data(
         uint64_t timestamp,
-        Milliseconds tolerance = Milliseconds(-1),
+        Duration tolerance = Duration::milliseconds(-1),
         InterpolationMode mode = InterpolationMode::NEAREST
     ) const {
         // Use default tolerance if not specified
-        auto actual_tolerance = (tolerance.count() < 0) ? default_tolerance_ : tolerance;
+        auto actual_tolerance = tolerance.is_negative() ? default_tolerance_ : tolerance;
         return buffer_.get_data(timestamp, actual_tolerance, mode);
     }
     
@@ -417,10 +417,10 @@ public:
             std::min(req.interpolation_mode, static_cast<uint8_t>(3))
         );
         
-        // Convert tolerance from nanoseconds to milliseconds
-        Milliseconds tolerance_ms = req.tolerance_ns > 0 
-            ? Milliseconds(req.tolerance_ns / 1'000'000ULL)
-            : Milliseconds(-1);  // Use default
+        // Convert tolerance from nanoseconds to Duration
+        Duration tolerance_ms = req.tolerance_ns > 0 
+            ? Duration::nanoseconds(static_cast<int64_t>(req.tolerance_ns))
+            : Duration::milliseconds(-1);  // Use default
         
         // Search buffer for matching data
         const TimsMessage<T>* found = buffer_.get_data(
@@ -503,7 +503,7 @@ private:
     std::optional<CmdMailbox> cmd_mailbox_ = std::nullopt;          // Command mailbox for this output (default empty)
     std::optional<PublishMailbox> publish_mailbox_ = std::nullopt;  // Publish mailbox for sending data (default empty)
     OutputBuffer<TimsMessage<T>, SLOTS> buffer_;                    // Timestamped data storage
-    Milliseconds default_tolerance_;                                // Default tolerance for get_data
+    Duration default_tolerance_;                                     // Default tolerance for get_data
     uint32_t next_seq_number_ = 0;                                  // Sequence counter
     T workspace_{};                                                 // Zero-copy workspace for user writes
 
