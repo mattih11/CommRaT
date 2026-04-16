@@ -1,0 +1,43 @@
+add_executable(example_continuous_input continuous_input_example.cpp)
+target_link_libraries(example_continuous_input PRIVATE commrat)
+
+add_executable(example_clean_interface clean_interface_example.cpp)
+target_link_libraries(example_clean_interface PRIVATE commrat)
+
+add_executable(example_commands command_example.cpp)
+target_link_libraries(example_commands PRIVATE commrat)
+
+add_executable(example_loop_mode loop_mode_example.cpp)
+target_link_libraries(example_loop_mode PRIVATE commrat)
+
+add_executable(example_multi_output_runtime multi_output_runtime.cpp)
+target_link_libraries(example_multi_output_runtime PRIVATE commrat)
+
+add_executable(example_sensor_fusion multi_output_sensor_fusion.cpp)
+target_link_libraries(example_sensor_fusion PRIVATE commrat)
+
+add_executable(introspection_example introspection_example.cpp)
+target_link_libraries(introspection_example PRIVATE commrat)
+
+# Standalone module main wrapper examples
+add_executable(module_main_basic module_main_basic.cpp)
+target_link_libraries(module_main_basic PRIVATE commrat)
+
+add_executable(module_main_with_config module_main_with_config.cpp)
+target_link_libraries(module_main_with_config PRIVATE commrat)
+
+add_executable(module_main_multiformat module_main_multiformat.cpp)
+target_link_libraries(module_main_multiformat PRIVATE commrat)
+
+# Documentation examples
+add_executable(doc_example_hello_commrat
+    ${CMAKE_SOURCE_DIR}/docs/examples/01_hello_commrat/hello_commrat.cpp)
+target_link_libraries(doc_example_hello_commrat PRIVATE commrat)
+
+add_executable(doc_example_multi_output
+    ${CMAKE_SOURCE_DIR}/docs/examples/02_multi_output/multi_output_example.cpp)
+target_link_libraries(doc_example_multi_output PRIVATE commrat)
+
+add_executable(doc_example_multi_input_fusion
+    ${CMAKE_SOURCE_DIR}/docs/examples/03_multi_input_fusion/multi_input_fusion.cpp)
+target_link_libraries(doc_example_multi_input_fusion PRIVATE commrat)
