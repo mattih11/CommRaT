@@ -226,8 +226,8 @@ void test_get_data_wrap_around() {
     
     // Now publish more data to have t1 as oldest in buffer and full buffer (10 messages)
     for (int i = 0; i < 7; ++i) {
-        output.publish(SensorData{.value = 40.0f + i,
-            .sensor_id = 4 + i}, t3 + (i + 1) * 1000000000ULL);
+        output.publish(SensorData{.value = 40.0f + static_cast<float>(i),
+            .sensor_id = static_cast<uint32_t>(4 + i)}, t3 + (i + 1) * 1000000000ULL);
     }
     reply = output.handle_get_data_request(req);
     

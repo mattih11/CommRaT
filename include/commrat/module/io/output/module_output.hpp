@@ -225,8 +225,12 @@ public:
         TimsMessage<T> msg{
             .header = {
                 .msg_type = CommratApp::template get_message_id<T>(),
+                .msg_size = 0,
                 .timestamp = timestamp,
                 .seq_number = next_seq_number_++,
+                .dest = 0,
+                .src = 0,
+                .flags = 0
             },
             .payload = std::move(data)
         };

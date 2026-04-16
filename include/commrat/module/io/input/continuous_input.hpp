@@ -200,9 +200,12 @@ public:
         TimsMessage<UnsubscribeRequestPayload> request{
             .header = {
                 .msg_type = Registry::template get_message_id<UnsubscribeRequestPayload>(),
+                .msg_size = 0,
                 .timestamp = Time::now(),
                 .seq_number = 0,
+                .dest = 0,
                 .src = data_mbx_->mailbox_id(),
+                .flags = 0
             },
             .payload = {
                 .subscriber_addr = data_mbx_->mailbox_id()

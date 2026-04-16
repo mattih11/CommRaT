@@ -156,6 +156,8 @@ public:
                 .msg_size = 0,  // Will be set by serialization
                 .timestamp = 0, // Will be set by TiMS with current time
                 .seq_number = 0, // Will be set by TiMS
+                .dest = dest_mailbox,
+                .src = 0,       // Will be set by TiMS
                 .flags = 0
             },
             .payload = message
@@ -191,6 +193,8 @@ public:
                 .msg_size = 0,  // Will be set by serialization
                 .timestamp = timestamp, // USER-PROVIDED timestamp
                 .seq_number = 0, // Will be set by TiMS
+                .dest = dest_mailbox,
+                .src = 0,       // Will be set by TiMS
                 .flags = 0
             },
             .payload = message

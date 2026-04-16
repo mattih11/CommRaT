@@ -264,6 +264,7 @@ void test_compile_time_constraints() {
     using Valid1 = TestApp::Module2<Output<SensorData>, Period<100>>;
     using Valid2 = TestApp::Module2<Output<FilteredData>, Input<SensorData>>;
     using Valid3 = TestApp::Module2<Output<SensorData>, Period<100>>;  // Raw type
+    (void)sizeof(Valid1); (void)sizeof(Valid2); (void)sizeof(Valid3);
     
     // These should NOT compile (Phase 5 rejects multi-I/O)
     // Uncomment to verify compile-time rejection:
