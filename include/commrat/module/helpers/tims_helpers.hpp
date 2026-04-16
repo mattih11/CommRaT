@@ -25,6 +25,8 @@ TimsMessage<T> create_tims_message(T&& payload, uint64_t timestamp_ns) {
             .msg_size = 0,     // serialize() will set this
             .timestamp = timestamp_ns,  // ONE SOURCE OF TRUTH
             .seq_number = 0,   // TiMS will set this
+            .dest = 0,
+            .src = 0,
             .flags = 0
         },
         .payload = std::forward<T>(payload)

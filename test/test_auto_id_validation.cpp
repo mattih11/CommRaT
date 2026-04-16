@@ -39,6 +39,7 @@ int main() {
         using AutoMsg3 = MessageDefinition<AutoID3, MessagePrefix::UserDefined, UserSubPrefix::Data>;
         
         using TestRegistry = MessageRegistry<AutoMsg1, AutoMsg2, AutoMsg3>;
+        (void)sizeof(TestRegistry);
         
         // First auto-assigned ID should be 1
         static_assert(AutoMsg1::local_id == 0, "Before registry processing, ID is 0");

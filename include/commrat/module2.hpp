@@ -422,7 +422,7 @@ private:
         
         while (!should_stop_.load(std::memory_order_acquire)) {
             // Receive command with timeout (allows checking should_stop_ periodically)
-            auto result = cmd_mailbox.receive_any_for(
+            cmd_mailbox.receive_any_for(
                 Milliseconds(100),
                 [&](auto&& received_msg) {
                     // Try system command visitor first

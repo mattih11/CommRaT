@@ -184,7 +184,7 @@ int test_compile_time_mailbox_names() {
     return 0;
 }
 
-int main(int argc, char** argv) {
+int main(int, char**) {
     // Test EnumName utility
     std::cout << "Running test_enum_names...\n";
     test_enum_names();

@@ -126,10 +126,12 @@ public:
         TimsMessage<GetDataReqPayload> request{
             .header = {
                 .msg_type = Registry::template get_message_id<GetDataReqPayload>(),
+                .msg_size = 0,
                 .timestamp = Time::now(),
                 .seq_number = 0,
                 .dest = 0,  // Will be filled by mailbox
-                .src  = 0   // Will be filled by mailbox
+                .src  = 0,  // Will be filled by mailbox
+                .flags = 0
             },
             .payload = {
                 .target_timestamp = timestamp,
@@ -190,10 +192,12 @@ public:
         TimsMessage<GetNextDataReqPayload> request{
             .header = {
                 .msg_type = Registry::template get_message_id<GetNextDataReqPayload>(),
+                .msg_size = 0,
                 .timestamp = Time::now(),
                 .seq_number = 0,
                 .dest = 0,  // Will be filled by mailbox
-                .src  = 0   // Will be filled by mailbox
+                .src  = 0,  // Will be filled by mailbox
+                .flags = 0
             },
             .payload = {}  // Empty
         };

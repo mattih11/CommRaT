@@ -67,6 +67,7 @@ public:
 protected:
     void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& output) override {
         // Should compile - primary is first input
+        (void)imu;
         output = FusedData{
             .position_x = static_cast<float>(gps->latitude),
             .position_y = static_cast<float>(gps->longitude)
@@ -132,6 +133,7 @@ public:
 protected:
     void process(const IMUData& imu, const Synced<GPSData>& gps, FusedData& output) override {
         // Should compile - first input (IMU) implicitly primary
+        (void)imu; (void)gps;
         output = FusedData{
             .velocity_y = imu.accel_y
         };
@@ -153,6 +155,7 @@ protected:
     void process(const IMUData& imu, const Synced<GPSData>& gps, const Synced<LidarData>& lidar, 
                  FusedData& fused, DiagnosticsData& diag) override {
         // Should compile - multi-input + multi-output signature
+        (void)imu;
         fused.position_x = static_cast<float>(gps->latitude);
         fused.position_z = lidar->distance;
         
