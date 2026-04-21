@@ -36,6 +36,31 @@ target_link_libraries(commrat PUBLIC
     rt
 )
 
+# Platform backend selection
+set(COMMRAT_PLATFORM "STD" CACHE STRING "Platform backend (STD or EVL)")
+set_property(CACHE COMMRAT_PLATFORM PROPERTY STRINGS STD EVL)
+
+if(NOT COMMRAT_PLATFORM MATCHES "^(STD|EVL)$")
+    message(FATAL_ERROR "COMMRAT_PLATFORM must be STD or EVL, got: ${COMMRAT_PLATFORM}")
+endif()
+
+target_compile_definitions(commrat PUBLIC COMMRAT_PLATFORM_${COMMRAT_PLATFORM})
+
+if(COMMRAT_PLATFORM STREQUAL "EVL")
+    find_library(EVL_LIBRARY NAMES evl REQUIRED
+        DOC "libevl runtime library (Xenomai 4 / libevl)")
+    find_path(EVL_INCLUDE_DIR NAMES evl/thread.h REQUIRED
+        DOC "libevl include directory")
+    add_library(EVL::evl UNKNOWN IMPORTED)
+    set_target_properties(EVL::evl PROPERTIES
+        IMPORTED_LOCATION "${EVL_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${EVL_INCLUDE_DIR}")
+    target_link_libraries(commrat PUBLIC EVL::evl)
+    message(STATUS "CommRaT platform: EVL (Xenomai 4 / libevl)")
+else()
+    message(STATUS "CommRaT platform: STD (standard Linux)")
+endif()
+
 if(COMMRAT_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
