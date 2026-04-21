@@ -1,6 +1,6 @@
 # CommRaT Development Roadmap
 
-**Last Updated**: April 7, 2026
+**Last Updated**: April 22, 2026
 
 This document tracks planned features, improvements, and long-term ideas for CommRaT. For active bugs and runtime issues, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
