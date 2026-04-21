@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Phase 2.0+ (Full subscription protocol, user command replies, dead code cleanup)  
-**Next**: Platform abstraction layer (libevl/Xenomai 4), input buffering, command ergonomics
+**Current Status**: Build modernized, warning-free, CI pipeline in place. EVL platform backend headers exist; implementation pending.  
+**Next**: EVL backend implementation (`evl/threading_impl.hpp`, `evl/timestamp_impl.hpp`), input buffering, command ergonomics
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, type safety computed at compile time
@@ -114,9 +114,19 @@ Time::sleep(Milliseconds(10));
 
 ### Platform Abstraction Layer (libevl / Xenomai 4)
 
-CommRaT supports two platform backends selected at compile time via CMake:
-- `COMMRAT_PLATFORM_STD` (default): Standard Linux (`std::thread`, `std::mutex`, `std::chrono`)
-- `COMMRAT_PLATFORM_EVL`: Hard real-time via libevl/Xenomai 4 (out-of-band scheduling)
+CommRaT supports two platform backends selected at compile time via the `COMMRAT_PLATFORM` CMake cache variable:
+
+```bash
+cmake -B build                          # default: STD
+cmake -B build -DCOMMRAT_PLATFORM=EVL   # hard real-time
+```
+
+- `COMMRAT_PLATFORM=STD` (default): Standard Linux (`std::thread`, `std::mutex`, `std::chrono`)
+- `COMMRAT_PLATFORM=EVL`: Hard real-time via libevl/Xenomai 4 (out-of-band scheduling)
+
+The CMake option propagates `COMMRAT_PLATFORM_STD` or `COMMRAT_PLATFORM_EVL` as compile definitions and auto-discovers `libevl` + `evl/thread.h` when EVL is selected.
+
+> **EVL backend status**: Headers exist in `include/commrat/platform/evl/` but contain `#error` stubs. `-DCOMMRAT_PLATFORM=EVL` does not yet compile. Tracked via `build-evl-compile` CI job (`continue-on-error: true`).
 
 **EVL Execution Model:**
 - EVL threads are regular POSIX threads that attach to the EVL core via `evl_attach_self()`
@@ -565,6 +575,7 @@ Result: Each subscriber receives ONLY their subscribed message type!
 
 ```
 CommRaT/
+├── CMakeLists.txt                         # Root build (COMMRAT_PLATFORM option, find_package)
 ├── include/commrat/
 │   ├── module2.hpp                        # Module base class (I/O tuple architecture)
 │   ├── module/io/
@@ -583,21 +594,41 @@ CommRaT/
 │   │       ├── subscription_messages.hpp  # Subscribe/Unsubscribe protocol
 │   │       └── data_request_messages.hpp  # GetData/GetNextData protocol
 │   └── platform/
+│       ├── platform.hpp                   # Backend selection macros
 │       ├── threading.hpp                  # Thread, Mutex abstractions
-│       └── timestamp.hpp                  # Time, Duration, Timestamp
-├── examples/                              # Working examples (CTest validated)
+│       ├── timestamp.hpp                  # Time, Duration, Timestamp
+│       ├── std/                           # std:: backend (fully operational)
+│       └── evl/                           # EVL backend (headers present, #error stubs)
+├── examples/
+│   ├── CMakeLists.txt                     # Example targets
+│   └── *.cpp                              # Working examples
+├── test/
+│   ├── CMakeLists.txt                     # Test targets + add_test()
+│   └── *.cpp                              # CTest suite
+├── scripts/ci/
+│   └── run-evl-tests.sh                   # QEMU SSH test runner (rsync + cmake + ctest)
+├── .github/workflows/
+│   ├── doxygen.yml                        # Doxygen → GitHub Pages
+│   └── ci.yml                             # 3-job CI: std build, EVL compile-check, EVL QEMU runtime
 ├── docs/
 │   ├── ARCHITECTURE.md                    # System architecture
 │   ├── API_REFERENCE.md                   # API documentation
 │   ├── GETTING_STARTED.md                 # First-time setup
 │   ├── USER_GUIDE.md                      # Comprehensive guide
 │   ├── KNOWN_ISSUES.md                    # Active issues
+│   ├── ROADMAP.md                         # Feature roadmap and status
 │   ├── internal/                          # Design decisions, phase history
 │   ├── work/                              # Active design docs
 │   └── archive/                           # Archived docs
-├── tims/                                  # TiMS library
-└── SeRTial/                               # Serialization library
+└── src/
+    └── tims_wrapper.cpp                   # TiMS IPC wrapper
 ```
+
+**External dependencies** (installed system-wide, not submodules):
+- **RACK** — TiMS IPC library (`find_package(RACK REQUIRED)` → `RACK::rack`)
+- **SeRTial** — zero-allocation serialization (`find_package(SeRTial REQUIRED)` → `SeRTial::sertial`)
+- **reflectcpp** — reflection, found transitively via SeRTial
+- **libevl** — Xenomai 4 RT primitives (only needed when `COMMRAT_PLATFORM=EVL`)
 
 ## Documentation Strategy
 
@@ -814,9 +845,12 @@ void process(const T& input) {
 - **Subscription protocol integration** (Subscribe/Unsubscribe/GetData dispatch wired in command_loop_impl, end-to-end proven)
 - **User command reply mechanism** (on_command reply sent via CMD mailbox, matching system command pattern)
 - **Dead code removal** (legacy subscription.hpp removed, RT violations eliminated)
+- **Modern CMake build system** (find_package for RACK/SeRTial/Threads, examples/test subdirectories, COMMRAT_BUILD_EXAMPLES/TESTS options, warning-free)
+- **COMMRAT_PLATFORM CMake option** (`STD`/`EVL`, auto-discovers libevl, propagates compile definitions, CMake-validated)
+- **CI pipeline** (3-job GitHub Actions: `build-std` in container, `build-evl-compile` with continue-on-error, `test-evl-runtime` via QEMU wic image + SSH)
 
 ### In Progress
-- Platform abstraction layer (libevl/Xenomai 4 backend for hard-RT)
+- EVL backend implementation (`evl/threading_impl.hpp`, `evl/timestamp_impl.hpp` — both have `#error` stubs)
 - Input buffering strategies
 - Command ergonomics improvements
 

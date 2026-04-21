@@ -46,11 +46,15 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 git clone https://github.com/mattih11/CommRaT.git
 cd CommRaT
 
-# Build and install
+# Build and install (standard platform, default)
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
 sudo make install
+
+# Build for EVL / Xenomai 4 (requires libevl on build host)
+cmake .. -DCOMMRAT_PLATFORM=EVL
+make -j$(nproc)
 ```
 
 ### Your First CommRaT Application

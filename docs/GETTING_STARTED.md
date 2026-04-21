@@ -161,9 +161,12 @@ int main() {
 ## Build and Run
 
 ```bash
-# Build
+# Build (standard platform, default)
 mkdir build && cd build
 cmake .. && make
+
+# To build for EVL / Xenomai 4 (requires libevl on build host):
+cmake .. -DCOMMRAT_PLATFORM=EVL && make
 
 # Start TIMS router (separate terminal)
 tims_router_tcp

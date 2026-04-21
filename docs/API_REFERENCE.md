@@ -1131,15 +1131,24 @@ WriteLocked(mutex)   { /* exclusive write section */ }
 
 **Header:** `<commrat/platform/platform.hpp>`
 
-Compile-time backend selection via CMake define:
+Backend is selected via the `COMMRAT_PLATFORM` CMake cache variable:
 
-| Define | Backend | Description |
-|--------|---------|-------------|
-| `COMMRAT_PLATFORM_STD` | Standard Linux | `std::thread`, `std::mutex`, `std::chrono` (default) |
-| `COMMRAT_PLATFORM_EVL` | Hard real-time | libevl/Xenomai 4, out-of-band scheduling |
+```bash
+cmake -B build                          # default: STD
+cmake -B build -DCOMMRAT_PLATFORM=EVL   # hard real-time
+```
 
-If neither is defined, defaults to `COMMRAT_PLATFORM_STD`.
-Defining both is a compile error.
+CMake propagates the selection as a compile definition:
+
+| `COMMRAT_PLATFORM` | Compile definition | Backend |
+|---|---|---|
+| `STD` (default) | `COMMRAT_PLATFORM_STD` | `std::thread`, `std::mutex`, `std::chrono` |
+| `EVL` | `COMMRAT_PLATFORM_EVL` | libevl / Xenomai 4, out-of-band scheduling |
+
+Defining both is a compile error. If neither is defined (e.g. manual build), defaults to `COMMRAT_PLATFORM_STD`.
+
+> **EVL status**: `evl/threading_impl.hpp` and `evl/timestamp_impl.hpp` contain `#error` stubs.
+> `-DCOMMRAT_PLATFORM=EVL` does not yet compile. Tracked in CI `build-evl-compile` job.
 
 ### Feature Detection Macros
 
