@@ -50,7 +50,7 @@ DATA mailbox: per-input   - Receive continuous data streams (blocking receive)
 - `Duration` structural type with constexpr arithmetic (NTTP-compatible)
 - `Thread`, `Mutex`, `SharedMutex`, `ConditionVariable` wrappers
 - `Time::now()`, `Time::sleep()` with platform-selected backend
-- Compile-time backend selection: `COMMRAT_PLATFORM_STD` (default) or `COMMRAT_PLATFORM_EVL`
+- Compile-time backend selection via `COMMRAT_PLATFORM=STD` (default) or `COMMRAT_PLATFORM=EVL` CMake option
 
 ---
 

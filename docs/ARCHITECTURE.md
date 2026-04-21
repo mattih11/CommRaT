@@ -399,12 +399,24 @@ and `include/commrat/messaging/message_registry.hpp`.
 
 CommRaT uses a compile-time platform abstraction to support multiple backends.
 All threading, timing, and synchronization primitives are wrapped behind a unified
-C++ API. The backend is selected via CMake option:
+C++ API. Select the backend via the `COMMRAT_PLATFORM` CMake cache variable:
 
-| CMake Option | Backend | Use Case |
-|---|---|---|
-| `COMMRAT_PLATFORM_STD` | `std::thread`, `std::mutex`, `std::chrono` | Default Linux, development, testing |
-| `COMMRAT_PLATFORM_EVL` | libevl / Xenomai 4 | Hard real-time, out-of-band scheduling |
+```bash
+cmake -B build -DCOMMRAT_PLATFORM=STD   # default -- standard Linux
+cmake -B build -DCOMMRAT_PLATFORM=EVL   # hard real-time -- requires libevl / Xenomai 4 kernel
+```
+
+| `COMMRAT_PLATFORM` | Compile definition | Backend | Use Case |
+|---|---|---|---|
+| `STD` (default) | `COMMRAT_PLATFORM_STD` | `std::thread`, `std::mutex`, `std::chrono` | Standard Linux, development, testing |
+| `EVL` | `COMMRAT_PLATFORM_EVL` | libevl / Xenomai 4 | Hard real-time, out-of-band scheduling |
+
+The EVL backend requires `libevl` and `evl/thread.h` to be present on the build host.
+CMake will locate them automatically via `find_library` / `find_path` and report an
+error if they are missing.
+
+> **Status**: EVL backend headers exist but contain `#error` stubs. `-DCOMMRAT_PLATFORM=EVL`
+> will not yet link successfully. Tracked in the CI `build-evl-compile` job (`continue-on-error`).
 
 ### Abstraction Mapping
 

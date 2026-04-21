@@ -73,8 +73,16 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Enable compilation against libevl for hard real-time guarantees
 - Swap platform layer without changing application code
 - Duration type, free function constructors, std::/EVL backends
-- Status: **COMPLETED** (std:: backend fully operational, EVL skeleton in place)
+- `COMMRAT_PLATFORM` CMake cache variable selects backend (`STD` / `EVL`)
+- Status: **COMPLETED** (std:: backend fully operational, EVL headers in place, implementation pending)
 - Details: See `docs/work/PLATFORM_ABSTRACTION_LAYER.md`
+
+**CI Pipeline** -- COMPLETED
+- 3-job GitHub Actions workflow: `.github/workflows/ci.yml`
+- `build-std`: builds and runs ctest in ratos-dev-image container (STD platform)
+- `build-evl-compile`: compile-checks EVL platform build (`continue-on-error` until backends are implemented)
+- `test-evl-runtime`: downloads RaTOS wic disk image, boots QEMU, rsync + build + ctest inside EVL kernel guest
+- Scripts: `scripts/ci/run-evl-tests.sh`
 
 **Unified ModuleType Definition**
 - Extend message registry to define complete module interfaces
