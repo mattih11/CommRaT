@@ -748,21 +748,19 @@ These will trigger automatic demotion to in-band (losing RT guarantees):
 
 ### Build Integration (CMake)
 
-```cmake
-option(COMMRAT_PLATFORM "Platform backend: std or evl" "std")
+Use the `COMMRAT_PLATFORM` cache variable (implemented in CommRaT's `CMakeLists.txt`):
 
-if(COMMRAT_PLATFORM STREQUAL "evl")
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(EVL REQUIRED evl)
-
-    target_compile_definitions(commrat PUBLIC COMMRAT_PLATFORM_EVL)
-    target_include_directories(commrat PUBLIC ${EVL_INCLUDE_DIRS})
-    target_link_libraries(commrat PUBLIC ${EVL_LIBRARIES} pthread)
-else()
-    target_compile_definitions(commrat PUBLIC COMMRAT_PLATFORM_STD)
-    target_link_libraries(commrat PUBLIC pthread)
-endif()
+```bash
+cmake -B build -DCOMMRAT_PLATFORM=EVL   # selects EVL backend
+cmake -B build                          # default: STD
 ```
+
+CMake auto-discovers `libevl` and `evl/thread.h` via `find_library` / `find_path`,
+creates an `EVL::evl` imported target, and propagates `COMMRAT_PLATFORM_EVL` as a
+compile definition. No manual `pkg_check_modules` needed.
+
+The compile definitions (`COMMRAT_PLATFORM_EVL` / `COMMRAT_PLATFORM_STD`) are then
+used in headers as `#if defined(COMMRAT_PLATFORM_EVL)` — see `platform.hpp`.
 
 ### Header Organization
 

@@ -40,6 +40,8 @@ For each of the following, verify it reflects the current state of the code:
 | `docs/GETTING_STARTED.md` | Build commands, prerequisites, code examples |
 | `docs/ROADMAP.md` | Move completed items, update In Progress, add new Planned items |
 | `docs/KNOWN_ISSUES.md` | Mark resolved issues, add newly discovered ones |
+| `docs/work/EVL_API_REFERENCE.md` | CMake build integration section (uses `COMMRAT_PLATFORM=EVL`, not manual defines) |
+| `docs/work/PLATFORM_ABSTRACTION_LAYER.md` | Implementation status, phase completion |
 | `docs/README.md` | Platform abstraction one-liner, feature list |
 | `README.md` | Quick start build commands, feature bullets |
 | `examples/README.md` | Build commands, list of examples |
