@@ -10,14 +10,14 @@ on:
 env:
   BUILD_TYPE: Release
 
-# Required GitHub Actions variables (set in repo Settings -> Variables):
+# Required GitHub Actions secrets (set in repo Settings -> Secrets -> Actions):
 #   RATOS_IMAGE_REF       e.g. ghcr.io/myorg/ratos-dev-image:latest
 #   RATOS_REGISTRY_USER   e.g. myorg  (GitHub username or org owning the GHCR image)
-#   RATOS_RELEASE_REPO    e.g. myorg/RaTOS
-#
-# Required GitHub Actions secrets (set in repo Settings -> Secrets):
 #   RATOS_REGISTRY_TOKEN  PAT or GHCR token with read:packages scope
 #   RATOS_RELEASE_TOKEN   PAT with contents:read scope on the RaTOS repo
+#
+# Required GitHub Actions variables (set in repo Settings -> Variables -> Actions):
+#   RATOS_RELEASE_REPO    e.g. myorg/RaTOS
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -28,9 +28,9 @@ jobs:
     name: Build & Test (STD platform)
     runs-on: ubuntu-latest
     container:
-      image: ${{ vars.RATOS_IMAGE_REF }}
+      image: ${{ secrets.RATOS_IMAGE_REF }}
       credentials:
-        username: ${{ vars.RATOS_REGISTRY_USER }}
+        username: ${{ secrets.RATOS_REGISTRY_USER }}
         password: ${{ secrets.RATOS_REGISTRY_TOKEN }}
     steps:
       - name: Checkout
@@ -56,9 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # EVL backends contain #error stubs - not yet implemented
     container:
-      image: ${{ vars.RATOS_IMAGE_REF }}
+      image: ${{ secrets.RATOS_IMAGE_REF }}
       credentials:
-        username: ${{ vars.RATOS_REGISTRY_USER }}
+        username: ${{ secrets.RATOS_REGISTRY_USER }}
         password: ${{ secrets.RATOS_REGISTRY_TOKEN }}
     steps:
       - name: Checkout
