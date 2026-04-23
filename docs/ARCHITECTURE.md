@@ -402,8 +402,8 @@ All threading, timing, and synchronization primitives are wrapped behind a unifi
 C++ API. Select the backend via the `COMMRAT_PLATFORM` CMake cache variable:
 
 ```bash
-cmake -B build -DCOMMRAT_PLATFORM=STD   # default -- standard Linux
-cmake -B build -DCOMMRAT_PLATFORM=EVL   # hard real-time -- requires libevl / Xenomai 4 kernel
+cmake --preset default   # default -- standard Linux
+cmake --preset evl       # hard real-time -- requires libevl / Xenomai 4 kernel
 ```
 
 | `COMMRAT_PLATFORM` | Compile definition | Backend | Use Case |

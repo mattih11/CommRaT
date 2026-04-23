@@ -1,0 +1,61 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "default",
+      "displayName": "Default (STD platform, Release)",
+      "description": "Standard Linux platform, Release build with examples. Use inside the dev container or when all dependencies are installed locally.",
+      "inherits": "base",
+      "cacheVariables": {
+        "COMMRAT_BUILD_EXAMPLES": "ON",
+        "COMMRAT_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (STD platform)",
+      "description": "Standard Linux platform, Debug build with full assertions.",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "evl",
+      "displayName": "EVL platform (compile-check)",
+      "description": "EVL/Xenomai 4 platform backend. Requires libevl installed (present in the RaTOS dev container). Tests and examples disabled until the EVL backends are implemented.",
+      "inherits": "base",
+      "cacheVariables": {
+        "COMMRAT_PLATFORM": "EVL",
+        "COMMRAT_BUILD_TESTS": "OFF",
+        "COMMRAT_BUILD_EXAMPLES": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default" },
+    { "name": "debug",   "configurePreset": "debug"   },
+    { "name": "evl",     "configurePreset": "evl"     }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

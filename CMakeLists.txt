@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 project(CommRaT VERSION 1.0.0 LANGUAGES CXX)
 
 # Modern C++ standard
@@ -117,6 +117,60 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CommRaT
 )
+
+#-----------------------------------------------------------------------------
+# Container-based development targets
+#
+# These targets let you build and test inside the RaTOS dev container without
+# opening a Dev Container session. They are skipped automatically when already
+# running inside a container (GitHub Actions and Dev Containers both set the
+# 'container' environment variable).
+#
+# Usage (from a cmake --preset default build dir):
+#   cmake --build --preset default --target commrat-shell
+#   cmake --build --preset default --target commrat-test-container
+#   cmake --build --preset default --target commrat-evl-compile
+#-----------------------------------------------------------------------------
+if(NOT DEFINED ENV{container})
+    find_program(COMMRAT_CONTAINER_RUNTIME docker podman)
+    if(COMMRAT_CONTAINER_RUNTIME)
+        set(RATOS_IMAGE_REF "ghcr.io/mattih11/ratos-dev-image:latest"
+            CACHE STRING "RaTOS dev container image used by commrat-* targets")
+
+        add_custom_target(commrat-shell
+            COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm -it
+                --volume "${CMAKE_SOURCE_DIR}:/workspace"
+                --workdir /workspace
+                ${RATOS_IMAGE_REF}
+                bash
+            USES_TERMINAL
+            COMMENT "Opening interactive shell in RaTOS dev container (${RATOS_IMAGE_REF})"
+            VERBATIM
+        )
+
+        add_custom_target(commrat-test-container
+            COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm
+                --volume "${CMAKE_SOURCE_DIR}:/workspace"
+                --workdir /workspace
+                ${RATOS_IMAGE_REF}
+                bash -c "cmake --preset default && cmake --build --preset default && ctest --preset default"
+            USES_TERMINAL
+            COMMENT "Building and testing CommRaT inside RaTOS dev container"
+            VERBATIM
+        )
+
+        add_custom_target(commrat-evl-compile
+            COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm
+                --volume "${CMAKE_SOURCE_DIR}:/workspace"
+                --workdir /workspace
+                ${RATOS_IMAGE_REF}
+                bash -c "cmake --preset evl && cmake --build --preset evl"
+            USES_TERMINAL
+            COMMENT "EVL platform compile-check inside RaTOS dev container"
+            VERBATIM
+        )
+    endif()
+endif()
 
 #-----------------------------------------------------------------------------
 # Documentation with Doxygen

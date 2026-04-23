@@ -1,0 +1,24 @@
+{
+  "name": "CommRaT EVL Development",
+  "image": "ghcr.io/mattih11/ratos-dev-image:latest",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cmake-tools",
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack"
+      ],
+      "settings": {
+        "cmake.configurePreset": "default",
+        "cmake.buildPreset": "default",
+        "cmake.testPreset": "default",
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+        "C_Cpp.default.cppStandard": "c++20"
+      }
+    }
+  },
+  "onCreateCommand": "cmake --preset default"
+}

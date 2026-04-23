@@ -4,7 +4,7 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Build modernized, warning-free, CI pipeline in place. EVL platform backend headers exist; implementation pending.  
+**Current Status**: Build modernized, warning-free, CI pipeline in place. CMakePresets and Dev Container configured. EVL platform backend headers exist; implementation pending.  
 **Next**: EVL backend implementation (`evl/threading_impl.hpp`, `evl/timestamp_impl.hpp`), input buffering, command ergonomics
 
 ### Core Philosophy
@@ -117,8 +117,8 @@ Time::sleep(Milliseconds(10));
 CommRaT supports two platform backends selected at compile time via the `COMMRAT_PLATFORM` CMake cache variable:
 
 ```bash
-cmake -B build                          # default: STD
-cmake -B build -DCOMMRAT_PLATFORM=EVL   # hard real-time
+cmake --preset default   # default: STD
+cmake --preset evl       # hard real-time
 ```
 
 - `COMMRAT_PLATFORM=STD` (default): Standard Linux (`std::thread`, `std::mutex`, `std::chrono`)
@@ -575,7 +575,11 @@ Result: Each subscriber receives ONLY their subscribed message type!
 
 ```
 CommRaT/
-├── CMakeLists.txt                         # Root build (COMMRAT_PLATFORM option, find_package)
+├── .commrat.env                           # Non-secret config defaults (image ref, QEMU settings)
+├── CMakePresets.json                      # Build presets: default, debug, evl
+├── CMakeLists.txt                         # Root build (COMMRAT_PLATFORM option, find_package, container targets)
+├── .devcontainer/
+│   └── devcontainer.json                  # VS Code Dev Container (ratos-dev-image, cmake-tools)
 ├── include/commrat/
 │   ├── module2.hpp                        # Module base class (I/O tuple architecture)
 │   ├── module/io/
@@ -606,7 +610,9 @@ CommRaT/
 │   ├── CMakeLists.txt                     # Test targets + add_test()
 │   └── *.cpp                              # CTest suite
 ├── scripts/ci/
-│   └── run-evl-tests.sh                   # QEMU SSH test runner (rsync + cmake + ctest)
+│   └── run-evl-tests.sh                   # QEMU SSH test runner (rsync + cmake presets + ctest; SSH_KEY/SSH_PORT via env)
+├── scripts/
+│   └── run-local-evl-tests.sh             # Local QEMU runner (sources .commrat.env, gh run download)
 ├── .github/workflows/
 │   ├── doxygen.yml                        # Doxygen → GitHub Pages
 │   └── ci.yml                             # 3-job CI: std build, EVL compile-check, EVL QEMU runtime
@@ -847,7 +853,10 @@ void process(const T& input) {
 - **Dead code removal** (legacy subscription.hpp removed, RT violations eliminated)
 - **Modern CMake build system** (find_package for RACK/SeRTial/Threads, examples/test subdirectories, COMMRAT_BUILD_EXAMPLES/TESTS options, warning-free)
 - **COMMRAT_PLATFORM CMake option** (`STD`/`EVL`, auto-discovers libevl, propagates compile definitions, CMake-validated)
-- **CI pipeline** (3-job GitHub Actions: `build-std` in container, `build-evl-compile` with continue-on-error, `test-evl-runtime` via QEMU wic image + SSH)
+- **CI pipeline** (3-job GitHub Actions: `build-std` in container, `build-evl-compile` with continue-on-error, `test-evl-runtime` via `dawidd6/action-download-artifact` + QEMU; public image, only `RATOS_RELEASE_TOKEN` secret needed)
+- **CMakePresets** (`default`/`debug`/`evl` presets; used by CI, local builds, VS Code cmake-tools, CLion)
+- **Dev Container** (`.devcontainer/devcontainer.json` — zero-setup IDE using ratos-dev-image with all deps)
+- **`.commrat.env` config** (single source of truth for non-secret values; `.commrat.env.local` for machine overrides)
 
 ### In Progress
 - EVL backend implementation (`evl/threading_impl.hpp`, `evl/timestamp_impl.hpp` — both have `#error` stubs)
