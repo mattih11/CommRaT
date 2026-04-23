@@ -7,7 +7,7 @@ Create your first CommRaT application in three steps.
 ## Prerequisites
 
 - **C++20 compiler** (GCC 10+, Clang 12+)
-- **CMake 3.16+**
+- **CMake 3.21+**
 - **[SeRTial](https://github.com/mattih11/SeRTial)** installed system-wide
 - **[RACK](https://github.com/smolorz/RACK)** installed system-wide (provides TiMS messaging)
 - **TIMS router running** (`tims_router_tcp` from RACK)
@@ -162,11 +162,12 @@ int main() {
 
 ```bash
 # Build (standard platform, default)
-mkdir build && cd build
-cmake .. && make
+cmake --preset default
+cmake --build --preset default
 
 # To build for EVL / Xenomai 4 (requires libevl on build host):
-cmake .. -DCOMMRAT_PLATFORM=EVL && make
+cmake --preset evl
+cmake --build --preset evl
 
 # Start TIMS router (separate terminal)
 tims_router_tcp

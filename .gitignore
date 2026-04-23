@@ -2,6 +2,14 @@
 build/
 cmake-build-*/
 
+# CMake preset build directories
+build/default/
+build/debug/
+build/evl/
+
+# Local environment overrides (machine-specific, not committed)
+.commrat.env.local
+
 # Doxygen output
 docs/api/
 

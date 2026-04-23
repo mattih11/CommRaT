@@ -7,81 +7,65 @@ on:
     branches: [main]
   workflow_dispatch:
 
-env:
-  BUILD_TYPE: Release
-
-# Required GitHub Actions variables (set in repo Settings -> Variables -> Actions):
-#   RATOS_IMAGE_REF       e.g. ghcr.io/myorg/ratos-dev-image:latest
-#   RATOS_RELEASE_REPO    e.g. myorg/RaTOS
+# The RaTOS dev container image is public (no credentials required to pull).
+# Image reference and release repo are defined in .commrat.env and mirrored
+# here. Update both files when the RaTOS image changes.
 #
-# Required GitHub Actions secrets (set in repo Settings -> Secrets -> Actions):
-#   RATOS_REGISTRY_USER   e.g. myorg  (GitHub username or org owning the GHCR image)
-#   RATOS_REGISTRY_TOKEN  PAT or GHCR token with read:packages scope
-#   RATOS_RELEASE_TOKEN   PAT with contents:read scope on the RaTOS repo
-#
-# Note: container.image only supports the vars context, not secrets.
+# Required GitHub Actions secrets (repo Settings -> Secrets -> Actions):
+#   RATOS_RELEASE_TOKEN  PAT with actions:read scope on mattih11/RaTOS
+#                        (needed to download workflow run artifacts)
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1: Build and test with the standard Linux platform backend
+  # Job 1: Build and test with the standard Linux platform backend.
   #        Runs inside the ratos-dev-image container where all deps are installed.
   # ---------------------------------------------------------------------------
   build-std:
     name: Build & Test (STD platform)
     runs-on: ubuntu-latest
     container:
-      image: ${{ vars.RATOS_IMAGE_REF }}
-      credentials:
-        username: ${{ secrets.RATOS_REGISTRY_USER }}
-        password: ${{ secrets.RATOS_REGISTRY_TOKEN }}
+      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: cmake --preset default
 
       - name: Build
-        run: cmake --build build --parallel $(nproc)
+        run: cmake --build --preset default --parallel $(nproc)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --preset default
 
   # ---------------------------------------------------------------------------
-  # Job 2: Compile-check with the EVL platform backend
+  # Job 2: Compile-check with the EVL platform backend.
   #        Expected to fail until evl/threading_impl.hpp and
   #        evl/timestamp_impl.hpp are implemented. continue-on-error keeps
-  #        the CI green while tracking progress.
+  #        the overall CI green while tracking progress.
   # ---------------------------------------------------------------------------
   build-evl-compile:
     name: Compile check (EVL platform)
     runs-on: ubuntu-latest
     continue-on-error: true  # EVL backends contain #error stubs - not yet implemented
     container:
-      image: ${{ vars.RATOS_IMAGE_REF }}
-      credentials:
-        username: ${{ secrets.RATOS_REGISTRY_USER }}
-        password: ${{ secrets.RATOS_REGISTRY_TOKEN }}
+      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure (EVL)
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCOMMRAT_PLATFORM=EVL \
-            -DCOMMRAT_BUILD_TESTS=OFF \
-            -DCOMMRAT_BUILD_EXAMPLES=OFF
+        run: cmake --preset evl
 
       - name: Build (EVL)
-        run: cmake --build build --parallel $(nproc)
+        run: cmake --build --preset evl --parallel $(nproc)
 
   # ---------------------------------------------------------------------------
-  # Job 3: Runtime tests inside a real EVL kernel via QEMU
-  #        Downloads the deployed wic disk image and vmlinuz from the RaTOS
-  #        release, boots them with QEMU, rsync CommRaT source in, builds
-  #        with the STD platform (all deps present in image), and runs ctest.
+  # Job 3: Runtime tests inside a real EVL kernel via QEMU.
+  #        Downloads the most recent successful RaTOS build artifact from the
+  #        mattih11/RaTOS repository, boots the wic image with QEMU, rsyncs
+  #        CommRaT source in, builds with the STD platform (all deps present),
+  #        and runs ctest.
   #
   #        NOTE: EVL platform runtime tests require the EVL backends to be
   #        implemented first. Until then, STD tests run under the EVL kernel.
@@ -101,30 +85,27 @@ jobs:
             qemu-system-x86 kpartx rsync
 
       - name: Download RaTOS artifacts
-        env:
-          GH_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
-        run: |
-          mkdir ratos-artifacts
-          gh release download \
-            --repo ${{ vars.RATOS_RELEASE_REPO }} \
-            --pattern "*container-amd64-vmlinuz" \
-            --pattern "*container-amd64.wic.gz" \
-            --dir ratos-artifacts
-          ls -lh ratos-artifacts/
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          repo: mattih11/RaTOS
+          workflow: build-and-publish.yml
+          branch: main
+          name: ratos-evl-artifacts
+          path: ratos-artifacts
+          github_token: ${{ secrets.RATOS_RELEASE_TOKEN }}
 
       - name: Prepare disk image
         run: |
           cd ratos-artifacts
-          gunzip *.wic.gz
+          ls -lh
+          if compgen -G "*.wic.gz" > /dev/null; then gunzip *.wic.gz; fi
           mv *.wic ratos.wic
-          mv *-vmlinuz vmlinuz
+          mv *vmlinuz vmlinuz
 
       - name: Generate SSH keypair and inject into image
         run: |
           ssh-keygen -t ed25519 -N "" -f ci_key
-          # Map partitions from the wic image so we can inject the SSH key
           sudo kpartx -av ratos-artifacts/ratos.wic
-          # Wait for device nodes to appear
           sleep 1
           sudo mkdir -p /mnt/ratos
           sudo mount /dev/mapper/loop0p1 /mnt/ratos
@@ -166,7 +147,7 @@ jobs:
           exit 1
 
       - name: Build and test CommRaT in guest
-        run: bash scripts/ci/run-evl-tests.sh
+        run: SSH_KEY=ci_key SSH_PORT=2222 bash scripts/ci/run-evl-tests.sh
 
       - name: Stop QEMU
         if: always()
