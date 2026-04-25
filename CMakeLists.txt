@@ -128,17 +128,21 @@ install(FILES
 #
 # Usage (from a cmake --preset default build dir):
 #   cmake --build --preset default --target commrat-shell
+#   cmake --build --preset default --target commrat-evl-dev
 #   cmake --build --preset default --target commrat-test-container
 #   cmake --build --preset default --target commrat-evl-compile
+#
+# Alternatively, use scripts/run-in-container.sh directly (more flexible).
 #-----------------------------------------------------------------------------
 if(NOT DEFINED ENV{container})
-    find_program(COMMRAT_CONTAINER_RUNTIME docker podman)
+    find_program(COMMRAT_CONTAINER_RUNTIME NAMES docker podman)
     if(COMMRAT_CONTAINER_RUNTIME)
         set(RATOS_IMAGE_REF "ghcr.io/mattih11/ratos-dev-image:latest"
             CACHE STRING "RaTOS dev container image used by commrat-* targets")
 
         add_custom_target(commrat-shell
             COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm -it
+                --network host
                 --volume "${CMAKE_SOURCE_DIR}:/workspace"
                 --workdir /workspace
                 ${RATOS_IMAGE_REF}
@@ -148,8 +152,27 @@ if(NOT DEFINED ENV{container})
             VERBATIM
         )
 
+        add_custom_target(commrat-evl-dev
+            COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm -it
+                --network host
+                --volume "${CMAKE_SOURCE_DIR}:/workspace"
+                --workdir /workspace
+                ${RATOS_IMAGE_REF}
+                bash -c
+                    "set -euo pipefail && \
+                     echo '--- Building EVL preset ---' && \
+                     cmake --preset evl && \
+                     cmake --build --preset evl --parallel $(nproc) && \
+                     echo '--- Build complete; starting shell (build output in build/evl/) ---' && \
+                     exec bash"
+            USES_TERMINAL
+            COMMENT "Build EVL platform inside RaTOS dev container, then open shell"
+            VERBATIM
+        )
+
         add_custom_target(commrat-test-container
             COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm
+                --network host
                 --volume "${CMAKE_SOURCE_DIR}:/workspace"
                 --workdir /workspace
                 ${RATOS_IMAGE_REF}
@@ -161,6 +184,7 @@ if(NOT DEFINED ENV{container})
 
         add_custom_target(commrat-evl-compile
             COMMAND ${COMMRAT_CONTAINER_RUNTIME} run --rm
+                --network host
                 --volume "${CMAKE_SOURCE_DIR}:/workspace"
                 --workdir /workspace
                 ${RATOS_IMAGE_REF}
