@@ -8,15 +8,29 @@
 
 #pragma once
 
-#include <commrat/platform/threading.hpp>
-#include <commrat/platform/timestamp.hpp>
-#include <commrat/messages.hpp>  // For TimsMessage
+#include <corerat/platform/threading.hpp>
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
+#include <corerat/messaging/wire_message.hpp>  // For TimsMessage
 #include <sertial/containers/ring_buffer.hpp>
 #include <optional>
 #include <cmath>
 #include <algorithm>
 
 namespace commrat {
+
+using corerat::SharedMutex;
+using corerat::SharedLock;
+using corerat::UniqueLockShared;
+using corerat::Duration;
+using corerat::Nanoseconds;
+using corerat::Microseconds;
+using corerat::Milliseconds;
+using corerat::Seconds;
+using corerat::Timestamp;
+using corerat::Time;
+template<typename T>
+using TimsMessage = corerat::WireMessage<T>;
 
 // ============================================================================
 // Timestamp Accessor Trait (handles both direct .timestamp and .header.timestamp)

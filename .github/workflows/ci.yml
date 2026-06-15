@@ -36,39 +36,55 @@ jobs:
         run: cmake --build --preset default --parallel $(nproc)
 
       - name: Test
-        run: ctest --preset default
+        run: |
+          corerat-router-tcp > /dev/null 2>&1 &
+          sleep 1
+          ctest --preset default
+          kill %1 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
-  # Job 2: Compile-check with the EVL platform backend.
-  #        Expected to fail until evl/threading_impl.hpp and
-  #        evl/timestamp_impl.hpp are implemented. continue-on-error keeps
-  #        the overall CI green while tracking progress.
+  # Job 2: Cross-compile with the EVL platform backend against the RaTOS SDK.
+  #        Uses scripts/evl-dev.sh --cross evl-cross which auto-downloads and
+  #        caches the ISAR SDK, then builds with cmake --preset evl-cross.
+  #        The SDK cache is keyed to RATOS_RELEASE_TAG from .commrat.env.
   # ---------------------------------------------------------------------------
   build-evl-compile:
-    name: Compile check (EVL platform)
+    name: Build (EVL platform cross-compile)
     runs-on: ubuntu-latest
-    continue-on-error: true  # EVL backends contain #error stubs - not yet implemented
-    container:
-      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure (EVL)
-        run: cmake --preset evl
+      - name: Read release tag
+        run: |
+          tag=$(grep '^RATOS_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          echo "RATOS_RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
 
-      - name: Build (EVL)
-        run: cmake --build --preset evl --parallel $(nproc)
+      - name: Install patchelf
+        run: sudo apt-get install -y --no-install-recommends patchelf
+
+      - name: Restore SDK cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .evl-cache/sdk
+            .evl-cache/.sdk_cache_key
+          key: ratos-sdk-${{ env.RATOS_RELEASE_TAG }}
+
+      - name: Cross-compile (EVL)
+        env:
+          RATOS_RELEASE_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
+        run: scripts/evl-dev.sh --cross evl-cross
 
   # ---------------------------------------------------------------------------
   # Job 3: Runtime tests inside a real EVL kernel via QEMU.
-  #        Downloads the most recent successful RaTOS build artifact from the
-  #        mattih11/RaTOS repository, boots the wic image with QEMU, rsyncs
-  #        CommRaT source in, builds with the STD platform (all deps present),
-  #        and runs ctest.
-  #
-  #        NOTE: EVL platform runtime tests require the EVL backends to be
-  #        implemented first. Until then, STD tests run under the EVL kernel.
+  #        Uses scripts/evl-dev.sh --cross evl-cross --test which:
+  #          1. Downloads + caches the RaTOS SDK (auto, keyed to release tag)
+  #          2. Cross-compiles CommRaT with cmake --preset evl-cross
+  #          3. Downloads + caches QEMU kernel/initrd/ext4 artifacts
+  #          4. Boots QEMU with the EVL kernel
+  #          5. Deploys cross-compiled binaries to the guest
+  #          6. Runs all test_* binaries and reports pass/fail
   # ---------------------------------------------------------------------------
   test-evl-runtime:
     name: Runtime tests (EVL kernel via QEMU)
@@ -78,80 +94,69 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read release tag
+        run: |
+          tag=$(grep '^RATOS_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          echo "RATOS_RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
+
       - name: Install QEMU and tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 kpartx rsync
+            qemu-system-x86 rsync patchelf
 
-      - name: Download RaTOS artifacts
-        uses: dawidd6/action-download-artifact@v6
+      - name: Restore SDK cache
+        uses: actions/cache@v4
         with:
-          repo: mattih11/RaTOS
-          workflow: build-and-publish.yml
-          branch: main
-          name: ratos-evl-artifacts
-          path: ratos-artifacts
-          github_token: ${{ secrets.RATOS_RELEASE_TOKEN }}
+          path: |
+            .evl-cache/sdk
+            .evl-cache/.sdk_cache_key
+          key: ratos-sdk-${{ env.RATOS_RELEASE_TAG }}
 
-      - name: Prepare disk image
+      - name: Restore QEMU artifacts cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .evl-cache/ratos.ext4
+            .evl-cache/vmlinuz
+            .evl-cache/initrd.img
+            .evl-cache/.cache_key
+          key: ratos-qemu-${{ env.RATOS_RELEASE_TAG }}
+
+      - name: Cross-compile and run tests in QEMU
+        env:
+          RATOS_RELEASE_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
+        run: scripts/evl-dev.sh --cross evl-cross --test
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Publish the cross-compilation SDK as a release asset.
+  #        Only runs on version tags (v*). Downloads the SDK installer from
+  #        the RaTOS release artifacts and re-publishes it alongside the
+  #        CommRaT release so developers can use --cross without building RaTOS.
+  # ---------------------------------------------------------------------------
+  publish-sdk:
+    name: Publish RaTOS SDK (release tags)
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SDK from RaTOS release
+        env:
+          GH_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
         run: |
-          cd ratos-artifacts
-          ls -lh
-          if compgen -G "*.wic.gz" > /dev/null; then gunzip *.wic.gz; fi
-          mv *.wic ratos.wic
-          mv *vmlinuz vmlinuz
+          # Find the most recent RaTOS release that has the SDK asset
+          gh release download \
+            --repo mattih11/RaTOS \
+            --pattern "ratos-dev-sdk-container-amd64*" \
+            --dir sdk-artifact
+          ls -lh sdk-artifact/
 
-      - name: Generate SSH keypair and inject into image
+      - name: Attach SDK to CommRaT release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ssh-keygen -t ed25519 -N "" -f ci_key
-          sudo kpartx -av ratos-artifacts/ratos.wic
-          sleep 1
-          sudo mkdir -p /mnt/ratos
-          sudo mount /dev/mapper/loop0p1 /mnt/ratos
-          sudo mkdir -p /mnt/ratos/root/.ssh
-          sudo cp ci_key.pub /mnt/ratos/root/.ssh/authorized_keys
-          sudo chmod 700 /mnt/ratos/root/.ssh
-          sudo chmod 600 /mnt/ratos/root/.ssh/authorized_keys
-          sudo umount /mnt/ratos
-          sudo kpartx -dv ratos-artifacts/ratos.wic
-
-      - name: Start QEMU
-        run: |
-          qemu-system-x86_64 \
-            -kernel ratos-artifacts/vmlinuz \
-            -append "root=/dev/vda1 rw console=ttyS0 quiet" \
-            -drive file=ratos-artifacts/ratos.wic,format=raw,if=virtio \
-            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
-            -device virtio-net-pci,netdev=net0 \
-            -m 2G -smp 2 \
-            -nographic \
-            -serial mon:stdio &
-          echo $! > qemu.pid
-
-      - name: Wait for SSH
-        run: |
-          echo "Waiting for QEMU guest SSH..."
-          for i in $(seq 1 90); do
-            if ssh -i ci_key \
-                -o StrictHostKeyChecking=no \
-                -o ConnectTimeout=2 \
-                -o BatchMode=yes \
-                -p 2222 root@127.0.0.1 true 2>/dev/null; then
-              echo "SSH ready after $((i * 2))s"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "ERROR: Timeout waiting for SSH after 180s" >&2
-          exit 1
-
-      - name: Build and test CommRaT in guest
-        run: SSH_KEY=ci_key SSH_PORT=2222 bash scripts/ci/run-evl-tests.sh
-
-      - name: Stop QEMU
-        if: always()
-        run: |
-          if [ -f qemu.pid ]; then
-            kill "$(cat qemu.pid)" 2>/dev/null || true
-          fi
+          gh release upload "${{ github.ref_name }}" \
+            sdk-artifact/ratos-dev-sdk-container-amd64* \
+            --clobber

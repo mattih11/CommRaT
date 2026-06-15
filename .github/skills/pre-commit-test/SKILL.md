@@ -36,7 +36,7 @@ If no files match any category, no tests are needed.
 
 ### build + ctest (source or header changes)
 
-**Prerequisite**: `tims_router_tcp` must be running before ctest. Tests that open
+**Prerequisite**: `corerat-router-tcp` must be running before ctest. Tests that open
 TiMS mailboxes will abort or fail immediately if the router is not up.
 
 ```bash
@@ -54,14 +54,14 @@ kill $TIMS_PID 2>/dev/null || true
 
 To check if it is already running:
 ```bash
-pgrep -x tims_router_tcp && echo "running" || echo "not running"
+pgrep -x corerat-router-tcp && echo "running" || echo "not running"
 ```
 
 Pass criteria: zero build errors, all tests pass (or known-failing tests still fail as expected).
 
 ### cmake-reconfigure (CMakeLists.txt changes)
 
-**Prerequisite**: `tims_router_tcp` must be running (see build + ctest above).
+**Prerequisite**: `corerat-router-tcp` must be running (see build + ctest above).
 
 ```bash
 cd /home/muddy/src/CommRaT

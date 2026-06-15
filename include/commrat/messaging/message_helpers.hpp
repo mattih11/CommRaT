@@ -2,11 +2,18 @@
 
 #include "message_registry.hpp"
 #include "data_with_commands.hpp"
-#include "commrat/messaging/message_id.hpp"
+#include <corerat/messaging/message_id.hpp>
 #include "commrat/messaging/system/data_request_messages.hpp"
 #include <cstdint>
 
 namespace commrat {
+
+using corerat::MessagePrefix;
+using corerat::UserSubPrefix;
+using corerat::SystemSubPrefix;
+using corerat::DefaultMessageDef;
+using corerat::MessageDefinition;
+inline constexpr uint16_t AUTO_ID = 0;
 
 /**
  * @file message_helpers.hpp

@@ -12,14 +12,55 @@ using SystemId = uint32_t;
 using InstanceId = uint32_t;
 
 // Core framework components
-#include "commrat/messages.hpp"
-#include "commrat/messaging/message_id.hpp"
+#include <corerat/messaging/wire_message.hpp>
+#include <corerat/messaging/message_id.hpp>
+#include <corerat/ipc/mailbox.hpp>
+
+// CommRaT namespace aliases for CoreRaT types
+namespace commrat {
+    // IPC / Mailbox
+    template<typename... MessageDefs>
+    using Mailbox = corerat::Mailbox<MessageDefs...>;
+    template<typename T>
+    using TimsMessage = corerat::WireMessage<T>;
+    using TimsHeader  = corerat::WireHeader;
+    using corerat::MailboxConfig;
+    template<typename T>
+    using MailboxResult = corerat::MailboxResult<T>;
+    using corerat::MailboxError;
+
+    // Platform — duration
+    using corerat::Duration;
+    using corerat::Nanoseconds;
+    using corerat::Microseconds;
+    using corerat::Milliseconds;
+    using corerat::Seconds;
+    using corerat::Minutes;
+    using corerat::Hours;
+    using namespace corerat::literals;
+
+    // Platform — time
+    using corerat::Timestamp;
+    using corerat::Time;
+
+    // Platform — threading
+    using corerat::Thread;
+    using corerat::Mutex;
+    using corerat::SharedMutex;
+    using corerat::ConditionVariable;
+    using corerat::Lock;
+    using corerat::UniqueLock;
+    using corerat::SharedLock;
+    using corerat::UniqueLockShared;
+    using corerat::ThreadPriority;
+    using corerat::ThreadConfig;
+    using corerat::SchedulingPolicy;
+    using corerat::CvStatus;
+} // namespace commrat
 #include "commrat/messaging/message_registry.hpp"
 #include "commrat/messaging/message_helpers.hpp"
 #include "commrat/module/io/io_spec.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
-#include "commrat/platform/tims_wrapper.hpp"
-#include "commrat/mailbox/mailbox.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/module2.hpp"
 #include "commrat/introspection/introspection_helper.hpp"

@@ -964,7 +964,7 @@ Before shipping `process()` code, verify:
 **Module not receiving data**
 - Check `source_system_id` / `source_instance_id` match producer's `system_id` / `instance_id`
 - Ensure producer starts before consumer
-- Verify TiMS router is running (`tims_router_tcp`)
+- Verify TiMS router is running (`corerat-router-tcp`)
 
 **Address collision**
 - Two modules with same `(type_id, system_id, instance_id)` will collide

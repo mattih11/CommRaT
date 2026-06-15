@@ -1,6 +1,6 @@
 #pragma once
 
-#include "commrat/messages.hpp"
+#include <corerat/messaging/wire_message.hpp>
 #include "commrat/messaging/message_registry.hpp"
 #include "commrat/messaging/message_helpers.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
@@ -8,11 +8,15 @@
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/data_request_messages.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include <optional>
 #include <stdexcept>
 
 namespace commrat {
+
+using corerat::Duration;
+using corerat::Milliseconds;
 //TODO: move to correct place
 using SystemId = uint32_t;
 using InstanceId = uint32_t;

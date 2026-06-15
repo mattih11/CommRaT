@@ -16,10 +16,15 @@
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/module/traits/type_extraction.hpp"
 // input_infrastructure.hpp contains legacy class - thin wrapper now in output_infrastructure.hpp
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include <tuple>
 
 namespace commrat {
+
+using corerat::Timestamp;
+using corerat::Time;
+using corerat::Milliseconds;
 
 /**
  * @brief I/O Handler Service - Manages inputs and outputs

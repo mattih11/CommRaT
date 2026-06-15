@@ -2,7 +2,7 @@
 
 #include <commrat/commrat.hpp>
 #include <commrat/module/module_config.hpp>
-#include <commrat/platform/threading.hpp>
+#include <corerat/platform/threading.hpp>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <csignal>

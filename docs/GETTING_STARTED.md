@@ -10,7 +10,7 @@ Create your first CommRaT application in three steps.
 - **CMake 3.21+**
 - **[SeRTial](https://github.com/mattih11/SeRTial)** installed system-wide
 - **[RACK](https://github.com/smolorz/RACK)** installed system-wide (provides TiMS messaging)
-- **TIMS router running** (`tims_router_tcp` from RACK)
+- **TIMS router running** (`corerat-router-tcp` from CoreRaT)
 
 ---
 
@@ -170,7 +170,7 @@ cmake --preset evl
 cmake --build --preset evl
 
 # Start TIMS router (separate terminal)
-tims_router_tcp
+corerat-router-tcp &
 
 # Run
 ./my_app
@@ -268,7 +268,7 @@ See `examples/` directory:
 
 ## Troubleshooting
 
-**"Connection refused"**: Start `tims_router_tcp` in a separate terminal.
+**"Connection refused"**: Start `corerat-router-tcp` in a separate terminal.
 
 **"Message not received"**: Verify `source_system_id`/`source_instance_id` match the producer's config.
 

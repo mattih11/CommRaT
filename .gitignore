@@ -10,6 +10,9 @@ build/evl/
 # Local environment overrides (machine-specific, not committed)
 .commrat.env.local
 
+# EVL artifact cache (downloaded by scripts/run-local-evl-tests.sh)
+.evl-cache/
+
 # Doxygen output
 docs/api/
 

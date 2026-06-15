@@ -13,7 +13,7 @@ This document tracks known issues, limitations, and areas requiring investigatio
 **Status**: Known Limitation  
 **Priority**: Low
 
-The TiMS router (tims_router_tcp) has a connection/mailbox limit. Creating 10+ concurrent modules in a single process causes the router to drop connections, resulting in:
+The TiMS router (`tims_router_tcp` from RACK) has a connection/mailbox limit. The CoreRaT router (`corerat-router-tcp`) does not have this issue. Creating 10+ concurrent modules in a single process with the old RACK router causes it to drop connections, resulting in:
 ```
 Tims: recv head ERROR, (Connection reset by peer)
 Failed to start PUBLISH mailbox: TiMS initialization failed
@@ -21,7 +21,7 @@ Failed to start PUBLISH mailbox: TiMS initialization failed
 
 **Affected**: `test_address_collisions` Test 8 (stress test with 10 instances)  
 **Not affected**: Normal usage with ~5-6 concurrent modules  
-**Workaround**: Restart tims_router_tcp between stress tests, or reduce concurrent module count.  
+**Workaround**: Use `corerat-router-tcp` (no connection limit) or restart `tims_router_tcp` between stress tests.
 **Root cause**: TiMS router connection table finite; not a CommRaT code issue.
 
 ### 1. Type-Based Metadata Access Limited to 2 Types

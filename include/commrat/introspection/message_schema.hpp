@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "commrat/messages.hpp"
+#include <corerat/messaging/wire_message.hpp>
 #include <sertial/core/layout/struct_layout.hpp>
 #include <rfl.hpp>
 #include <string_view>

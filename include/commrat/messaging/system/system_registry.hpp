@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../message_id.hpp"
+#include <corerat/messaging/message_id.hpp>
 #include "../message_registry.hpp"
 #include "subscription_messages.hpp"
 #include "data_request_messages.hpp"

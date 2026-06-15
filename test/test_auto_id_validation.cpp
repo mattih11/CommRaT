@@ -3,7 +3,7 @@
  * @brief Test AUTO_ID=0 and MAX_MESSAGE_ID validation
  */
 
-#include "commrat/messaging/message_id.hpp"
+#include <corerat/messaging/message_id.hpp>
 #include "commrat/messaging/message_registry.hpp"
 #include <iostream>
 #include <cassert>

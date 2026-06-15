@@ -4,13 +4,13 @@
  */
 
 #include "commrat/commrat.hpp"
-#include "commrat/messages.hpp"
-#include "commrat/messaging/message_id.hpp"
+#include <corerat/messaging/wire_message.hpp>
+// message_id now via corerat/messaging/message_id.hpp (included transitively)
 #include "commrat/messaging/message_registry.hpp"
 #include "commrat/messaging/message_helpers.hpp"
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/module/io/output/module_output.hpp"
-#include "commrat/platform/timestamp.hpp"
+// timestamp now via corerat/platform/timestamp.hpp (included transitively)
 #include <cassert>
 #include <iostream>
 
