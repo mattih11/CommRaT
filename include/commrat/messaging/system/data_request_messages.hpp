@@ -1,10 +1,16 @@
 #pragma once
 
-#include "../message_id.hpp"
-#include "commrat/messages.hpp"
+#include <corerat/messaging/message_id.hpp>
+#include <corerat/messaging/wire_message.hpp>
 #include <cstdint>
 
 namespace commrat {
+
+using corerat::MessageDefinition;
+using corerat::MessagePrefix;
+using corerat::UserSubPrefix;
+template<typename T>
+using TimsMessage = corerat::WireMessage<T>;
 
 // Forward declarations for ReplyType aliases
 template<typename T>

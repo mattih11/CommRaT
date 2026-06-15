@@ -5,9 +5,14 @@
 #include <vector>
 #include <rfl.hpp>
 #include "commrat/mailbox/mailbox_type.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
 
 namespace commrat {
+// CoreRaT types needed in commrat:: namespace
+using corerat::Duration;
+using corerat::Milliseconds;
+using corerat::Time;
+using corerat::Timestamp;
 
 // ============================================================================
 // Mailbox Configuration

@@ -1,9 +1,16 @@
 #pragma once
 
-#include "../message_id.hpp"
+#include <corerat/messaging/message_id.hpp>
 #include <cstdint>
 
 namespace commrat {
+// Bring corerat message-ID types into commrat:: namespace
+using corerat::MessageDefinition;
+using corerat::MessagePrefix;
+using corerat::SystemSubPrefix;
+using corerat::UserSubPrefix;
+using corerat::DefaultMessageDef;
+using corerat::make_message_id;
 
 /**
  * @brief Request to subscribe to continuous data from a producer module

@@ -83,9 +83,9 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - `build-evl-compile`: compile-checks EVL platform build (`continue-on-error` until backends are implemented)
 - `test-evl-runtime`: downloads RaTOS wic disk image via `dawidd6/action-download-artifact`, boots QEMU, rsync + build + ctest inside EVL kernel guest
 - Image is public (no credentials required); only `RATOS_RELEASE_TOKEN` secret needed (artifact download)
-- Scripts: `scripts/ci/run-evl-tests.sh` (SSH-configurable), `scripts/run-local-evl-tests.sh` (local QEMU runner)
-- Configuration: `.commrat.env` (non-secret defaults), `.commrat.env.local` (machine-local overrides, gitignored)
-- CMakePresets: `default` / `debug` / `evl` — used by CI, local builds, VS Code, and CLion
+- Scripts: `scripts/evl-dev.sh` — single script for all EVL dev work (`--cross`, `--build`, `--test`, `--run`, `--shell`)
+- Configuration: `.commrat.env` (non-secret defaults, including `RATOS_RELEASE_TAG` pin), `.commrat.env.local` (machine-local overrides, gitignored)
+- CMakePresets: `default` / `debug` / `evl` / `evl-cross` — used by CI, local builds, VS Code, and CLion
 - Dev Container: `.devcontainer/devcontainer.json` — zero-setup IDE with full IntelliSense in ratos-dev-image
 
 **Unified ModuleType Definition**

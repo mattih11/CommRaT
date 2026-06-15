@@ -9,9 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Use GNUInstallDirs for standard installation directories
 include(GNUInstallDirs)
 
-find_package(SeRTial REQUIRED)
-find_package(RACK REQUIRED)
-find_package(Threads REQUIRED)
+find_package(CoreRaT REQUIRED)
 
 option(COMMRAT_BUILD_EXAMPLES "Build CommRaT examples" ON)
 option(COMMRAT_BUILD_TESTS    "Build CommRaT tests"    ON)
@@ -19,46 +17,23 @@ option(COMMRAT_BUILD_TESTS    "Build CommRaT tests"    ON)
 add_compile_options(-Wall -Wextra -Wpedantic)
 add_compile_options($<$<CONFIG:Release>:-O3> $<$<CONFIG:Release>:-march=native>)
 
-# Library target
-add_library(commrat STATIC
-    src/tims_wrapper.cpp
-)
+# Library target — header-only; CoreRaT provides the IPC backend
+add_library(commrat INTERFACE)
 
-target_include_directories(commrat PUBLIC
+target_include_directories(commrat INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_link_libraries(commrat PUBLIC
-    SeRTial::sertial
-    RACK::rack
-    Threads::Threads
-    rt
-)
-
-# Platform backend selection
-set(COMMRAT_PLATFORM "STD" CACHE STRING "Platform backend (STD or EVL)")
-set_property(CACHE COMMRAT_PLATFORM PROPERTY STRINGS STD EVL)
-
-if(NOT COMMRAT_PLATFORM MATCHES "^(STD|EVL)$")
-    message(FATAL_ERROR "COMMRAT_PLATFORM must be STD or EVL, got: ${COMMRAT_PLATFORM}")
-endif()
-
-target_compile_definitions(commrat PUBLIC COMMRAT_PLATFORM_${COMMRAT_PLATFORM})
-
-if(COMMRAT_PLATFORM STREQUAL "EVL")
-    find_library(EVL_LIBRARY NAMES evl REQUIRED
-        DOC "libevl runtime library (Xenomai 4 / libevl)")
-    find_path(EVL_INCLUDE_DIR NAMES evl/thread.h REQUIRED
-        DOC "libevl include directory")
-    add_library(EVL::evl UNKNOWN IMPORTED)
-    set_target_properties(EVL::evl PROPERTIES
-        IMPORTED_LOCATION "${EVL_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${EVL_INCLUDE_DIR}")
-    target_link_libraries(commrat PUBLIC EVL::evl)
-    message(STATUS "CommRaT platform: EVL (Xenomai 4 / libevl)")
+# Link the appropriate CoreRaT IPC backend
+if(TARGET CoreRaT::corerat_tims)
+    # STD platform: CoreRaT was built with the self-contained TCP/TiMS backend
+    target_link_libraries(commrat INTERFACE CoreRaT::corerat_tims)
+    message(STATUS "CommRaT: using CoreRaT TiMS backend (STD platform)")
 else()
-    message(STATUS "CommRaT platform: STD (standard Linux)")
+    # EVL platform: CoreRaT was built with the EVL-native IPC backend (header-only)
+    target_link_libraries(commrat INTERFACE CoreRaT::corerat)
+    message(STATUS "CommRaT: using CoreRaT EVL backend")
 endif()
 
 if(COMMRAT_BUILD_EXAMPLES)
@@ -76,9 +51,6 @@ endif()
 #-----------------------------------------------------------------------------
 install(TARGETS commrat
     EXPORT CommRaTTargets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
@@ -132,7 +104,7 @@ install(FILES
 #   cmake --build --preset default --target commrat-test-container
 #   cmake --build --preset default --target commrat-evl-compile
 #
-# Alternatively, use scripts/run-in-container.sh directly (more flexible).
+# Alternatively, use scripts/evl-dev.sh directly (more flexible).
 #-----------------------------------------------------------------------------
 if(NOT DEFINED ENV{container})
     find_program(COMMRAT_CONTAINER_RUNTIME NAMES docker podman)

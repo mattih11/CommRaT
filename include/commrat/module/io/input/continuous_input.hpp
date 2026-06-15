@@ -1,13 +1,18 @@
 #pragma once
 
 #include "cmd_input.hpp"
-#include "commrat/mailbox/mailbox.hpp"
+#include <corerat/ipc/mailbox.hpp>
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include <optional>
 
 namespace commrat {
+
+using corerat::Duration;
+using corerat::Milliseconds;
+using corerat::MailboxConfig;
 
 /**
  * @brief Continuous input interface - receives push data stream (RACK RackDataProxy)

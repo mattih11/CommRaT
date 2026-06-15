@@ -1,11 +1,17 @@
 #pragma once
 
-#include "message_id.hpp"
+#include <corerat/messaging/message_id.hpp>
 #include "message_helpers.hpp"
 #include <tuple>
 #include <type_traits>
 
 namespace commrat {
+// Bring corerat message-ID types into commrat:: namespace
+using corerat::MessageDefinition;
+using corerat::MessagePrefix;
+using corerat::UserSubPrefix;
+using corerat::DefaultMessageDef;
+
 
 /**
  * @brief Associate commands with a data message type

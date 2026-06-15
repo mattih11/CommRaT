@@ -1,11 +1,15 @@
 #pragma once
 
-#include "commrat/messages.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/messaging/wire_message.hpp>
+#include <corerat/platform/timestamp.hpp>
 #include <cstdint>
 #include <utility>
 
 namespace commrat {
+
+template<typename T>
+using TimsMessage = corerat::WireMessage<T>;
+using TimsHeader = corerat::WireHeader;
 
 // ============================================================================
 // TimsMessage Creation Helpers

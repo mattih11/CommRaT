@@ -36,12 +36,21 @@
 #include "commrat/messaging/message_registry.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
-#include "commrat/platform/threading.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/threading.hpp>
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
+#include <corerat/platform/platform.hpp>
 #include <tuple>
 #include <type_traits>
+#include <iostream>
 
 namespace commrat {
+
+using corerat::Thread;
+using corerat::Duration;
+using corerat::Milliseconds;
+using corerat::Timestamp;
+using corerat::Time;
 
 // Forward declarations
 template<typename Registry, typename T> class ContinuousInput;
@@ -166,6 +175,18 @@ public:
     explicit Module2(const ModuleConfig& config)
         : config_(config)
     {
+        // Print platform info once per process
+        [[maybe_unused]] static bool platform_printed = []() {
+#if defined(CORERAT_PLATFORM_EVL)
+            std::clog << "[CommRaT] Platform: EVL (Xenomai 4 / libevl)"
+                      << " | OOB=" << COMMRAT_HAS_OOB
+                      << " | PI-mutex=" << COMMRAT_HAS_PI_MUTEX
+                      << "\n";
+#else
+            std::clog << "[CommRaT] Platform: STD (standard Linux)\n";
+#endif
+            return true;
+        }();
         // Create WORK mailbox for subscription protocol
         create_work_mailbox();
         

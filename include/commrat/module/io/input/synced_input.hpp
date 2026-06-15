@@ -1,13 +1,19 @@
 #pragma once
 
 #include "cmd_input.hpp"
-#include "commrat/mailbox/mailbox.hpp"
+#include <corerat/ipc/mailbox.hpp>
 #include "commrat/mailbox/timestamped_ring_buffer.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include "commrat/module/io/synced.hpp"
 #include "commrat/messaging/system/data_request_messages.hpp"
 
 namespace commrat {
+
+using corerat::Duration;
+using corerat::Milliseconds;
+using corerat::Time;
+using corerat::Timestamp;
 
 /**
  * @brief Synchronized input interface - pull data by timestamp (RACK getData)

@@ -1,8 +1,9 @@
 #pragma once
 
-#include "../messages.hpp"
-#include "message_id.hpp"
+#include <corerat/messaging/wire_message.hpp>
+#include <corerat/messaging/message_id.hpp>
 #include "system/data_request_messages.hpp"  // For GetDataRequest, GetNextDataRequest
+#include <corerat/ipc/mailbox.hpp>
 #include <type_traits>
 #include <tuple>
 #include <optional>
@@ -10,10 +11,25 @@
 
 namespace commrat {
 
+using corerat::MessagePrefix;
+using corerat::UserSubPrefix;
+using corerat::SystemSubPrefix;
+using corerat::make_message_id;
+using corerat::MAX_MESSAGE_ID;
+using corerat::MessageDefinition;
+using corerat::DefaultMessageDef;
+using corerat::user_message_id;
+using corerat::system_message_id;
+using corerat::MailboxError;
+using corerat::MailboxConfig;
+template<typename T>
+using MailboxResult = corerat::MailboxResult<T>;
+template<typename T>
+using TimsMessage = corerat::WireMessage<T>;
+
 // Forward declarations
 template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
 class Module;
-template<typename... MessageDefs> class Mailbox;
 template<typename... MessageDefs> class MessageRegistry;
 
 // ============================================================================
@@ -51,10 +67,15 @@ struct ExtractMailboxType<R, std::enable_if_t<HasRegistryMember<R>::value>> {
     using type = typename ExtractMailboxType<typename R::Registry, void>::type;
 };
 
-// Case 2: MessageRegistry<...> - extract template parameters directly
+// Case 2: MessageRegistry<...> - expand to full type list (includes GetData, replies, etc.)
 template<typename... MessageDefs>
 struct ExtractMailboxType<MessageRegistry<MessageDefs...>, std::enable_if_t<!HasRegistryMember<MessageRegistry<MessageDefs...>>::value>> {
-    using type = Mailbox<MessageDefs...>;
+    using Reg = MessageRegistry<MessageDefs...>;
+    template<typename Tuple> struct ToMailbox;
+    template<typename... Defs> struct ToMailbox<std::tuple<Defs...>> {
+        using type = corerat::Mailbox<Defs...>;
+    };
+    using type = typename ToMailbox<typename Reg::MessageDefsTuple>::type;
 };
 
 /**
@@ -124,61 +145,16 @@ public:
 };
 
 // ============================================================================
-// Request-Reply Message Expansion
+// Request-Reply Message Expansion — delegate to corerat
 // ============================================================================
 
-/**
- * @brief Expand message definitions to include reply messages
- * 
- * For each MessageDefinition with has_reply = true, adds its ReplyMessageDef
- * to the registry automatically.
- */
-template<typename... MessageDefs>
-struct ExpandReplies;
-
-template<>
-struct ExpandReplies<> {
-    using Result = std::tuple<>;
-};
-
-template<typename First, typename... Rest>
-struct ExpandReplies<First, Rest...> {
-private:
-    using RestExpanded = typename ExpandReplies<Rest...>::Result;
-    
-public:
-    using Result = std::conditional_t<
-        First::has_reply,
-        decltype(std::tuple_cat(
-            std::declval<std::tuple<First, typename First::ReplyMessageDef>>(),
-            std::declval<RestExpanded>()
-        )),
-        decltype(std::tuple_cat(
-            std::declval<std::tuple<First>>(),
-            std::declval<RestExpanded>()
-        ))
-    >;
-};
+using corerat::ExpandReplies;
 
 // ============================================================================
 // Message ID Auto-Increment System
 // ============================================================================
 
-/**
- * @brief Safely extract ReplyPayload from a MessageDefinition, defaulting to void.
- *
- * DataWithCommands and other non-MessageDefinition types lack ReplyPayload,
- * so this helper avoids a hard compile error when they pass through AutoAssignIDsProcess.
- */
-template<typename T, typename = void>
-struct GetReplyPayload {
-    using type = void;
-};
-
-template<typename T>
-struct GetReplyPayload<T, std::void_t<typename T::ReplyPayload>> {
-    using type = typename T::ReplyPayload;
-};
+using corerat::GetReplyPayload;
 
 /**
  * @brief Helper to assign auto-incremented IDs to messages marked with needs_auto_id
@@ -272,41 +248,10 @@ struct AutoAssignIDs {
 };
 
 // ============================================================================
-// Compile-Time Message ID Collision Detection
+// Compile-Time Message ID Collision Detection — delegate to corerat
 // ============================================================================
 
-template<typename... MessageDefs>
-struct CheckCollisions {
-    static constexpr bool check() {
-        if constexpr (sizeof...(MessageDefs) <= 1) {
-            return true;
-        } else {
-            return check_all_pairs<MessageDefs...>();
-        }
-    }
-    
-private:
-    template<typename First, typename Second, typename... Rest>
-    static constexpr bool check_all_pairs() {
-        constexpr uint32_t id1 = make_message_id(
-            static_cast<uint8_t>(First::prefix),
-            First::subprefix,
-            First::local_id
-        );
-        constexpr uint32_t id2 = make_message_id(
-            static_cast<uint8_t>(Second::prefix),
-            Second::subprefix,
-            Second::local_id
-        );
-        
-        static_assert(id1 != id2, "Message ID collision detected!");
-        
-        if constexpr (sizeof...(Rest) > 0) {
-            return check_all_pairs<First, Rest...>() && check_all_pairs<Second, Rest...>();
-        }
-        return true;
-    }
-};
+using corerat::CheckCollisions;
 
 // ============================================================================
 // Compile-Time Message Type Registry
@@ -726,6 +671,14 @@ public:
     // System Infrastructure (for Module2 compatibility)
     // ========================================================================
     
+    // Helper: expand a tuple of MessageDefs into a corerat::Mailbox<...>
+    template<typename Tuple>
+    struct ExpandedMailbox;
+    template<typename... Defs>
+    struct ExpandedMailbox<std::tuple<Defs...>> {
+        using type = corerat::Mailbox<Defs...>;
+    };
+
     /**
      * @brief System infrastructure placeholder
      * 
@@ -733,8 +686,8 @@ public:
      * CommRaT specializes this with subscription-protocol-specific mailbox.
      */
     struct System {
-        // Generic WorkMailbox - unrestricted (sends/receives any registered type)
-        using WorkMailbox = Mailbox<MessageDefs...>;
+        // Generic WorkMailbox - all registered types (including GetData expansions)
+        using WorkMailbox = typename ExpandedMailbox<ProcessedDefs>::type;
     };
     
 private:

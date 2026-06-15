@@ -1,10 +1,14 @@
 #pragma once
 
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include <cstdint>
 #include <cstddef>
 
 namespace commrat {
+
+using corerat::Duration;
+using corerat::Milliseconds;
 
 /**
  * @brief Configuration for BufferedOutput

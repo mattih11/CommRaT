@@ -2,12 +2,21 @@
 
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/module/helpers/type_name.hpp"
-#include "commrat/mailbox/mailbox.hpp"
+#include <corerat/ipc/mailbox.hpp>
 #include "commrat/messaging/data_with_commands.hpp"
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
+#include <corerat/platform/duration.hpp>
 #include <cstdint>
 
 namespace commrat {
+
+using corerat::Duration;
+using corerat::Milliseconds;
+using corerat::Time;
+using corerat::Timestamp;
+template<typename T>
+using TimsMessage = corerat::WireMessage<T>;
+using TimsHeader  = corerat::WireHeader;
 
 /**
  * @brief Command-only input interface (RACK RackProxy pattern)

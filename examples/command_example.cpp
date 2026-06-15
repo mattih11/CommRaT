@@ -8,7 +8,7 @@
 #include <csignal>
 #include <atomic>
 #include <cmath>
-#include "commrat/platform/timestamp.hpp"
+#include <corerat/platform/timestamp.hpp>
 
 using namespace example_messages;
 using commrat::Time;

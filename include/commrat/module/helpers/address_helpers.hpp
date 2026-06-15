@@ -1,12 +1,17 @@
 #pragma once
 
 #include "commrat/module/module_config.hpp"
-#include "commrat/mailbox/mailbox.hpp"
+#include <corerat/ipc/mailbox.hpp>
 #include "commrat/messaging/system/system_registry.hpp"
 #include <cstdint>
 #include <algorithm>
 
 namespace commrat {
+
+using corerat::MailboxError;
+using corerat::MailboxConfig;
+template<typename T>
+using MailboxResult = corerat::MailboxResult<T>;
 
 // ============================================================================
 // Address Encoding Constants (RACK-style, byte-aligned)

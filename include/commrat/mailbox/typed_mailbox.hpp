@@ -5,8 +5,9 @@
 
 #pragma once
 
-#include "mailbox.hpp"
+#include <corerat/ipc/mailbox.hpp>
 #include "../messaging/message_registry.hpp"
+#include "../messaging/registry_utils.hpp"
 #include "../messaging/system/system_registry.hpp"
 #include <type_traits>
 
