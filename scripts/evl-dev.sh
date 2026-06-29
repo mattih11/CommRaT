@@ -98,7 +98,7 @@ INITRD_PATH=""
 RATOS_RELEASE_REPO="${RATOS_RELEASE_REPO:-}"
 RATOS_RUN_ID="${RATOS_RUN_ID:-}"
 RATOS_RELEASE_TAG="${RATOS_RELEASE_TAG:-}"
-QEMU_MEMORY="${QEMU_MEMORY:-2G}"
+QEMU_MEMORY="${QEMU_MEMORY:-4G}"
 QEMU_CPUS="${QEMU_CPUS:-4}"
 SSH_PORT="${SSH_PORT:-22222}"
 EVL_SDK_DIR="${EVL_SDK_DIR:-.evl-cache/sdk}"
@@ -551,6 +551,7 @@ if [[ -n "$DO_BUILD" ]]; then
     rsync -az --delete \
         --exclude=build \
         --exclude=.git \
+        --exclude=.evl-cache \
         -e "ssh ${SSH_OPTS}" \
         ./ "root@127.0.0.1:/root/CommRaT/"
 
@@ -559,7 +560,7 @@ if [[ -n "$DO_BUILD" ]]; then
         set -euo pipefail
         cd /root/CommRaT
         cmake --preset ${DO_BUILD} 2>&1
-        cmake --build --preset ${DO_BUILD} --parallel \$(nproc) 2>&1
+        cmake --build --preset ${DO_BUILD} --parallel \$(( \$(nproc) < 2 ? 1 : 2 )) 2>&1
         echo 'Build complete.'
     "
 fi
@@ -584,8 +585,13 @@ done < <(find /root/commrat/test -maxdepth 1 -name "test_*" \
 echo "Results: ${ok} passed, ${fail} failed"
 [[ $fail -eq 0 ]]'
     else
-        # Source was built inside guest via ctest
-        CTEST_PRESET="${DO_BUILD:-default}"
+        # Source was built inside guest via ctest.
+        # evl-cross has no test preset — fall back to default.
+        case "${DO_BUILD:-default}" in
+            debug)       CTEST_PRESET="debug"   ;;
+            evl)         CTEST_PRESET="evl"     ;;
+            *)           CTEST_PRESET="default" ;;
+        esac
         echo "Running ctest --preset ${CTEST_PRESET} on EVL guest..."
         ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
             set -euo pipefail

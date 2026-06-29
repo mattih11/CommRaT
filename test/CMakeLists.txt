@@ -1,3 +1,6 @@
+# Tests use assert() for checks - ensure it is never compiled out regardless of build type.
+add_compile_options(-UNDEBUG)
+
 add_executable(test_process_signature test_process_signature.cpp)
 target_link_libraries(test_process_signature PRIVATE commrat)
 add_test(NAME test_process_signature COMMAND test_process_signature)
