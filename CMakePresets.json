@@ -31,12 +31,12 @@
     },
     {
       "name": "evl",
-      "displayName": "EVL platform (in-container compile-check)",
-      "description": "EVL/Xenomai 4 platform backend. Requires CoreRaT built with EVL support in the sysroot (present in ratos-dev-image). Tests and examples disabled; use evl-cross for a full build.",
+      "displayName": "EVL platform (QEMU guest / ratos-dev-image)",
+      "description": "EVL/Xenomai 4 platform backend. Requires CoreRaT built with EVL support in the sysroot (present in ratos-dev-image). Run inside QEMU with evl-dev.sh --build evl --test, or use evl-cross for cross-compilation.",
       "inherits": "base",
       "cacheVariables": {
-        "COMMRAT_BUILD_TESTS": "OFF",
-        "COMMRAT_BUILD_EXAMPLES": "OFF"
+        "COMMRAT_BUILD_TESTS": "ON",
+        "COMMRAT_BUILD_EXAMPLES": "ON"
       }
     },
     {
@@ -66,6 +66,11 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "evl",
+      "configurePreset": "evl",
       "output": { "outputOnFailure": true }
     }
   ]
