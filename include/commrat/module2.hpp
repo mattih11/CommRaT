@@ -179,8 +179,8 @@ public:
         [[maybe_unused]] static bool platform_printed = []() {
 #if defined(CORERAT_PLATFORM_EVL)
             std::clog << "[CommRaT] Platform: EVL (Xenomai 4 / libevl)"
-                      << " | OOB=" << COMMRAT_HAS_OOB
-                      << " | PI-mutex=" << COMMRAT_HAS_PI_MUTEX
+                      << " | OOB=" << CORERAT_HAS_OOB
+                      << " | PI-mutex=" << CORERAT_HAS_PI_MUTEX
                       << "\n";
 #else
             std::clog << "[CommRaT] Platform: STD (standard Linux)\n";
