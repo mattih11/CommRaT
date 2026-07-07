@@ -533,12 +533,18 @@ done
 # ---------------------------------------------------------------------------
 
 # Deploy cross-compiled binaries to guest.
-# If --shell was given without --cross, auto-detect a previous evl-cross build.
-if [[ -z "$DO_CROSS" && "$DO_SHELL" -eq 1 && -d "build/evl-cross" ]]; then
-    echo "Note: --shell without --cross; auto-deploying existing build/evl-cross/ to guest."
-    DO_CROSS="evl-cross"
+# If no --cross/--build given but --test or --shell requested, auto-detect a cached
+# in-guest build (build/evl/) or cross-compile output (build/evl-cross/).
+if [[ -z "$DO_CROSS" && -z "$DO_BUILD" && ( "$DO_SHELL" -eq 1 || "$DO_TEST" -eq 1 ) ]]; then
+    for _preset in evl evl-cross; do
+        if [[ -d "build/${_preset}/test" ]]; then
+            echo "Note: Using cached build/${_preset}/ (no --build/--cross specified)."
+            DO_CROSS="${_preset}"
+            break
+        fi
+    done
 fi
-if [[ -n "$DO_CROSS" ]]; then
+if [[ -n "$DO_CROSS" && ( "$DO_SHELL" -eq 1 || ${#RUN_CMDS[@]} -gt 0 ) ]]; then
     echo "Deploying build/${DO_CROSS}/ to guest /root/commrat/..."
     rsync -az --delete \
         -e "ssh ${SSH_OPTS}" \
@@ -563,42 +569,50 @@ if [[ -n "$DO_BUILD" ]]; then
         cmake --build --preset ${DO_BUILD} --parallel \$(( \$(nproc) < 2 ? 1 : 2 )) 2>&1
         echo 'Build complete.'
     "
+    # Sync built binaries back to host so subsequent --test runs skip recompilation.
+    echo "Caching build/${DO_BUILD}/ from guest to host..."
+    mkdir -p "build/${DO_BUILD}"
+    rsync -az \
+        -e "ssh ${SSH_OPTS}" \
+        "root@127.0.0.1:/root/CommRaT/build/${DO_BUILD}/" "build/${DO_BUILD}/"
+    # Treat as a binary cache for --test/--shell/--run steps below.
+    DO_CROSS="${DO_BUILD}"
 fi
 
 # Run tests
 if [[ "$DO_TEST" -eq 1 ]]; then
-    if [[ -n "$DO_CROSS" ]]; then
-        # Binaries were cross-compiled and deployed to /root/commrat/
-        echo "Running tests from /root/commrat/test/ on EVL guest..."
-        ssh ${SSH_OPTS} root@127.0.0.1 bash -c 'set -euo pipefail
-ulimit -H -t unlimited 2>/dev/null || true; ulimit -t unlimited 2>/dev/null || true
-ok=0; fail=0
-while IFS= read -r -d "" t; do
-    printf "  %-50s" "$(basename "$t")"
-    if timeout 120 "$t" > /tmp/.test_out 2>&1; then
-        echo PASS; ((ok++)) || true
-    else
-        echo FAIL; ((fail++)) || true; cat /tmp/.test_out
-    fi
-done < <(find /root/commrat/test -maxdepth 1 -name "test_*" \
-              -executable -type f -print0 | sort -z)
-echo "Results: ${ok} passed, ${fail} failed"
-[[ $fail -eq 0 ]]'
-    else
-        # Source was built inside guest via ctest.
-        # evl-cross has no test preset — fall back to default.
-        case "${DO_BUILD:-default}" in
-            debug)       CTEST_PRESET="debug"   ;;
-            evl)         CTEST_PRESET="evl"     ;;
-            *)           CTEST_PRESET="default" ;;
-        esac
-        echo "Running ctest --preset ${CTEST_PRESET} on EVL guest..."
+    # Determine ctest preset: use DO_BUILD preset if we just built, otherwise evl.
+    CTEST_PRESET="${DO_BUILD:-evl}"
+
+    if [[ -z "$DO_BUILD" && -n "$DO_CROSS" ]]; then
+        # Binary cache case: source not on guest yet.
+        # Sync source and deploy binaries into the CMake build tree, then configure
+        # (fast, ~0.5s — no build, just generates CTestTestfile.cmake with guest paths).
+        echo "Deploying source + build/${DO_CROSS}/ to guest for ctest..."
+        rsync -az --delete \
+            --exclude=build --exclude=.git --exclude=.evl-cache \
+            -e "ssh ${SSH_OPTS}" \
+            ./ "root@127.0.0.1:/root/CommRaT/"
+        ssh ${SSH_OPTS} root@127.0.0.1 mkdir -p "/root/CommRaT/build/evl"
+        rsync -az \
+            -e "ssh ${SSH_OPTS}" \
+            "build/${DO_CROSS}/" "root@127.0.0.1:/root/CommRaT/build/evl/"
+        echo "Configuring on guest (generates CTestTestfile.cmake)..."
         ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
             set -euo pipefail
             cd /root/CommRaT
-            ctest --preset ${CTEST_PRESET} 2>&1
+            rm -f build/evl/CMakeCache.txt build/evl/CMakeFiles/cmake.check_cache
+            cmake --preset evl 2>&1
         "
     fi
+
+    # Single source of truth: CMakeLists.txt defines all tests, timeouts, and pass conditions.
+    echo "Running ctest --preset ${CTEST_PRESET} on EVL guest..."
+    ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
+        set -euo pipefail
+        cd /root/CommRaT
+        ctest --preset ${CTEST_PRESET} --timeout 120 2>&1
+    "
 fi
 
 # Run specific binaries
@@ -615,12 +629,9 @@ if [[ "$DO_SHELL" -eq 1 ]]; then
     echo ""
     echo "Opening interactive EVL guest shell."
     if [[ -n "$DO_CROSS" ]]; then
-        echo "Cross-compiled binaries are at /root/commrat/"
+        echo "Binaries are at /root/commrat/"
         echo "  evl ps          check EVL thread status"
         echo "  evl check       verify RT health"
-    elif [[ -n "$DO_BUILD" ]]; then
-        echo "CommRaT source + build are at /root/CommRaT/"
-        echo "Build output at /root/CommRaT/build/${DO_BUILD}/"
     fi
     echo "Type 'exit' to stop QEMU and clean up."
     echo ""
