@@ -20,14 +20,23 @@ add_executable(introspection_example introspection_example.cpp)
 target_link_libraries(introspection_example PRIVATE commrat)
 
 # Standalone module main wrapper examples
-add_executable(module_main_basic module_main_basic.cpp)
-target_link_libraries(module_main_basic PRIVATE commrat)
+# commrat_module() creates the executable and generates a *.module.json
+# descriptor alongside the binary, used by ProcessLauncher for discovery.
+commrat_module(module_main_basic
+    SOURCES module_main_basic.cpp
+    MODULE_CLASS BasicSensorModule)
 
-add_executable(module_main_with_config module_main_with_config.cpp)
-target_link_libraries(module_main_with_config PRIVATE commrat)
+commrat_module(module_main_with_config
+    SOURCES module_main_with_config.cpp
+    MODULE_CLASS FilterModule)
 
-add_executable(module_main_multiformat module_main_multiformat.cpp)
-target_link_libraries(module_main_multiformat PRIVATE commrat)
+commrat_module(module_main_multiformat
+    SOURCES module_main_multiformat.cpp
+    MODULE_CLASS FusionModule)
+
+# Process launcher binary — generic; no module class of its own
+add_executable(sensor_filter_launcher sensor_filter_launcher.cpp)
+target_link_libraries(sensor_filter_launcher PRIVATE commrat)
 
 # Documentation examples
 add_executable(doc_example_hello_commrat

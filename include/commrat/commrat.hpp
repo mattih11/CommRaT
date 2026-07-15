@@ -64,6 +64,12 @@ namespace commrat {
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/module2.hpp"
 #include "commrat/introspection/introspection_helper.hpp"
+#include "commrat/module/helpers/type_name.hpp"
+#include "commrat/module/helpers/address_helpers.hpp"
+
+// Forward-declare Launcher so MyApp::Launcher is a valid alias.
+// Include <commrat/launcher/launcher.hpp> to use it.
+namespace commrat { template<typename App> class Launcher; }
 
 /**
  * @namespace commrat
@@ -187,9 +193,90 @@ public:
     //using HistoricalMailbox = commrat::HistoricalMailbox<Registry, HistorySize>;
     
     /**
+     * @brief Compile-time mailbox address for a known payload type T.
+     *
+     * Usage:  constexpr auto addr = MyApp::get_address<TemperatureData>(10, 1);
+     */
+    template<typename T>
+    static constexpr uint32_t get_address(uint8_t system_id, uint8_t instance_id) {
+        return calculate_base_address<T, std::tuple<T>, Registry>(system_id, instance_id);
+    }
+
+    /**
+     * @brief Runtime mailbox address lookup by type name string.
+     *
+     * Iterates all registered payload types, compares TypeName<T>::value to
+     * type_name, and returns the base mailbox address for the first match.
+     *
+     * Returns std::nullopt if type_name is not registered.
+     *
+     * Usage:  auto addr = MyApp::get_address("TemperatureData", 10, 1);
+     */
+    static std::optional<uint32_t> get_address(std::string_view type_name,
+                                                uint8_t system_id,
+                                                uint8_t instance_id) {
+        return get_address_impl(type_name, system_id, instance_id,
+                                static_cast<payload_types*>(nullptr));
+    }
+
+    /**
+     * @brief Get the registered string name for payload type T.
+     *
+     * Returns the same string as TypeName<T>::value (reflectcpp type name).
+     */
+    template<typename T>
+    static constexpr auto get_type_name() {
+        return TypeName<T>::value;
+    }
+
+    /**
+     * @brief Invoke a generic callable for the payload type matching type_name.
+     *
+     * Calls fn<T>() for the registered payload type whose name equals type_name.
+     * Returns true if a match was found and fn was called, false otherwise.
+     *
+     * Usage:
+     *   MyApp::visit_type("TemperatureData", []<typename T>() {
+     *       // T is TemperatureData here
+     *       auto bridge = std::make_unique<BridgeModule<MyApp, T>>(...);
+     *   });
+     */
+    template<typename Fn>
+    static bool visit_type(std::string_view type_name, Fn&& fn) {
+        return visit_type_impl(type_name, std::forward<Fn>(fn),
+                               static_cast<payload_types*>(nullptr));
+    }
+
+private:
+    template<typename... Ts>
+    static std::optional<uint32_t> get_address_impl(std::string_view name,
+                                                     uint8_t sys, uint8_t inst,
+                                                     std::tuple<Ts...>*) {
+        std::optional<uint32_t> result;
+        ((TypeName<Ts>::value == std::string_view(name.data(), name.size())
+            ? (result = calculate_base_address<Ts, std::tuple<Ts>, Registry>(sys, inst), true)
+            : false) || ...);
+        return result;
+    }
+
+    template<typename Fn, typename... Ts>
+    static bool visit_type_impl(std::string_view name, Fn&& fn, std::tuple<Ts...>*) {
+        return ((TypeName<Ts>::value == std::string_view(name.data(), name.size())
+                    ? (fn.template operator()<Ts>(), true)
+                    : false) || ...);
+    }
+
+public:
+    /**
      * @brief Introspection helper - export message schemas to JSON/YAML/etc.
      */
     using Introspection = IntrospectionHelper<CommRaT>;
+
+    /**
+     * @brief Config-driven launcher - load and start modules from YAML/JSON.
+     * Usage: MyApp::Launcher::run(argc, argv, [](auto& l) { l.register_module<T>("name"); });
+     */
+    using Launcher = commrat::Launcher<CommRaT>;
 };
 
 } // namespace commrat
