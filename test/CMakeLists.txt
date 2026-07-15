@@ -113,12 +113,15 @@ if(COMMRAT_BUILD_EXAMPLES)
                 $<TARGET_FILE:doc_example_multi_input_fusion>)
 
     add_test(NAME module_main_basic
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_module_main_example.sh
-                $<TARGET_FILE:module_main_basic>)
-    add_test(NAME module_main_with_config
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_module_main_example.sh
-                $<TARGET_FILE:module_main_with_config>)
-    add_test(NAME module_main_multiformat
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_module_main_example.sh
-                $<TARGET_FILE:module_main_multiformat>)
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_continuous_example.sh
+                $<TARGET_FILE:module_main_basic>
+                ${CMAKE_SOURCE_DIR}/examples/configs/sensor_basic.json)
+
+    # Sensor + filter process launcher test: spawns both binaries, runs for 3s, exits 0.
+    # Replaces the old run_module_main_example.sh multi-process orchestration.
+    add_test(NAME example_sensor_filter_launcher
+        COMMAND $<TARGET_FILE:sensor_filter_launcher>
+                ${CMAKE_SOURCE_DIR}/examples/configs/sensor_filter_app.json
+                --duration-ms 3000)
+    set_tests_properties(example_sensor_filter_launcher PROPERTIES TIMEOUT 15)
 endif()

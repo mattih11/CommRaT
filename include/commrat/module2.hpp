@@ -361,9 +361,17 @@ private:
         // Calculate WORK mailbox address using primary output type_id
         // This ensures modules with different output types at the same [sys][inst]
         // get unique WORK mailbox addresses (matching their CMD/PUBLISH mailboxes)
+        // Note: std::conditional_t evaluates both branches eagerly, so we guard
+        // std::tuple_element_t with a non-empty fallback tuple to avoid a hard
+        // error when OutputTypes is empty (input-only modules).
+        using SafeOutputTypes = std::conditional_t<
+            IO::Meta::has_outputs,
+            typename IO::Meta::OutputTypes,
+            std::tuple<void>
+        >;
         using PrimaryOutputType = std::conditional_t<
             IO::Meta::has_outputs,
-            std::tuple_element_t<0, typename IO::Meta::OutputTypes>,
+            std::tuple_element_t<0, SafeOutputTypes>,
             void
         >;
         uint32_t work_addr = get_mailbox_address<PrimaryOutputType, std::tuple<>, Registry>(

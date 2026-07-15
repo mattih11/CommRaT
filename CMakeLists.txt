@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Use GNUInstallDirs for standard installation directories
 include(GNUInstallDirs)
+include(cmake/CommRaTMacros.cmake)
 
 find_package(CoreRaT REQUIRED)
 
