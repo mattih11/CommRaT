@@ -124,4 +124,11 @@ if(COMMRAT_BUILD_EXAMPLES)
                 ${CMAKE_SOURCE_DIR}/examples/configs/sensor_filter_app.json
                 --duration-ms 3000)
     set_tests_properties(example_sensor_filter_launcher PROPERTIES TIMEOUT 15)
+
+    # IMU + GPS fusion process launcher test (3 binaries: IMU, GPS, Fusion).
+    add_test(NAME example_imu_gps_fusion_launcher
+        COMMAND $<TARGET_FILE:imu_gps_fusion_launcher>
+                ${CMAKE_SOURCE_DIR}/examples/configs/imu_gps_fusion_app.json
+                --duration-ms 3000)
+    set_tests_properties(example_imu_gps_fusion_launcher PROPERTIES TIMEOUT 15)
 endif()

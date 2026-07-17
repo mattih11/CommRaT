@@ -34,6 +34,18 @@ commrat_module(module_main_multiformat
     SOURCES module_main_multiformat.cpp
     MODULE_CLASS FusionModule)
 
+# IMU + GPS fusion example system (separate producer binaries + process launcher)
+commrat_module(imu_module
+    SOURCES imu_module.cpp
+    MODULE_CLASS IMUModule)
+
+commrat_module(gps_module
+    SOURCES gps_module.cpp
+    MODULE_CLASS GPSModule)
+
+add_executable(imu_gps_fusion_launcher imu_gps_fusion_launcher.cpp)
+target_link_libraries(imu_gps_fusion_launcher PRIVATE commrat)
+
 # Process launcher binary — generic; no module class of its own
 add_executable(sensor_filter_launcher sensor_filter_launcher.cpp)
 target_link_libraries(sensor_filter_launcher PRIVATE commrat)

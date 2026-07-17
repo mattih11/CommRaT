@@ -1,7 +1,7 @@
 # CommRaT API Reference
 
-**Version**: 2.1.0
-**Last Updated**: April 13, 2026
+**Version**: 2.2.0
+**Last Updated**: July 15, 2026
 
 Accurate API reference derived from header files. For Doxygen docs, run `make docs`.
 
@@ -25,6 +25,7 @@ Accurate API reference derived from header files. For Doxygen docs, run `make do
 14. [Threading Abstractions](#threading-abstractions)
 15. [Platform Selection](#platform-selection)
 16. [Introspection](#introspection)
+17. [Deployment / Launcher](#deployment--launcher)
 
 ---
 
@@ -1196,6 +1197,106 @@ static std::string export_all();
 template<typename Writer = rfl::json::Writer>
 static void write_to_file(const std::string& filename);
 ```
+
+---
+
+## Deployment / Launcher
+
+**Headers:**
+- `<commrat/launcher/process_launcher.hpp>` — process-based (fork/exec)
+- `<commrat/launcher/launcher.hpp>` — in-process `Launcher<App>` (for monolithic use)
+- `<commrat/launcher/module_description.hpp>` — `AppDescription`, `ModuleDescription`
+
+### commrat_module() CMake macro
+
+**File:** `cmake/CommRaTMacros.cmake` (auto-included by CommRaT's `CMakeLists.txt`)
+
+```cmake
+commrat_module(<target>
+    SOURCES   source1.cpp [source2.cpp ...]
+    MODULE_CLASS  ClassName
+    [LINKS    lib1 lib2 ...])
+```
+
+Wraps `add_executable()` and generates `<ClassName>.module.json` via `file(GENERATE)` containing the binary path. `ProcessLauncher` discovers these files at runtime.
+
+### ProcessLauncher
+
+Non-template; usable without including `commrat.hpp`.
+
+```cpp
+class ProcessLauncher {
+public:
+    // Load AppDescription JSON + scan dirs for *.module.json descriptors
+    void load(const std::string& app_desc_path,
+              const std::vector<std::string>& descriptor_dirs);
+
+    // Fork/exec each module binary with a generated ModuleConfig JSON
+    void start();
+
+    // SIGTERM all children; SIGKILL after 3 s
+    void stop();
+
+    // Drop-in main(): argv[1] = app.json, optional --duration-ms N
+    // Auto-discovers descriptors from dirname(argv[0])
+    static int main(int argc, char** argv);
+};
+```
+
+Minimal launcher binary (3 lines):
+
+```cpp
+#include <commrat/launcher/process_launcher.hpp>
+int main(int argc, char** argv) {
+    return commrat::ProcessLauncher::main(argc, argv);
+}
+```
+
+### MyApp::Launcher (in-process)
+
+Forward-declared in `commrat.hpp`; include `<commrat/launcher/launcher.hpp>` to use.
+
+```cpp
+#include <commrat/commrat.hpp>
+#include <commrat/launcher/launcher.hpp>
+
+int main(int argc, char** argv) {
+    return MyApp::Launcher::run(argc, argv, [](auto& l) {
+        l.register_module<MySensorModule>("MySensorModule");
+        l.register_module<MyFilterModule>("MyFilterModule");
+    });
+}
+```
+
+Reads the same `AppDescription` format; starts modules in the same process.
+
+### AppDescription format
+
+```json
+{
+  "app_name": "MySensorSystem",
+  "modules": [
+    {
+      "name": "Sensor_1",
+      "module_class": "MySensorModule",
+      "outputs": [{"type_name": "SensorData", "system_id": 10, "instance_id": 1}],
+      "inputs": [],
+      "period_ms": 100
+    },
+    {
+      "name": "Filter_1",
+      "module_class": "MyFilterModule",
+      "outputs": [{"type_name": "FilteredData", "system_id": 20, "instance_id": 1}],
+      "inputs": [
+        {"type_name": "SensorData", "source_system_id": 10,
+         "source_instance_id": 1, "synced": false}
+      ]
+    }
+  ]
+}
+```
+
+`synced: true` maps to `SyncedInput<T>`; `synced: false` (default) maps to `Input<T>` (primary, continuous).
 
 ---
 

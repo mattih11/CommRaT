@@ -26,45 +26,10 @@
  *   ./module_main_multiformat --name "FusionModule" --system-id 30 --instance-id 1 --period 10000000
  */
 
-#include <commrat/commrat.hpp>
+#include "imu_gps_app.hpp"
 #include <commrat/module_main.hpp>
 #include <cstdint>
 #include <cmath>
-
-// Input message types
-struct IMUData {
-    float accel_x;
-    float accel_y;
-    float accel_z;
-    float gyro_x;
-    float gyro_y;
-    float gyro_z;
-};
-
-struct GPSData {
-    double latitude;
-    double longitude;
-    float altitude;
-    float speed;
-};
-
-// Output message (fused)
-struct FusedPose {
-    double latitude;
-    double longitude;
-    float altitude;
-    float velocity_x;
-    float velocity_y;
-    float velocity_z;
-    bool gps_valid;
-};
-
-// Application definition
-using MyApp = commrat::CommRaT<
-    commrat::Message::Data<IMUData>,
-    commrat::Message::Data<GPSData>,
-    commrat::Message::Data<FusedPose>
->;
 
 /**
  * @brief Sensor fusion module - combines IMU and GPS
@@ -75,18 +40,21 @@ using MyApp = commrat::CommRaT<
  * - Metadata access (is_valid, has_new_data)
  * - Config loading from JSON file or CLI
  */
-class FusionModule : public MyApp::Module2<
+class FusionModule : public ImuGpsApp::Module2<
     commrat::Output<FusedPose>,
     commrat::Input<IMUData>,  // IMU first = primary
     commrat::SyncedInput<GPSData>   // GPS second = secondary
 > {
 public:
-    using MyApp::Module2<commrat::Output<FusedPose>, commrat::Input<IMUData>, commrat::SyncedInput<GPSData>>::Module2;
+    using ImuGpsApp::Module2<commrat::Output<FusedPose>, commrat::Input<IMUData>, commrat::SyncedInput<GPSData>>::Module2;
 
 protected:
     void process(const IMUData& imu, const commrat::Synced<GPSData>& gps, FusedPose& output) override {
-        // Check GPS validity
-        bool gps_valid = gps.is_valid() && gps.is_fresh();
+        // Check GPS validity.
+        // In a multi-process deployment GPS and IMU timestamps will never be
+        // exactly equal, so use is_valid() (within tolerance) instead of
+        // is_fresh() (exact nanosecond match).
+        bool gps_valid = gps.is_valid();
         
         // Simple fusion (in real system: Kalman filter)
         
