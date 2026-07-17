@@ -51,10 +51,7 @@ public:
 protected:
     void process(const IMUData& imu, const commrat::Synced<GPSData>& gps, FusedPose& output) override {
         // Check GPS validity.
-        // In a multi-process deployment GPS and IMU timestamps will never be
-        // exactly equal, so use is_valid() (within tolerance) instead of
-        // is_fresh() (exact nanosecond match).
-        bool gps_valid = gps.is_valid();
+        bool gps_valid = gps.is_valid() && gps.is_fresh();
         
         // Simple fusion (in real system: Kalman filter)
         
