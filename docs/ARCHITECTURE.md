@@ -477,6 +477,58 @@ Compile-time validation via `static_assert` and concepts preferred over runtime 
 
 ---
 
+## Deployment
+
+### commrat_module() CMake macro
+
+Each module binary is declared with `commrat_module()` instead of `add_executable()`. At build time it generates a cmake-managed `<ModuleClass>.module.json` descriptor file alongside the binary:
+
+```cmake
+# CMakeLists.txt
+commrat_module(my_sensor
+    SOURCES  my_sensor.cpp
+    MODULE_CLASS  MySensorModule)
+```
+
+Generated file (`MySensorModule.module.json`):
+```json
+{ "module_class": "MySensorModule", "binary": "/path/to/build/my_sensor" }
+```
+
+### ProcessLauncher
+
+`ProcessLauncher` reads an `AppDescription` JSON, discovers `*.module.json` descriptors from `dirname(argv[0])`, writes per-module `ModuleConfig` JSON to `/tmp`, and fork/execs each binary as a separate process:
+
+```cpp
+// my_launcher.cpp
+#include <commrat/launcher/process_launcher.hpp>
+int main(int argc, char** argv) {
+    return commrat::ProcessLauncher::main(argc, argv);
+}
+```
+
+`AppDescription` format (`app.json`):
+```json
+{
+  "app_name": "MySensorSystem",
+  "modules": [
+    { "name": "Sensor_1", "module_class": "MySensorModule",
+      "outputs": [{"type_name": "SensorData", "system_id": 10, "instance_id": 1}],
+      "inputs": [], "period_ms": 100 },
+    { "name": "Filter_1", "module_class": "FilterModule",
+      "outputs": [{"type_name": "FilteredData", "system_id": 20, "instance_id": 1}],
+      "inputs": [{"type_name": "SensorData", "source_system_id": 10,
+                   "source_instance_id": 1, "synced": false}] }
+  ]
+}
+```
+
+Producers are spawned first with a 200 ms stagger so their TiMS mailboxes are ready before consumers subscribe. On `stop()` / SIGINT: SIGTERM to all children, 3 s grace period, SIGKILL fallback.
+
+CTest integration via `--duration-ms N`: the launcher exits 0 after N milliseconds.
+
+---
+
 ## Design Decisions
 
 ### Why CMD Per Output (not shared)?

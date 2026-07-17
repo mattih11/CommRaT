@@ -1,6 +1,6 @@
 # CommRaT Development Roadmap
 
-**Last Updated**: April 22, 2026
+**Last Updated**: July 15, 2026
 
 This document tracks planned features, improvements, and long-term ideas for CommRaT. For active bugs and runtime issues, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
@@ -227,6 +227,7 @@ For full history, see `docs/internal/phase_history/` and `docs/internal/refactor
 - Subscription protocol integration (Subscribe/Unsubscribe/GetData dispatch in command_loop)
 - User command reply mechanism (on_command reply sent via CMD mailbox)
 - Platform abstraction layer (Duration type, Thread/Mutex/Time wrappers, std::/EVL backends)
+- **Process launcher system** (`commrat_module()` CMake macro, `ProcessLauncher`, `MyApp::Launcher`; `AppDescription` YAML/JSON config drives fork/exec of per-module binaries; `--duration-ms` for CTest; descriptor auto-discovery from `*.module.json` files generated at build time)
 
 ## Contributing Ideas
 

@@ -921,6 +921,7 @@ void process(const T& input) {
 - **CMakePresets** (`default`/`debug`/`evl` presets; used by CI, local builds, VS Code cmake-tools, CLion)
 - **Dev Container** (`.devcontainer/devcontainer.json` — zero-setup IDE using ratos-dev-image with all deps)
 - **`.commrat.env` config** (single source of truth for non-secret values; `.commrat.env.local` for machine overrides)
+- **Process launcher system**: `commrat_module()` CMake macro wraps `add_executable` and emits `<ClassName>.module.json` descriptors via `file(GENERATE)`. `ProcessLauncher` discovers descriptors from `dirname(argv[0])`, fork/execs each module binary with a temp `ModuleConfig` JSON, SIGTERM on stop with SIGKILL fallback. `MyApp::Launcher` (in-process variant) forward-declared in `commrat.hpp`; requires `#include <commrat/launcher/launcher.hpp>`. Both read `AppDescription` JSON with `modules[].module_class`, `outputs`, `inputs`, `period_ms`. `--duration-ms N` for timed exit (CTest). See `include/commrat/launcher/` and `docs/work/LAUNCHER_DESIGN.md`.
 
 ### In Progress
 - EVL runtime tests passing (3 failing: test_3input_fusion, test_address_collisions, test_timestamp_logic — root cause is tims_recvmsg_timed() demoting EVL threads in-band; fixed by CoreRaT EVL IPC backend)
