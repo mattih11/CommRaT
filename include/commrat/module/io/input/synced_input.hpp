@@ -59,6 +59,7 @@ public:
         , interpolation_(InterpolationMode::NEAREST)
         , last_get_succeeded_(false)
         , last_get_was_fresh_(false)
+        , last_used_timestamp_(0)
     {}
     
     /**
@@ -80,6 +81,7 @@ public:
         interpolation_ = interpolation;
         last_get_succeeded_ = false;
         last_get_was_fresh_ = false;
+        last_used_timestamp_ = 0;
     }
     
     /**
@@ -102,6 +104,7 @@ public:
         , interpolation_(interpolation)
         , last_get_succeeded_(false)
         , last_get_was_fresh_(false)
+        , last_used_timestamp_(0)
     {}
     
     /**
@@ -173,9 +176,14 @@ public:
         
         msg = &last_message_;
         last_get_succeeded_ = true;
-        
-        // Determine freshness from timestamp delta (SyncedInput's responsibility)
-        last_get_was_fresh_ = (reply.payload.timestamp_delta_ns == 0);
+
+        // Fresh = the found message has a timestamp we haven't seen before in
+        // a previous cycle. This works correctly in both same-process and
+        // multi-process deployments: secondary-input timestamps will never be
+        // nanosecond-equal to primary-input timestamps across separate processes,
+        // but they do advance as new secondary messages arrive.
+        last_get_was_fresh_ = (last_message_.header.timestamp != last_used_timestamp_);
+        last_used_timestamp_ = last_message_.header.timestamp;
         
         return true;
     }
@@ -302,6 +310,7 @@ private:
     InterpolationMode interpolation_;       ///< How to handle mismatches
     bool last_get_succeeded_;               ///< Did last get_data find data?
     bool last_get_was_fresh_;               ///< Was last get_data fresh or cached?
+    uint64_t last_used_timestamp_;          ///< Timestamp of data returned last cycle
     TimsMessage<OutputType> last_message_;  ///< Storage for last retrieved message
 };
 
