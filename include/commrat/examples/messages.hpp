@@ -1,6 +1,6 @@
 #pragma once
-// Shim — message types have moved to the installed include tree.
-#include <commrat/examples/messages.hpp>
+
+#include "user_messages.hpp"
 
 /**
  * @file messages.hpp

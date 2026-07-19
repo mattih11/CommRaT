@@ -81,14 +81,21 @@ public:
      * Load AppDescription and discover module descriptors.
      *
      * @param app_desc_path   Path to the AppDescription JSON file.
-     * @param descriptor_dirs Directories to scan for *.module.json files.
+     * @param descriptor_dirs Directories to scan for *.module.json files
+     *                        and companion binaries.
      *                        Defaults to dirname(argv[0]) when using main().
      */
     void load(const std::string& app_desc_path,
               const std::vector<std::string>& descriptor_dirs) {
         description_ = load_app_description(app_desc_path);
+        // Seed with caller-supplied dirs, then extend with any dirs listed in
+        // the AppDescription itself.
         for (const auto& dir : descriptor_dirs)
             scan_directory_for_descriptors(dir);
+        if (description_.descriptor_dirs.has_value()) {
+            for (const auto& dir : *description_.descriptor_dirs)
+                scan_directory_for_descriptors(dir);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -116,6 +123,13 @@ public:
         for (const auto* mod : ordered) {
             spawn_module(*mod);
             ::usleep(200'000);  // 200 ms stagger
+        }
+
+        // Spawn companions (e.g. web dashboards) after all modules are up
+        if (description_.companions.has_value()) {
+            ::usleep(200'000);  // brief extra pause before non-RT companions
+            for (const auto& comp : *description_.companions)
+                spawn_companion(comp);
         }
     }
 
@@ -163,27 +177,32 @@ public:
      * Drop-in main() for a process launcher binary.
      *
      * Descriptor files are auto-discovered from dirname(argv[0]).
+     * Additional descriptor directories can be specified via --descriptor-dir.
      *
      * @param argc  Argument count.
      * @param argv  argv[1] = AppDescription JSON path.
-     *              Optional: --duration-ms N  (exit after N ms, for CTest)
+     *              Optional: --duration-ms N       (exit after N ms, for CTest)
+     *              Optional: --descriptor-dir DIR  (repeat for multiple dirs)
      */
     static int main(int argc, char** argv) {
         if (argc < 2) {
             std::cerr << "Usage: " << argv[0]
-                      << " <app.json> [--duration-ms N]\n";
+                      << " <app.json> [--duration-ms N] [--descriptor-dir DIR]...\n";
             return 1;
         }
 
         uint32_t duration_ms = 0;
-        for (int i = 2; i < argc - 1; ++i) {
-            if (std::string_view(argv[i]) == "--duration-ms")
-                duration_ms = static_cast<uint32_t>(std::stoul(argv[i + 1]));
-        }
-
         // Auto-discover descriptors from the directory containing this binary
         std::filesystem::path exe = std::filesystem::canonical(argv[0]);
         std::vector<std::string> descriptor_dirs{exe.parent_path().string()};
+
+        for (int i = 2; i < argc; ++i) {
+            std::string_view arg(argv[i]);
+            if (arg == "--duration-ms" && i + 1 < argc)
+                duration_ms = static_cast<uint32_t>(std::stoul(argv[++i]));
+            else if (arg == "--descriptor-dir" && i + 1 < argc)
+                descriptor_dirs.emplace_back(argv[++i]);
+        }
 
         detail::g_process_launcher_shutdown.store(false);
         std::signal(SIGINT,  detail::process_launcher_signal_handler);
@@ -238,6 +257,7 @@ private:
     AppDescription                              description_;
     std::unordered_map<std::string,
                        ModuleDescriptor>        descriptors_;   // module_class → descriptor
+    std::vector<std::string>                    scanned_dirs_;  // for companion binary lookup
     std::vector<ChildInfo>                      children_;
     std::vector<std::string>                    temp_files_;
     pid_t                                       launcher_pid_{0};
@@ -269,6 +289,38 @@ private:
                   << " (pid=" << pid << " binary="
                   << std::filesystem::path(desc.binary).filename().string() << ")\n";
         children_.push_back({pid, mod.name});
+    }
+
+    void spawn_companion(const CompanionDescription& comp) {
+        // Resolve binary: absolute path if it contains '/', otherwise search
+        // the scanned descriptor directories (same dirs as modules).
+        std::string binary = resolve_companion_binary(comp.binary);
+        if (binary.empty()) {
+            std::cerr << "[Launcher] WARNING: companion binary '" << comp.binary
+                      << "' not found — skipping\n";
+            return;
+        }
+
+        // Build argv: binary + extra args
+        std::vector<const char*> argv_vec;
+        argv_vec.push_back(binary.c_str());
+        for (const auto& a : comp.args) argv_vec.push_back(a.c_str());
+        argv_vec.push_back(nullptr);
+
+        pid_t pid = ::fork();
+        if (pid < 0)
+            throw std::runtime_error("fork() failed for companion '" + comp.name + "'");
+
+        if (pid == 0) {
+            ::execv(binary.c_str(), const_cast<char* const*>(argv_vec.data()));
+            std::cerr << "[Child] execv failed for companion: " << binary << "\n";
+            ::_exit(1);
+        }
+
+        std::cout << "[Launcher] Started companion '" << comp.name << "'"
+                  << " (pid=" << pid << " binary="
+                  << std::filesystem::path(binary).filename().string() << ")\n";
+        children_.push_back({pid, comp.name});
     }
 
     // ------------------------------------------------------------------
@@ -340,6 +392,7 @@ private:
 
     void scan_directory_for_descriptors(const std::string& dir) {
         if (!std::filesystem::is_directory(dir)) return;
+        scanned_dirs_.push_back(dir);  // remember for companion lookup
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
             if (entry.path().extension() != ".json") continue;
             const std::string& p = entry.path().string();
@@ -366,6 +419,21 @@ private:
             throw std::runtime_error(msg);
         }
         return it->second;
+    }
+
+    // Resolve a companion binary name to an absolute path.
+    // If the name already contains '/', treat as a path (verify existence).
+    // Otherwise search scanned descriptor directories for an executable.
+    std::string resolve_companion_binary(const std::string& name) const {
+        if (name.find('/') != std::string::npos) {
+            return std::filesystem::exists(name) ? name : std::string{};
+        }
+        for (const auto& dir : scanned_dirs_) {
+            std::filesystem::path candidate = std::filesystem::path(dir) / name;
+            if (std::filesystem::exists(candidate))
+                return candidate.string();
+        }
+        return {};
     }
 
     // ------------------------------------------------------------------

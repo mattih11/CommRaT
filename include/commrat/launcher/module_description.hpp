@@ -55,12 +55,30 @@ struct ModuleDescription {
 };
 
 /**
+ * Describes a non-CommRaT companion process (e.g. a web dashboard) to be
+ * started alongside the CommRaT modules.  The binary is looked up in the
+ * same descriptor directories as module binaries.
+ *
+ * Example (AppDescription JSON):
+ *   "companions": [{"name": "ratgui", "binary": "ratgui", "args": ["--port", "8080"]}]
+ */
+struct CompanionDescription {
+    std::string              name;    ///< Human-readable label
+    std::string              binary;  ///< Binary name (looked up in descriptor dirs) or absolute path
+    std::vector<std::string> args;    ///< Extra command-line arguments
+};
+
+/**
  * Top-level application description.
  * Maps to one CommRaT application (one CommRaT<> instantiation).
  */
 struct AppDescription {
-    std::string                    app_name;
-    std::vector<ModuleDescription> modules;
+    std::string                       app_name;
+    std::vector<ModuleDescription>    modules;
+    /// Optional: extra directories to scan for *.module.json and companion binaries.
+    std::optional<std::vector<std::string>> descriptor_dirs;
+    /// Optional: non-CommRaT companion processes started after all modules.
+    std::optional<std::vector<CompanionDescription>> companions;
 };
 
 } // namespace commrat

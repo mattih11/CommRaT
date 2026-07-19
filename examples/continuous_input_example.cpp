@@ -3,7 +3,7 @@
  * @brief Demonstrates ContinuousInput with automatic subscription
  */
 
-#include "messages/common_messages.hpp"
+#include <commrat/examples/common_messages.hpp>
 #include <iostream>
 #include <iomanip>
 #include <csignal>
