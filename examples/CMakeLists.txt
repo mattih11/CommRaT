@@ -13,6 +13,12 @@ target_link_libraries(example_loop_mode PRIVATE commrat)
 add_executable(example_multi_output_runtime multi_output_runtime.cpp)
 target_link_libraries(example_multi_output_runtime PRIVATE commrat)
 
+# Multi-output GUI producer — designed for use with RaTGUI.
+# Publishes StatusData, CounterData, TemperatureData and PoseData at 10 Hz.
+commrat_module(example_gui_producer
+    SOURCES example_gui_producer.cpp
+    MODULE_CLASS ExampleGUIProducerModule)
+
 add_executable(example_sensor_fusion multi_output_sensor_fusion.cpp)
 target_link_libraries(example_sensor_fusion PRIVATE commrat)
 

@@ -88,6 +88,7 @@ write_basic_package_version_file(
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfigVersion.cmake
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CommRaTMacros.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CommRaT
 )
 

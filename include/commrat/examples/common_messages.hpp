@@ -1,6 +1,6 @@
 #pragma once
-// Shim — message types have moved to the installed include tree.
-#include <commrat/examples/common_messages.hpp>
+
+#include "commrat/commrat.hpp"
 
 /**
  * @file common_messages.hpp

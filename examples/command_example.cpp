@@ -3,7 +3,7 @@
  * @brief Demonstrates simple command handling with DataWithCommands
  */
 
-#include "messages/common_messages.hpp"
+#include <commrat/examples/common_messages.hpp>
 #include <iostream>
 #include <csignal>
 #include <atomic>

@@ -155,19 +155,23 @@ public:
      * @return True if subscription succeeded, false on error
      */
     bool subscribe(Duration& actual_period, Duration timeout = Duration::zero()) {
-        // Build subscribe request
+        // Build subscribe request.
+        // header.src must be the WORK mailbox address so the producer's SubscribeReply
+        // is routed back to the mailbox that send_command() is waiting on.
+        // The DATA destination (where the producer pushes stream data) is conveyed
+        // via payload.subscriber_addr — those are two different mailboxes.
         TimsMessage<SubscribeRequestPayload> request{
             .header = {
                 .msg_type = Registry::template get_message_id<SubscribeRequestPayload>(),
-                .msg_size = 0,  // Will be set by serialization
+                .msg_size = 0,
                 .timestamp = Time::now(),
                 .seq_number = 0,
-                .dest = 0,  // Will be set by subscribe()
-                .src = data_mbx_->mailbox_id(),  // Producer sends data here
+                .dest = 0,
+                .src = this->work_mbx_->mailbox_id(),  // Reply must reach WORK mailbox
                 .flags = 0
             },
             .payload = {
-                .subscriber_addr = data_mbx_->mailbox_id(),
+                .subscriber_addr = data_mbx_->mailbox_id(),  // Where producer sends DATA
                 .requested_period_ms = requested_period_.count_ms()
             }
         };

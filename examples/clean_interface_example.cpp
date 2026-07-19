@@ -8,7 +8,7 @@
  * - System messages automatically included
  */
 
-#include "messages/messages.hpp"  // One include - that's it!
+#include <commrat/examples/messages.hpp>  // One include - that's it!
 #include <iostream>
 #include <cmath>
 
