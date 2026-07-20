@@ -27,23 +27,19 @@
  *   - name: IMU_1
  *     module_class: IMUModule
  *     outputs:
- *       - type_name: IMUData
- *         system_id: 10
+ *       - system_id: 10
  *         instance_id: 1
  *     period_ms: 10
  *
  *   - name: Fusion_1
  *     module_class: SensorFusion
  *     outputs:
- *       - type_name: FusedData
- *         system_id: 100
+ *       - system_id: 100
  *         instance_id: 1
  *     inputs:
- *       - type_name: IMUData
- *         source_system_id: 10
+ *       - source_system_id: 10
  *         source_instance_id: 1
- *       - type_name: GPSData
- *         source_system_id: 20
+ *       - source_system_id: 20
  *         source_instance_id: 1
  *         synced: true
  * @endcode
