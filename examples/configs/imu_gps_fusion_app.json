@@ -5,7 +5,7 @@
       "name": "IMU_1",
       "module_class": "IMUModule",
       "outputs": [
-        { "type_name": "IMUData", "system_id": 10, "instance_id": 1 }
+        { "system_id": 10, "instance_id": 1 }
       ],
       "inputs": [],
       "period_ms": 10
@@ -14,7 +14,7 @@
       "name": "GPS_1",
       "module_class": "GPSModule",
       "outputs": [
-        { "type_name": "GPSData", "system_id": 11, "instance_id": 1 }
+        { "system_id": 11, "instance_id": 1 }
       ],
       "inputs": [],
       "period_ms": 100
@@ -23,17 +23,15 @@
       "name": "Fusion_1",
       "module_class": "FusionModule",
       "outputs": [
-        { "type_name": "FusedPose", "system_id": 30, "instance_id": 1 }
+        { "system_id": 30, "instance_id": 1 }
       ],
       "inputs": [
         {
-          "type_name": "IMUData",
           "source_system_id": 10,
           "source_instance_id": 1,
           "synced": false
         },
         {
-          "type_name": "GPSData",
           "source_system_id": 11,
           "source_instance_id": 1,
           "synced": true

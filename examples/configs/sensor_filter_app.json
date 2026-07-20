@@ -5,7 +5,7 @@
       "name": "Sensor_1",
       "module_class": "BasicSensorModule",
       "outputs": [
-        { "type_name": "SensorData", "system_id": 10, "instance_id": 1 }
+        { "system_id": 10, "instance_id": 1 }
       ],
       "inputs": [],
       "period_ms": 100
@@ -14,11 +14,10 @@
       "name": "Filter_1",
       "module_class": "FilterModule",
       "outputs": [
-        { "type_name": "FilteredData", "system_id": 20, "instance_id": 1 }
+        { "system_id": 20, "instance_id": 1 }
       ],
       "inputs": [
         {
-          "type_name": "SensorData",
           "source_system_id": 10,
           "source_instance_id": 1,
           "synced": false

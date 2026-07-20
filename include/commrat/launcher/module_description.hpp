@@ -21,25 +21,21 @@ namespace commrat {
 
 /**
  * Describes one output of a module.
- * type_name must match a registered payload type (App::get_type_name<T>()).
  */
 struct OutputDescription {
-    std::string type_name;
-    uint8_t     system_id{0};
-    uint8_t     instance_id{1};
+    uint8_t system_id{0};
+    uint8_t instance_id{1};
 };
 
 /**
  * Describes one input of a module.
- * type_name must match a registered payload type.
  * synced = true → SyncedInput (pull-based, secondary).
  * synced = false (default) → Input (primary, continuous).
  */
 struct InputDescription {
-    std::string type_name;
-    uint8_t     source_system_id{0};
-    uint8_t     source_instance_id{1};
-    bool        synced{false};
+    uint8_t source_system_id{0};
+    uint8_t source_instance_id{1};
+    bool    synced{false};
 };
 
 /**
