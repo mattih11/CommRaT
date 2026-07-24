@@ -41,6 +41,9 @@ rfl
 test_sender
 test_receiver
 example_*
+# Re-include source files inside examples/ that match the pattern above
+!examples/*.cpp
+!examples/*.hpp
 
 # CMake
 CMakeCache.txt
