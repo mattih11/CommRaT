@@ -87,6 +87,7 @@ public:
      */
     void load(const std::string& app_desc_path,
               const std::vector<std::string>& descriptor_dirs) {
+        app_desc_path_ = std::filesystem::absolute(app_desc_path).string();
         description_ = load_app_description(app_desc_path);
         // Seed with caller-supplied dirs, then extend with any dirs listed in
         // the AppDescription itself.
@@ -255,6 +256,7 @@ private:
     struct ChildInfo { pid_t pid; std::string name; };
 
     AppDescription                              description_;
+    std::string                                 app_desc_path_; // absolute path passed to companions
     std::unordered_map<std::string,
                        ModuleDescriptor>        descriptors_;   // module_class → descriptor
     std::vector<std::string>                    scanned_dirs_;  // for companion binary lookup
@@ -301,9 +303,13 @@ private:
             return;
         }
 
-        // Build argv: binary + extra args
+        // Build argv: binary [app_desc_path] + extra args
+        // The AppDescription path is injected as the first positional argument
+        // so companions can read addresses and config from the same JSON.
         std::vector<const char*> argv_vec;
         argv_vec.push_back(binary.c_str());
+        if (!app_desc_path_.empty())
+            argv_vec.push_back(app_desc_path_.c_str());
         for (const auto& a : comp.args) argv_vec.push_back(a.c_str());
         argv_vec.push_back(nullptr);
 

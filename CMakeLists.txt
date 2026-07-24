@@ -48,10 +48,18 @@ if(COMMRAT_BUILD_TESTS)
 endif()
 
 #-----------------------------------------------------------------------------
+# commrat CLI binary
+#-----------------------------------------------------------------------------
+add_executable(commrat-cli src/commrat_main.cpp)
+set_target_properties(commrat-cli PROPERTIES OUTPUT_NAME commrat)
+target_link_libraries(commrat-cli PRIVATE commrat)
+
+#-----------------------------------------------------------------------------
 # Install
 #-----------------------------------------------------------------------------
-install(TARGETS commrat
+install(TARGETS commrat commrat-cli
     EXPORT CommRaTTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
