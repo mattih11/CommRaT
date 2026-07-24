@@ -25,6 +25,16 @@ target_link_libraries(example_sensor_fusion PRIVATE commrat)
 add_executable(introspection_example introspection_example.cpp)
 target_link_libraries(introspection_example PRIVATE commrat)
 
+# Generate the AllExamplesApp schema automatically after building introspection_example.
+# Output: build/default/examples/all_examples_schema.json
+# Open in tools/commrat-inspect/viewer.html to browse all example message types.
+commrat_generate_schema(
+    TARGET      introspection_example
+    APP_HEADER  "${CMAKE_SOURCE_DIR}/include/commrat/examples/all_examples_app.hpp"
+    APP_TYPE    AllExamplesApp
+    OUTPUT      "${CMAKE_CURRENT_BINARY_DIR}/all_examples_schema.json"
+)
+
 # Standalone module main wrapper examples
 # commrat_module() creates the executable and generates a *.module.json
 # descriptor alongside the binary, used by ProcessLauncher for discovery.

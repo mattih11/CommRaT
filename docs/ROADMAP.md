@@ -162,6 +162,61 @@ Future: Async callback mechanism.
 
 ### Developer Tools
 
+**CommRaT Schema Viewer and `commrat_generate_schema()` CMake function** -- DONE
+- `CommRaTMessageRecord { std::string layout; CommRaTMessageMetadata commrat; }` with
+  `CommRaTSchemaOutput = sertial::SchemaOutputT<CommRaTMessageRecord>` (sertial extension)
+- `IntrospectionHelper::export_all()` / `write_to_file()` emit `CommRaTSchemaOutput` JSON
+- `commrat_generate_schema(TARGET APP_HEADER APP_TYPE OUTPUT)` CMake function in
+  `cmake/CommRaTSchemaGen.cmake` (auto-included via `CommRaTConfig.cmake`)
+- `tools/commrat-inspect/viewer.html` — interactive web viewer: memory layout, CommRaT
+  metadata block, filter by name/ID, "hide system messages" checkbox
+- GitHub Pages deployment (via `doxygen.yml`): live viewer at
+  `https://<org>.github.io/<repo>/commrat-inspect/` with pre-built `AllExamplesApp` schema
+- Format compatible with plain sertial `SchemaOutput` (CommRaT block optional)
+- Status: Complete
+- Priority: Done
+
+**`commrat inspect` CLI subcommand**
+- CLI tool: `commrat inspect <message_schemas.json>`
+- Renders a human-readable table showing message IDs, type names, field layouts, sizes
+- `--summary` flag: one-line-per-type table (id, name, size)
+- `--message <name>` flag: full field breakdown for a specific type
+- Status: Planned (web viewer in `tools/commrat-inspect/viewer.html` covers most use cases)
+- Priority: Low
+
+**Introspection output in `commrat_module()` descriptor (single source of truth)**
+- Currently `*.module.json` only contains `module_class` + `binary` (CMake-static)
+- Goal: `commrat_module()` CMake macro emits full schema into the descriptor via a
+  post-build step — making `*.module.json` the single source of truth for types + IDs
+- Design:
+  1. Each module binary supports a `--commrat-inspect <outfile>` flag that calls
+     `IntrospectionHelper::write_to_file()` and exits cleanly
+  2. `commrat_module()` macro adds a CMake `add_custom_command(POST_BUILD ...)` that
+     runs the binary with that flag, capturing `CommRaTSchemaOutput` into the descriptor:
+     ```cmake
+     add_custom_command(TARGET ${target} POST_BUILD
+         COMMAND $<TARGET_FILE:${target}> --commrat-inspect
+                 ${CMAKE_CURRENT_BINARY_DIR}/${class_name}.schema.json
+         COMMENT "Generating CommRaT schema for ${class_name}")
+     ```
+  3. `CommRaTModuleDescriptor` (the `*.module.json` struct) gains a
+     `std::optional<CommRaTSchemaOutput> schema` field — still readable by old loaders
+  4. ProcessLauncher reads the embedded schema to verify message ID consistency
+     before spawning (catches registry mismatch at launch time, not at runtime)
+- Status: Design phase
+- Priority: Low
+
+**`AppDescription` and launch config as rfl-native structs**
+- `module_description.hpp` structs (`AppDescription`, `ModuleDescription`, etc.) already
+  work with `rfl::json::read<AppDescription>()` via reflectcpp aggregate reflection
+- Missing: the header does not include `<rfl.hpp>`, relying on callers to provide it
+- Todo: add `#include <rfl.hpp>` to `module_description.hpp` to make it self-contained
+  and document the `rfl::json::read` / `rfl::yaml::read` contract explicitly
+- Future: consider `rfl::Field<"name", T>` annotations to lock field names in JSON/YAML
+  and support rename without breaking existing config files
+- Status: Minor cleanup pending
+- Priority: Low
+
 **Performance Profiling**
 - Built-in latency measurement
 - Message rate tracking

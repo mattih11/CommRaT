@@ -72,7 +72,7 @@ int main() {
     // ========================================================================
     // 3. Export all message schemas
     // ========================================================================
-    std::cout << "3. All Message Schemas (JSON):\n";
+    std::cout << "3. All Message Schemas (CommRaTSchemaOutput JSON):\n";
     auto all_schemas = MyApp::Introspection::export_all();
     std::cout << all_schemas << "\n\n";
     

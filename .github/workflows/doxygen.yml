@@ -1,4 +1,4 @@
-name: Doxygen Documentation
+name: Documentation & Schema Viewer
 
 on:
   push:
@@ -19,6 +19,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      # Same image as CI so all CommRaT deps (CoreRaT, SeRTial, reflectcpp) are present.
+      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,15 +29,55 @@ jobs:
           submodules: recursive
 
       - name: Install Doxygen
-        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+        run: apt-get update -qq && apt-get install -y -qq doxygen graphviz
 
       - name: Generate Doxygen documentation
         run: doxygen Doxyfile
 
-      - name: Upload artifact
+      # Build the schema-gen driver and emit all_examples_schema.json.
+      # Only the schema_gen executable itself needs to run — no router required.
+      - name: Generate AllExamplesApp schema JSON
+        run: |
+          cmake --preset default -DCOMMRAT_BUILD_TESTS=OFF
+          cmake --build --preset default --target introspection_example_schema_gen --parallel $(nproc)
+          # Run the driver directly (post-build command is not triggered here)
+          build/default/examples/introspection_example_schema_gen
+          echo "Schema written to build/default/examples/all_examples_schema.json"
+          python3 -c "
+          import json, sys
+          d = json.load(open('build/default/examples/all_examples_schema.json'))
+          user = [m for m in d['messages'] if not m['commrat']['payload_type'].startswith('commrat::')]
+          print(f'Schema OK: {len(d[\"messages\"])} total entries, {len(user)} user types')
+          "
+
+      - name: Assemble GitHub Pages site
+        run: |
+          mkdir -p _site/api
+          cp -r docs/api/html/. _site/api/
+
+          # CommRaT inspect viewer + pre-built schema
+          mkdir -p _site/commrat-inspect
+          cp tools/commrat-inspect/viewer.html _site/commrat-inspect/
+          cp build/default/examples/all_examples_schema.json \
+             _site/commrat-inspect/all_examples_schema.json
+
+          # Landing page that auto-redirects to the viewer with the example schema
+          cat > _site/commrat-inspect/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html><head><meta charset="UTF-8">
+          <meta http-equiv="refresh" content="0; url=viewer.html?schema=all_examples_schema.json">
+          <title>CommRaT Schema Viewer</title></head>
+          <body>
+          <p>Redirecting to <a href="viewer.html?schema=all_examples_schema.json">CommRaT Schema Viewer</a>...</p>
+          </body></html>
+          EOF
+
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'docs/api/html'
+          path: '_site'
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'

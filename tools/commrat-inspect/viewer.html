@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommRaT Schema Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 4px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            color: #858585;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+
+        .controls {
+            background: #252526;
+            padding: 20px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .file-input {
+            margin-bottom: 15px;
+        }
+
+        input[type="file"] {
+            padding: 8px;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            align-items: center;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 8px 12px;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .filter-label {
+            color: #858585;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .type-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .type-card {
+            background: #2d2d30;
+            padding: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .type-card:hover {
+            background: #333337;
+            border-color: #007acc;
+        }
+
+        .type-card.selected {
+            border-color: #4ec9b0;
+            background: #333337;
+        }
+
+        .type-card.system-msg {
+            opacity: 0.65;
+        }
+
+        .type-card.system-msg:hover {
+            opacity: 1.0;
+        }
+
+        .type-name {
+            color: #4ec9b0;
+            font-weight: bold;
+            margin-bottom: 3px;
+            word-break: break-all;
+        }
+
+        .type-id-badge {
+            display: inline-block;
+            background: #0e639c;
+            color: #fff;
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 11px;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        .type-size {
+            color: #9cdcfe;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        .type-registry {
+            color: #858585;
+            font-size: 11px;
+            margin-top: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .details {
+            background: #252526;
+            padding: 20px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+
+        .commrat-block {
+            background: #1a2a1a;
+            border: 1px solid #2a5a2a;
+            border-radius: 4px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .commrat-block-title {
+            color: #4ec9b0;
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .commrat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .commrat-field {
+            background: #2d2d30;
+            padding: 10px 12px;
+            border-radius: 4px;
+        }
+
+        .commrat-field-label {
+            color: #858585;
+            font-size: 11px;
+            margin-bottom: 3px;
+        }
+
+        .commrat-field-value {
+            color: #dcdcaa;
+            font-size: 14px;
+            font-weight: bold;
+            word-break: break-all;
+        }
+
+        .commrat-field-value.id-value {
+            color: #4ec9b0;
+            font-size: 18px;
+        }
+
+        .commrat-field-value.type-value {
+            color: #9cdcfe;
+            font-size: 12px;
+            font-weight: normal;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            color: #569cd6;
+            font-size: 18px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #3c3c3c;
+            padding-bottom: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th {
+            background: #2d2d30;
+            color: #4ec9b0;
+            padding: 10px;
+            text-align: left;
+            border-bottom: 2px solid #555;
+        }
+
+        td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        tr:hover {
+            background: #2d2d30;
+        }
+
+        .field-marker {
+            display: inline-block;
+            width: 20px;
+            height: 14px;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .memory-layout {
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+
+        .memory-axis {
+            font-size: 11px;
+            color: #858585;
+            white-space: pre;
+            font-family: 'Consolas', 'Monaco', monospace;
+            line-height: 1.4;
+        }
+
+        .memory-bar {
+            font-size: 11px;
+            white-space: pre;
+            font-family: 'Consolas', 'Monaco', monospace;
+            line-height: 1.4;
+            margin: 2px 0;
+        }
+
+        .legend {
+            margin-top: 20px;
+            padding: 15px;
+            background: #2d2d30;
+            border-radius: 4px;
+        }
+
+        .legend-title {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+
+        .legend-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .legend-symbol {
+            margin-right: 10px;
+            font-family: monospace;
+        }
+
+        .field-0 { background-color: #569cd6; }
+        .field-1 { background-color: #4ec9b0; }
+        .field-2 { background-color: #dcdcaa; }
+        .field-3 { background-color: #c586c0; }
+        .field-4 { background-color: #9cdcfe; }
+        .field-5 { background-color: #ce9178; }
+        .field-6 { background-color: #b668cd; }
+        .field-7 { background-color: #4ec9a0; }
+        .padding { background-color: #5a5a5a; }
+
+        .variable-controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #2d2d30;
+            border-radius: 4px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            gap: 15px;
+        }
+
+        .control-label {
+            min-width: 150px;
+            color: #d4d4d4;
+        }
+
+        .control-slider {
+            flex: 1;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #3e3e42;
+            outline: none;
+            border-radius: 2px;
+        }
+
+        .control-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #4ec9b0;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
+        .control-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #4ec9b0;
+            cursor: pointer;
+            border-radius: 50%;
+            border: none;
+        }
+
+        .control-value {
+            min-width: 80px;
+            text-align: right;
+            color: #4ec9b0;
+            font-family: monospace;
+        }
+
+        .animation-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .control-button {
+            padding: 8px 16px;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .control-button:hover {
+            background: #1177bb;
+        }
+
+        .control-button:disabled {
+            background: #3e3e42;
+            color: #858585;
+            cursor: not-allowed;
+        }
+
+        .highlight-field {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
+            z-index: 10;
+        }
+
+        .hoverable {
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .hoverable:hover {
+            opacity: 0.8;
+        }
+
+        .dimmed {
+            opacity: 0.3;
+        }
+
+        .collapsible-section {
+            margin-bottom: 20px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #2d2d30;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .section-header:hover {
+            background: #3e3e42;
+        }
+
+        .collapse-icon {
+            font-size: 14px;
+            transition: transform 0.2s;
+            color: #4ec9b0;
+        }
+
+        .collapse-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .section-content {
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .section-content.collapsed {
+            display: none;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-box {
+            background: #2d2d30;
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        .info-label {
+            color: #858585;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #dcdcaa;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CommRaT Schema Viewer</h1>
+        <div class="subtitle">Reads CommRaTSchemaOutput JSON. Compatible with sertial-inspect output (layout field).</div>
+
+        <div class="controls">
+            <div class="file-input">
+                <input type="file" id="fileInput" accept=".json" />
+            </div>
+            <div class="filter-row hidden" id="filterRow">
+                <span class="filter-label">Filter:</span>
+                <input type="text" id="filterInput" class="filter-input"
+                       placeholder="type name or message ID..." oninput="renderTypeList()" />
+                <label style="color: #858585; font-size: 12px; cursor: pointer;">
+                    <input type="checkbox" id="hideSystem" onchange="renderTypeList()" style="margin-right: 4px;">
+                    Hide system messages
+                </label>
+            </div>
+            <div id="typeList" class="type-list hidden"></div>
+        </div>
+
+        <div id="details" class="details hidden"></div>
+    </div>
+
+    <script>
+        const FIELD_COLORS = [
+            '#569cd6', '#4ec9b0', '#dcdcaa', '#c586c0',
+            '#9cdcfe', '#ce9178', '#b668cd', '#4ec9a0'
+        ];
+        const PADDING_COLOR = '#5a5a5a';
+
+        // records[i] = { layout: <parsed StructLayout object>, commrat: <CommRaTMessageMetadata> }
+        let records = [];
+        let selectedRecord = null;
+        let variableFieldSizes = {};
+        let animationId = null;
+        let highlightedFieldIndex = null;
+
+        async function loadFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            const schemaUrl = params.get('schema');
+            if (!schemaUrl) return;
+            try {
+                const response = await fetch(schemaUrl);
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const data = await response.json();
+                parseAndLoad(data);
+            } catch (err) {
+                alert('Error loading schema from URL: ' + err.message);
+            }
+        }
+
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                parseAndLoad(JSON.parse(text));
+            } catch (err) {
+                alert('Error loading schema file: ' + err.message);
+            }
+        });
+
+        loadFromURL();
+
+        // Accept both CommRaTSchemaOutput (messages[i] = {layout:string, commrat:{...}})
+        // and plain sertial SchemaOutput (messages[i] = JSON string of StructLayout).
+        function parseAndLoad(data) {
+            records = [];
+            for (const msg of data.messages) {
+                if (typeof msg === 'string') {
+                    // Plain sertial format — no commrat block
+                    records.push({ layout: JSON.parse(msg), commrat: null });
+                } else if (msg && typeof msg.layout === 'string') {
+                    // CommRaT format
+                    records.push({ layout: JSON.parse(msg.layout), commrat: msg.commrat || null });
+                }
+            }
+            document.getElementById('filterRow').classList.remove('hidden');
+            renderTypeList();
+            document.getElementById('typeList').classList.remove('hidden');
+        }
+
+        function isSystemMessage(record) {
+            if (!record.commrat) return false;
+            const name = record.commrat.payload_type || '';
+            // System messages have payload types in the commrat:: namespace
+            return name.startsWith('commrat::');
+        }
+
+        function renderTypeList() {
+            const filter = (document.getElementById('filterInput').value || '').toLowerCase();
+            const hideSystem = document.getElementById('hideSystem').checked;
+            const typeList = document.getElementById('typeList');
+            typeList.innerHTML = '';
+
+            records.forEach((record, index) => {
+                const schema = record.layout;
+                const commrat = record.commrat;
+                const displayName = commrat ? shortName(commrat.payload_type) : schema.name;
+                const isSystem = isSystemMessage(record);
+
+                if (hideSystem && isSystem) return;
+                if (filter) {
+                    const idStr = commrat ? String(commrat.message_id) : '';
+                    const matchName = displayName.toLowerCase().includes(filter);
+                    const matchId = idStr.includes(filter);
+                    const matchFull = commrat ? commrat.payload_type.toLowerCase().includes(filter) : false;
+                    if (!matchName && !matchId && !matchFull) return;
+                }
+
+                const card = document.createElement('div');
+                card.className = 'type-card' + (isSystem ? ' system-msg' : '');
+                card.dataset.index = index;
+
+                let idBadge = '';
+                if (commrat) {
+                    idBadge = `<span class="type-id-badge">ID ${commrat.message_id}</span>`;
+                }
+
+                card.innerHTML = `
+                    <div class="type-name">${idBadge}${escHtml(displayName)}</div>
+                    <div class="type-size">${schema.sizeof_bytes} bytes &rarr; ${schema.max_packed_size} bytes packed</div>
+                    ${commrat ? `<div class="type-registry">${escHtml(shortRegistry(commrat.registry_name))}</div>` : ''}
+                `;
+                card.addEventListener('click', () => selectRecord(index));
+                typeList.appendChild(card);
+            });
+        }
+
+        function selectRecord(index) {
+            selectedRecord = records[index];
+            document.querySelectorAll('.type-card').forEach((card) => {
+                card.classList.toggle('selected', parseInt(card.dataset.index) === index);
+            });
+            renderDetails();
+            document.getElementById('details').classList.remove('hidden');
+        }
+
+        function renderDetails() {
+            const details = document.getElementById('details');
+            const schema = selectedRecord.layout;
+            const commrat = selectedRecord.commrat;
+
+            variableFieldSizes = {};
+            schema.field_names.forEach((name, i) => {
+                if (schema.field_is_variable && schema.field_is_variable[i]) {
+                    const capacity = schema.capacities ? schema.capacities[i] : 0;
+                    variableFieldSizes[i] = capacity;
+                }
+            });
+
+            const displayName = commrat ? shortName(commrat.payload_type) : schema.name;
+
+            details.innerHTML = `
+                <div class="section">
+                    <h2 style="color: #4ec9b0; margin-bottom: 16px;">${escHtml(displayName)}</h2>
+
+                    ${commrat ? renderCommRaTBlock(commrat) : ''}
+
+                    <div class="info-grid">
+                        <div class="info-box">
+                            <div class="info-label">Struct Size</div>
+                            <div class="info-value">${schema.sizeof_bytes} bytes</div>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-label">Base Packed</div>
+                            <div class="info-value">${schema.base_packed_size} bytes</div>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-label">Max Packed</div>
+                            <div class="info-value">${schema.max_packed_size} bytes</div>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-label">Current Packed</div>
+                            <div class="info-value" id="currentPackedSize">${calculateCurrentPackedSize(schema)} bytes</div>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-label">Fields</div>
+                            <div class="info-value">${schema.field_names.length}</div>
+                        </div>
+                    </div>
+                </div>
+
+                ${renderVariableControls(schema)}
+
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="collapse-icon">&#9660;</span>
+                        <span class="section-title">Fields</span>
+                    </div>
+                    <div class="section-content">
+                        ${renderFieldTable(schema)}
+                    </div>
+                </div>
+
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="collapse-icon">&#9660;</span>
+                        <span class="section-title">Memory Layout (struct)</span>
+                    </div>
+                    <div class="section-content">
+                        ${renderMemoryLayout(schema, false)}
+                    </div>
+                </div>
+
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="collapse-icon">&#9660;</span>
+                        <span class="section-title">Serialized Layout (packed)</span>
+                    </div>
+                    <div class="section-content" data-layout="serialized">
+                        ${renderMemoryLayout(schema, true)}
+                    </div>
+                </div>
+
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="collapse-icon">&#9660;</span>
+                        <span class="section-title">Serialization Operations</span>
+                    </div>
+                    <div class="section-content">
+                        ${renderBlockOperations(schema, 'serialize')}
+                    </div>
+                </div>
+
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="collapse-icon">&#9660;</span>
+                        <span class="section-title">Deserialization Operations</span>
+                    </div>
+                    <div class="section-content">
+                        ${renderBlockOperations(schema, 'deserialize')}
+                    </div>
+                </div>
+
+                <div class="legend">
+                    <div class="legend-title">Legend:</div>
+                    <div class="legend-item">
+                        <span class="legend-symbol" style="background: ${FIELD_COLORS[0]}; padding: 2px 8px;"> </span>
+                        <span>Regular field</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-symbol" style="background: ${FIELD_COLORS[1]}; padding: 2px 8px;">&nbsp;</span>
+                        <span>Variable field</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-symbol" style="background: ${PADDING_COLOR}; padding: 2px 8px;">&nbsp;</span>
+                        <span>Padding (not serialized)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-symbol">&#9500;&#9472;&#9508;</span>
+                        <span>Length prefix (4 bytes)</span>
+                    </div>
+                </div>
+            `;
+
+            setTimeout(setupHoverHighlighting, 0);
+        }
+
+        function renderCommRaTBlock(commrat) {
+            const hexId = '0x' + commrat.message_id.toString(16).toUpperCase().padStart(8, '0');
+            return `
+                <div class="commrat-block">
+                    <div class="commrat-block-title">CommRaT Metadata</div>
+                    <div class="commrat-grid">
+                        <div class="commrat-field">
+                            <div class="commrat-field-label">Message ID (decimal)</div>
+                            <div class="commrat-field-value id-value">${commrat.message_id}</div>
+                        </div>
+                        <div class="commrat-field">
+                            <div class="commrat-field-label">Message ID (hex)</div>
+                            <div class="commrat-field-value id-value">${hexId}</div>
+                        </div>
+                        <div class="commrat-field">
+                            <div class="commrat-field-label">Payload Type</div>
+                            <div class="commrat-field-value">${escHtml(shortName(commrat.payload_type))}</div>
+                        </div>
+                        <div class="commrat-field">
+                            <div class="commrat-field-label">Wire Type</div>
+                            <div class="commrat-field-value type-value">${escHtml(commrat.full_type)}</div>
+                        </div>
+                        <div class="commrat-field">
+                            <div class="commrat-field-label">Max Message Size</div>
+                            <div class="commrat-field-value">${commrat.max_message_size} bytes</div>
+                        </div>
+                        <div class="commrat-field" style="grid-column: 1 / -1;">
+                            <div class="commrat-field-label">Registry</div>
+                            <div class="commrat-field-value type-value">${escHtml(commrat.registry_name)}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleSection(header) {
+            const icon = header.querySelector('.collapse-icon');
+            const content = header.nextElementSibling;
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                icon.classList.remove('collapsed');
+                content.style.maxHeight = content.scrollHeight + 'px';
+            } else {
+                content.classList.add('collapsed');
+                icon.classList.add('collapsed');
+                content.style.maxHeight = '0';
+            }
+        }
+
+        function renderFieldTable(schema) {
+            let html = '<table><thead><tr>';
+            html += '<th></th><th>Name</th><th>Type</th><th>Size</th><th>Offset</th><th>Align</th><th>Var</th>';
+            html += '</tr></thead><tbody>';
+
+            schema.field_names.forEach((name, i) => {
+                const color = FIELD_COLORS[i % FIELD_COLORS.length];
+                const isVar = schema.field_is_variable && schema.field_is_variable[i];
+                const capacity = schema.capacities ? schema.capacities[i] : null;
+
+                html += `<tr data-field-index="${i}" class="hoverable">`;
+                html += `<td><span class="field-marker" style="background: ${color};">&nbsp;</span></td>`;
+                html += `<td>${escHtml(name)}</td>`;
+                html += `<td>${escHtml(truncate(schema.field_types[i], 40))}</td>`;
+                html += `<td>${schema.field_sizes[i]}</td>`;
+                html += `<td>${schema.field_offsets[i]}</td>`;
+                html += `<td>${schema.field_alignments ? schema.field_alignments[i] : '-'}</td>`;
+                html += `<td>${isVar && capacity ? `yes [${capacity}]` : 'no'}</td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function renderBlockOperations(schema, mode = 'serialize') {
+            let html = '<div style="font-family: monospace; font-size: 12px;">';
+            const blocks = buildSerializationBlocks(schema, mode);
+
+            html += '<div style="margin-bottom: 15px; color: #d4d4d4;">';
+            html += `Total blocks: <span style="color: #4ec9b0;">${blocks.length}</span> | `;
+            html += `Fixed: <span style="color: #569cd6;">${blocks.filter(b => b.type === 'fixed').length}</span> | `;
+            html += `Dynamic: <span style="color: #dcdcaa;">${blocks.filter(b => b.type === 'dynamic').length}</span> | `;
+            html += `RuntimeOffset: <span style="color: #c586c0;">${blocks.filter(b => b.type === 'runtime_offset').length}</span>`;
+            html += '</div>';
+
+            blocks.forEach((block) => {
+                const fieldColor = block.type === 'padding' ? PADDING_COLOR :
+                                  (block.fieldIndex >= 0 ? FIELD_COLORS[block.fieldIndex % FIELD_COLORS.length] : '#888');
+                const fieldIndices = block.fieldIndices || (block.fieldIndex >= 0 ? [block.fieldIndex] : []);
+                const fieldAttr = fieldIndices.length > 0 ? ` data-block-fields="${fieldIndices.join(',')}" class="hoverable"` : '';
+
+                html += `<div style="margin: 8px 0; padding: 8px; background: #2d2d2d; border-left: 3px solid ${fieldColor};"${fieldAttr}>`;
+                html += '<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">';
+                html += `<span style="color: ${fieldColor}; font-weight: bold;">${block.type.toUpperCase()}</span>`;
+                if (block.fieldIndex >= 0) {
+                    html += `<span style="color: #9cdcfe;">${escHtml(schema.field_names[block.fieldIndex])}</span>`;
+                }
+                html += `<span style="color: #666;">&rarr;</span>`;
+                html += `<span style="color: #ce9178;">${escHtml(block.description)}</span>`;
+                html += '</div>';
+                html += '<div style="color: #858585; font-size: 11px; margin-left: 20px;">';
+                html += escHtml(block.operation);
+                html += '</div></div>';
+            });
+
+            html += '</div>';
+            return html;
+        }
+
+        function buildSerializationBlocks(schema, mode = 'serialize') {
+            const blocks = [];
+            let dst_offset = 0;
+            const processed = new Array(schema.field_names.length).fill(false);
+            const isSerialize = mode === 'serialize';
+
+            let firstDynamicIndex = schema.field_names.length;
+            if (schema.field_is_variable) {
+                for (let i = 0; i < schema.field_names.length; i++) {
+                    if (schema.field_is_variable[i]) { firstDynamicIndex = i; break; }
+                }
+            }
+
+            if (firstDynamicIndex > 0) {
+                let regionStartSrc = schema.field_offsets[0];
+                let regionStartDst = dst_offset;
+                let regionSize = schema.field_sizes[0];
+                let regionFieldStart = 0;
+                let regionFieldCount = 1;
+
+                for (let i = 1; i < firstDynamicIndex; i++) {
+                    const currentOffset = schema.field_offsets[i];
+                    const expectedOffset = regionStartSrc + regionSize;
+                    if (currentOffset === expectedOffset) {
+                        regionSize += schema.field_sizes[i];
+                        regionFieldCount++;
+                    } else {
+                        const fieldNames = schema.field_names.slice(regionFieldStart, regionFieldStart + regionFieldCount).join(', ');
+                        const fieldIndices = Array.from({length: regionFieldCount}, (_, idx) => regionFieldStart + idx);
+                        blocks.push({ type: 'fixed', fieldIndex: regionFieldStart, fieldIndices,
+                            description: `${regionFieldCount} field(s): ${fieldNames}`,
+                            operation: isSerialize ? `memcpy(dest + ${regionStartDst}, src + ${regionStartSrc}, ${regionSize})` : `memcpy(dest + ${regionStartSrc}, src + ${regionStartDst}, ${regionSize})` });
+                        dst_offset += regionSize;
+                        blocks.push({ type: 'padding', fieldIndex: -1,
+                            description: `Skip ${currentOffset - expectedOffset} bytes of padding`,
+                            operation: `// Padding at src + ${expectedOffset} not copied` });
+                        regionStartSrc = currentOffset;
+                        regionStartDst = dst_offset;
+                        regionSize = schema.field_sizes[i];
+                        regionFieldStart = i;
+                        regionFieldCount = 1;
+                    }
+                }
+                const fieldNames = schema.field_names.slice(regionFieldStart, regionFieldStart + regionFieldCount).join(', ');
+                const fieldIndices = Array.from({length: regionFieldCount}, (_, idx) => regionFieldStart + idx);
+                blocks.push({ type: 'fixed', fieldIndex: regionFieldStart, fieldIndices,
+                    description: `${regionFieldCount} field(s): ${fieldNames}`,
+                    operation: isSerialize ? `memcpy(dest + ${regionStartDst}, src + ${regionStartSrc}, ${regionSize})` : `memcpy(dest + ${regionStartSrc}, src + ${regionStartDst}, ${regionSize})` });
+                dst_offset += regionSize;
+                for (let i = 0; i < firstDynamicIndex; i++) processed[i] = true;
+            }
+
+            for (let i = firstDynamicIndex; i < schema.field_names.length; i++) {
+                if (processed[i] || !(schema.field_is_variable && schema.field_is_variable[i])) continue;
+                const capacity = schema.capacities ? schema.capacities[i] : 0;
+                const elemSize = schema.element_sizes ? schema.element_sizes[i] : 1;
+                blocks.push({ type: 'dynamic', fieldIndex: i, description: 'Length prefix (4 bytes)',
+                    operation: isSerialize ? `uint32_t len = src.${schema.field_names[i]}.size();\nmemcpy(dest + ${dst_offset}, &len, 4)` : `uint32_t len;\nmemcpy(&len, src + ${dst_offset}, 4)` });
+                dst_offset += 4;
+                blocks.push({ type: 'dynamic', fieldIndex: i,
+                    description: `Variable data (0 to ${capacity} elements, ${elemSize} bytes each)`,
+                    operation: isSerialize ? `memcpy(dest + ${dst_offset}, src.${schema.field_names[i]}.data(), len * ${elemSize})` : `dest.${schema.field_names[i]}.set_size_unsafe(len);\nmemcpy(dest.${schema.field_names[i]}.data_unsafe(), src + ${dst_offset}, len * ${elemSize})` });
+                dst_offset += capacity * elemSize;
+                processed[i] = true;
+            }
+
+            let firstRuntimeOffset = -1;
+            for (let i = firstDynamicIndex; i < schema.field_names.length; i++) {
+                if (!processed[i] && !(schema.field_is_variable && schema.field_is_variable[i])) { firstRuntimeOffset = i; break; }
+            }
+
+            if (firstRuntimeOffset >= 0) {
+                let regionStartSrc = schema.field_offsets[firstRuntimeOffset];
+                let regionSize = schema.field_sizes[firstRuntimeOffset];
+                let regionFieldStart = firstRuntimeOffset;
+                let regionFieldCount = 1;
+                processed[firstRuntimeOffset] = true;
+
+                for (let i = firstRuntimeOffset + 1; i < schema.field_names.length; i++) {
+                    if (processed[i]) continue;
+                    const currentOffset = schema.field_offsets[i];
+                    const expectedOffset = regionStartSrc + regionSize;
+                    if (currentOffset === expectedOffset) {
+                        regionSize += schema.field_sizes[i];
+                        regionFieldCount++;
+                        processed[i] = true;
+                    } else {
+                        const fieldNames = schema.field_names.slice(regionFieldStart, regionFieldStart + regionFieldCount).join(', ');
+                        blocks.push({ type: 'runtime_offset', fieldIndex: regionFieldStart,
+                            description: `${regionFieldCount} field(s) after variable: ${fieldNames}`,
+                            operation: isSerialize ? `memcpy(dest + runtime_offset, src + ${regionStartSrc}, ${regionSize})` : `memcpy(dest + ${regionStartSrc}, src + runtime_offset, ${regionSize})` });
+                        blocks.push({ type: 'padding', fieldIndex: -1,
+                            description: `Skip ${currentOffset - expectedOffset} bytes of padding`,
+                            operation: `// Padding not copied` });
+                        regionStartSrc = currentOffset;
+                        regionSize = schema.field_sizes[i];
+                        regionFieldStart = i;
+                        regionFieldCount = 1;
+                        processed[i] = true;
+                    }
+                }
+                const fieldNames = schema.field_names.slice(regionFieldStart, regionFieldStart + regionFieldCount).join(', ');
+                blocks.push({ type: 'runtime_offset', fieldIndex: regionFieldStart,
+                    description: `${regionFieldCount} field(s) after variable: ${fieldNames}`,
+                    operation: isSerialize ? `memcpy(dest + runtime_offset, src + ${regionStartSrc}, ${regionSize})` : `memcpy(dest + ${regionStartSrc}, src + runtime_offset, ${regionSize})` });
+            }
+
+            return blocks;
+        }
+
+        function renderMemoryLayout(schema, isPacked) {
+            const totalBytes = isPacked ? schema.max_packed_size : schema.sizeof_bytes;
+            const regions = isPacked ? buildPackedRegions(schema) : buildStructRegions(schema);
+
+            const numDigits = totalBytes.toString().length;
+            const extraSpace = (numDigits + 3) * 2;
+            const availableChars = 120 - extraSpace;
+            const numLines = 1 + Math.floor((totalBytes - 1) / availableChars);
+            const bytesPerLine = Math.ceil(totalBytes / numLines);
+            const charsPerByte = Math.floor(availableChars / bytesPerLine);
+
+            let html = '<div class="memory-layout">';
+            html += renderAxis(0, Math.min(totalBytes, bytesPerLine), charsPerByte, numDigits, true);
+            for (let line = 0; line < numLines; line++) {
+                const startByte = line * bytesPerLine;
+                const endByte = Math.min(totalBytes, (line + 1) * bytesPerLine);
+                html += renderMemoryLine(regions, startByte, endByte, charsPerByte, numDigits, numLines > 1);
+            }
+            if (numLines > 1) {
+                html += renderAxis((numLines - 1) * bytesPerLine, totalBytes, charsPerByte, numDigits, false);
+            }
+            html += `<div style="color: #858585; margin-top: 10px;">${totalBytes} bytes</div>`;
+            html += '</div>';
+            return html;
+        }
+
+        function buildStructRegions(schema) {
+            const regions = [];
+            let currentOffset = 0;
+            schema.field_names.forEach((name, i) => {
+                const offset = schema.field_offsets[i];
+                const size = schema.field_sizes[i];
+                if (offset > currentOffset) regions.push({ offset: currentOffset, size: offset - currentOffset, fieldIndex: -1, isVariable: false, isLengthPrefix: false });
+                regions.push({ offset, size, fieldIndex: i, isVariable: schema.field_is_variable && schema.field_is_variable[i], isLengthPrefix: false });
+                currentOffset = offset + size;
+            });
+            if (currentOffset < schema.sizeof_bytes) regions.push({ offset: currentOffset, size: schema.sizeof_bytes - currentOffset, fieldIndex: -1, isVariable: false, isLengthPrefix: false });
+            return regions;
+        }
+
+        function buildPackedRegions(schema) {
+            let regions = [];
+            let offset = 0;
+            schema.field_names.forEach((name, i) => {
+                const isVar = schema.field_is_variable && schema.field_is_variable[i];
+                if (isVar) {
+                    regions.push({ offset, size: 4, fieldIndex: i, isVariable: false, isLengthPrefix: true });
+                    offset += 4;
+                    const capacity = schema.capacities ? schema.capacities[i] : 0;
+                    const elemSize = schema.element_sizes ? schema.element_sizes[i] : 1;
+                    const runtimeSize = variableFieldSizes[i] !== undefined ? variableFieldSizes[i] : capacity;
+                    const varSize = runtimeSize * elemSize;
+                    if (varSize > 0) {
+                        regions.push({ offset, size: varSize, fieldIndex: i, isVariable: true, isLengthPrefix: false });
+                        offset += varSize;
+                    }
+                } else {
+                    regions.push({ offset, size: schema.field_sizes[i], fieldIndex: i, isVariable: false, isLengthPrefix: false });
+                    offset += schema.field_sizes[i];
+                }
+            });
+            return regions;
+        }
+
+        function renderAxis(startByte, endByte, charsPerByte, numDigits, isTop) {
+            const indent = ' '.repeat(numDigits + 2);
+            const byteRange = endByte - startByte;
+            let tickSpacing = 1;
+            if (byteRange > 100) tickSpacing = 20;
+            else if (byteRange > 50) tickSpacing = 10;
+            else if (byteRange > 20) tickSpacing = 5;
+            else if (byteRange > 10) tickSpacing = 4;
+
+            const numChars = (endByte - startByte) * charsPerByte;
+            const numberArray = new Array(numChars).fill(' ');
+            const firstTick = Math.ceil(startByte / tickSpacing) * tickSpacing;
+            for (let byte = firstTick; byte < endByte; byte += tickSpacing) {
+                const charPos = (byte - startByte) * charsPerByte;
+                const label = byte.toString();
+                for (let i = 0; i < label.length && charPos + i < numChars; i++) numberArray[charPos + i] = label[i];
+            }
+            const numbers = indent + ' ' + numberArray.join('');
+
+            const corner = isTop ? '\u250c' : '\u2514';
+            const endCorner = isTop ? '\u2510' : '\u2518';
+            let axis = indent + corner;
+            for (let byte = startByte; byte < endByte; byte++) {
+                axis += (byte % tickSpacing === 0) ? '\u253c' : (isTop ? '\u252c' : '\u2534');
+                axis += '\u2500'.repeat(charsPerByte - 1);
+            }
+            axis += endCorner;
+            return `<div class="memory-axis">${isTop ? numbers + '\n' + axis : axis + '\n' + numbers}</div>`;
+        }
+
+        function renderMemoryLine(regions, startByte, endByte, charsPerByte, numDigits, showLabels) {
+            const lineBytes = endByte - startByte;
+            const lineChars = lineBytes * charsPerByte;
+            let content = '';
+            let currentChar = 0;
+
+            for (const region of regions) {
+                const regionEnd = region.offset + region.size;
+                if (regionEnd <= startByte) continue;
+                if (region.offset >= endByte) break;
+
+                const overlapStart = Math.max(region.offset, startByte);
+                const overlapEnd = Math.min(regionEnd, endByte);
+                const overlapSize = overlapEnd - overlapStart;
+                const chars = Math.max(1, Math.floor(overlapSize * charsPerByte));
+
+                const color = region.fieldIndex === -1 ? PADDING_COLOR : FIELD_COLORS[region.fieldIndex % FIELD_COLORS.length];
+                const fieldAttr = region.fieldIndex !== -1 ? ` data-field-index="${region.fieldIndex}" class="hoverable"` : '';
+
+                if (region.isLengthPrefix) {
+                    const inner = chars <= 1 ? '\u2551' : chars === 2 ? '\u251c\u2524' : '\u251c' + '\u2500'.repeat(chars - 2) + '\u2524';
+                    content += `<span style="background: ${color}; color: #1e1e1e;"${fieldAttr}>${inner}</span>`;
+                } else if (region.fieldIndex === -1) {
+                    content += `<span style="background: ${color}; color: ${color};">${'\u2591'.repeat(chars)}</span>`;
+                } else if (region.isVariable) {
+                    content += `<span style="background: ${color}; color: ${color};"${fieldAttr}>${'\u2591'.repeat(chars)}</span>`;
+                } else {
+                    content += `<span style="background: ${color}; color: ${color};"${fieldAttr}>${' '.repeat(chars)}</span>`;
+                }
+                currentChar += chars;
+            }
+            while (currentChar < lineChars) { content += ' '; currentChar++; }
+
+            const leftLabel = showLabels ? startByte.toString().padStart(numDigits, ' ') + '  ' : ' '.repeat(numDigits + 2);
+            const rightLabel = showLabels ? ' ' + (endByte - 1).toString().padEnd(numDigits, ' ') : '';
+            return `<div class="memory-bar">${leftLabel}\u251c${content}\u2524${rightLabel}</div>`;
+        }
+
+        function calculateCurrentPackedSize(schema) {
+            let size = schema.base_packed_size;
+            if (!schema.field_is_variable) return size;
+            schema.field_names.forEach((name, i) => {
+                if (schema.field_is_variable[i]) {
+                    const elemSize = schema.element_sizes ? schema.element_sizes[i] : 1;
+                    const runtimeSize = variableFieldSizes[i] || 0;
+                    size += 4 + (runtimeSize * elemSize);
+                }
+            });
+            return size;
+        }
+
+        function renderVariableControls(schema) {
+            if (!schema.field_is_variable) return '';
+            const hasVariableFields = schema.field_names.some((_, i) => schema.field_is_variable[i]);
+            if (!hasVariableFields) return '';
+
+            let html = '<div class="variable-controls"><div style="color: #4ec9b0; font-weight: bold; margin-bottom: 10px;">Variable Field Sizes</div>';
+            schema.field_names.forEach((name, i) => {
+                if (!schema.field_is_variable[i]) return;
+                const capacity = schema.capacities ? schema.capacities[i] : 0;
+                const currentSize = variableFieldSizes[i] || capacity;
+                const color = FIELD_COLORS[i % FIELD_COLORS.length];
+                html += `<div class="control-row">
+                    <div class="control-label" style="color: ${color};">
+                        <span class="field-marker" style="background: ${color}; padding: 2px 6px; margin-right: 8px;">&nbsp;</span>${escHtml(name)}</div>
+                    <input type="range" class="control-slider" min="0" max="${capacity}" value="${currentSize}"
+                           data-field-index="${i}" oninput="updateFieldSize(${i}, this.value)">
+                    <div class="control-value" id="size-${i}">${currentSize} / ${capacity}</div>
+                </div>`;
+            });
+            html += `<div class="animation-controls">
+                <button class="control-button" onclick="startAnimation()">Play</button>
+                <button class="control-button" onclick="stopAnimation()">Stop</button>
+                <button class="control-button" onclick="resetSizes()">Reset to Max</button>
+            </div></div>`;
+            return html;
+        }
+
+        function updateFieldSize(fieldIndex, newSize) {
+            variableFieldSizes[fieldIndex] = parseInt(newSize);
+            const schema = selectedRecord.layout;
+            const capacity = schema.capacities ? schema.capacities[fieldIndex] : 0;
+            document.getElementById(`size-${fieldIndex}`).textContent = `${newSize} / ${capacity}`;
+            document.getElementById('currentPackedSize').textContent = `${calculateCurrentPackedSize(schema)} bytes`;
+            const serializedContainer = document.querySelector('[data-layout="serialized"]');
+            if (serializedContainer) serializedContainer.innerHTML = renderMemoryLayout(schema, true);
+        }
+
+        function startAnimation() {
+            if (animationId) return;
+            const schema = selectedRecord.layout;
+            if (!schema.field_is_variable) return;
+            const variableFields = schema.field_names.map((_, i) => i).filter(i => schema.field_is_variable[i]);
+            if (!variableFields.length) return;
+            let frame = 0;
+            animationId = setInterval(() => {
+                variableFields.forEach(fi => {
+                    const capacity = schema.capacities ? schema.capacities[fi] : 0;
+                    const size = Math.floor(capacity * (0.5 + 0.5 * Math.sin(frame * 0.1 + fi)));
+                    const slider = document.querySelector(`input[data-field-index="${fi}"]`);
+                    if (slider) slider.value = size;
+                    updateFieldSize(fi, size);
+                });
+                frame++;
+            }, 100);
+        }
+
+        function stopAnimation() {
+            if (animationId) { clearInterval(animationId); animationId = null; }
+        }
+
+        function resetSizes() {
+            stopAnimation();
+            const schema = selectedRecord.layout;
+            if (!schema.field_is_variable) return;
+            schema.field_names.forEach((name, i) => {
+                if (!schema.field_is_variable[i]) return;
+                const capacity = schema.capacities ? schema.capacities[i] : 0;
+                variableFieldSizes[i] = capacity;
+                const slider = document.querySelector(`input[data-field-index="${i}"]`);
+                if (slider) slider.value = capacity;
+                updateFieldSize(i, capacity);
+            });
+        }
+
+        function setupHoverHighlighting() {
+            document.querySelectorAll('[data-field-index]').forEach(elem => {
+                elem.addEventListener('mouseenter', e => highlightField(parseInt(e.currentTarget.dataset.fieldIndex)));
+                elem.addEventListener('mouseleave', clearHighlight);
+            });
+            document.querySelectorAll('[data-block-fields]').forEach(elem => {
+                elem.addEventListener('mouseenter', e => highlightFields(e.currentTarget.dataset.blockFields.split(',').map(Number)));
+                elem.addEventListener('mouseleave', clearHighlight);
+            });
+        }
+
+        function highlightField(fieldIndex) { highlightFields([fieldIndex]); }
+
+        function highlightFields(fieldIndices) {
+            fieldIndices.forEach(fi => {
+                document.querySelectorAll(`[data-field-index="${fi}"]`).forEach(e => e.classList.add('highlight-field'));
+            });
+            document.querySelectorAll('[data-block-fields]').forEach(elem => {
+                const bf = elem.dataset.blockFields.split(',').map(Number);
+                if (bf.some(f => fieldIndices.includes(f))) elem.classList.add('highlight-field');
+            });
+            document.querySelectorAll('.hoverable').forEach(elem => {
+                const ef = elem.dataset.fieldIndex;
+                const bf = elem.dataset.blockFields;
+                let dim = true;
+                if (ef !== undefined && fieldIndices.includes(parseInt(ef))) dim = false;
+                else if (bf !== undefined && bf.split(',').map(Number).some(f => fieldIndices.includes(f))) dim = false;
+                if (dim) elem.classList.add('dimmed');
+            });
+        }
+
+        function clearHighlight() {
+            document.querySelectorAll('.highlight-field').forEach(e => e.classList.remove('highlight-field'));
+            document.querySelectorAll('.dimmed').forEach(e => e.classList.remove('dimmed'));
+        }
+
+        // Helpers
+        function shortName(fullType) {
+            // Keep last segment after "::"
+            const last = fullType.lastIndexOf('::');
+            return last >= 0 ? fullType.slice(last + 2) : fullType;
+        }
+
+        function shortRegistry(name) {
+            // Abbreviate long CommRaT<...> registry names
+            const m = name.match(/commrat::CommRaT<(.+)>$/s);
+            if (!m) return name;
+            const types = m[1].split(',').map(t => {
+                const n = t.lastIndexOf('::');
+                const bare = n >= 0 ? t.slice(n + 2) : t;
+                return bare.replace(/>.*$/, '').trim();
+            });
+            return 'CommRaT<' + types.join(', ') + '>';
+        }
+
+        function truncate(str, maxLen) {
+            return str.length <= maxLen ? str : str.substring(0, maxLen - 2) + '..';
+        }
+
+        function escHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>

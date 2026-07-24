@@ -12,30 +12,11 @@
  *   ./module_main_basic --help
  */
 
-#include <commrat/commrat.hpp>
+#include <commrat/examples/all_examples_app.hpp>
 #include <commrat/module_main.hpp>
-#include <cstdint>
 
-// Message definitions
-struct SensorData {
-    uint64_t sensor_id;
-    float temperature_c;
-    float humidity_percent;
-};
-
-// Forward declare FilteredData (even though this module doesn't use it)
-struct FilteredData {
-    uint32_t sensor_id;
-    float smoothed_temperature_c;
-    float smoothed_humidity_percent;
-    uint32_t sample_count;
-};
-
-// Application definition - MUST MATCH filter's registry!
-using MyApp = commrat::CommRaT<
-    commrat::Message::Data<SensorData>,
-    commrat::Message::Data<FilteredData>
->;
+using namespace sensor_filter_example;
+using MyApp = AllExamplesApp;
 
 /**
  * @brief Basic sensor module - generates periodic data
@@ -50,7 +31,7 @@ class BasicSensorModule : public MyApp::Module2<
     commrat::Period<100>  // Default period of 100ms (can be overridden via CLI)
 > {
 public:
-    using MyApp::Module2<commrat::Output<SensorData>, commrat::Period<100>>::Module2;  // Inherit constructor
+    using MyApp::Module2<commrat::Output<SensorData>, commrat::Period<100>>::Module2;
 
 protected:
     void process(SensorData& output) override {

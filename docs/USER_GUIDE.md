@@ -14,8 +14,9 @@ CommRaT (Communication Runtime) is a C++20 real-time messaging framework providi
 8. [Timestamp Management](#8-timestamp-management)
 9. [Command Handling](#9-command-handling)
 10. [Configuration and Deployment](#10-configuration-and-deployment)
-11. [Best Practices](#11-best-practices)
-12. [Troubleshooting](#12-troubleshooting)
+11. [Schema Introspection and Viewer](#11-schema-introspection-and-viewer)
+12. [Best Practices](#12-best-practices)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -919,7 +920,113 @@ Use unique `(system_id, instance_id)` pairs. Multiple instances of the same modu
 
 ---
 
-## 11. Best Practices
+## 11. Schema Introspection and Viewer
+
+CommRaT can export a machine-readable JSON schema describing every message
+type registered in a `CommRaT<>` application.  The schema captures the
+full binary layout of each wire message, plus CommRaT-specific metadata
+(message ID, registry name, payload and wire type names, max message size).
+
+### 11.1 C++ runtime export
+
+```cpp
+#include <commrat/introspection.hpp>
+
+// Write schema JSON to file
+MyApp::Introspection::write_to_file("my_app_schema.json");
+
+// Or capture as a string (e.g. for a REST endpoint)
+std::string json = MyApp::Introspection::export_all();
+```
+
+The output file contains a `CommRaTSchemaOutput` object:
+
+```json
+{
+  "version": "1.0",
+  "generated": "...",
+  "messages": [
+    {
+      "layout": "<sertial StructLayout JSON>",
+      "commrat": {
+        "message_id": 16777217,
+        "payload_type": "SensorData",
+        "full_type": "commrat::corerat::WireMessage<SensorData>",
+        "max_message_size": 32,
+        "registry_name": "MyApp"
+      }
+    },
+    ...
+  ]
+}
+```
+
+### 11.2 CMake schema generation (recommended)
+
+`commrat_generate_schema()` creates a lightweight side-car executable and
+attaches a `POST_BUILD` command so the JSON is regenerated automatically
+whenever the registry header changes.
+
+```cmake
+find_package(CommRaT REQUIRED)   # makes commrat_generate_schema() available
+
+commrat_generate_schema(
+    TARGET      my_module
+    APP_HEADER  "${CMAKE_SOURCE_DIR}/include/myapp/my_app.hpp"
+    APP_TYPE    MyApp
+    OUTPUT      "${CMAKE_BINARY_DIR}/my_app_schema.json"
+)
+```
+
+| Parameter | Description |
+|---|---|
+| `TARGET` | Any existing CMake executable target that can see the app header |
+| `APP_HEADER` | Path to the header that defines `APP_TYPE` (passed to `#include`) |
+| `APP_TYPE` | Unqualified name of the `CommRaT<...>` alias |
+| `OUTPUT` | Absolute path where the JSON file will be written |
+
+The side-car target is named `<TARGET>_schema_gen`.  Build it explicitly:
+
+```bash
+cmake --build build/ --target my_module_schema_gen
+```
+
+### 11.3 Web viewer
+
+Open `tools/commrat-inspect/viewer.html` in any browser and load a schema
+JSON via the file picker, or pass a `?schema=` URL parameter:
+
+```
+viewer.html?schema=../../build/default/my_app_schema.json
+```
+
+#### Live viewer (GitHub Pages)
+
+The CI workflow builds the `AllExamplesApp` schema and deploys it with
+the viewer to GitHub Pages:
+
+```
+https://<org>.github.io/<repo>/commrat-inspect/
+```
+
+That URL auto-redirects to:
+
+```
+viewer.html?schema=all_examples_schema.json
+```
+
+#### Viewer features
+
+- Memory layout map with byte-level visualization
+- CommRaT metadata block: message ID (decimal + hex), payload type,
+  wire type name, max message size, registry name
+- Filter bar: search by type name or message ID
+- "Hide system messages" checkbox (suppresses Subscribe/Unsubscribe/GetData)
+- Compatible with plain sertial `SchemaOutput` files (no CommRaT block)
+
+---
+
+## 12. Best Practices
 
 ### DO
 
@@ -957,7 +1064,7 @@ Before shipping `process()` code, verify:
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Common Issues
 
