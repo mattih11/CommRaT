@@ -1,51 +1,23 @@
 #pragma once
 /**
  * @file imu_gps_app.hpp
- * @brief Shared application definition for the IMU + GPS fusion example.
+ * @brief Backward-compatible include for the IMU + GPS fusion example.
  *
- * All binaries that participate in the same CommRaT application (imu_module,
- * gps_module, module_main_multiformat / FusionModule) must share this header
- * so that message IDs are identical across processes.
+ * Previously defined IMUData, GPSData, FusedPose, and ImuGpsApp inline.
+ * Those types are now in the installed header
+ * <commrat/examples/imu_gps_messages.hpp> under namespace imu_gps_example,
+ * and ImuGpsApp is aliased to AllExamplesApp so that all example binaries
+ * share a single unified registry when run together.
  */
 
-#include <commrat/commrat.hpp>
+#include <commrat/examples/all_examples_app.hpp>
 
-// ============================================================================
-// Message definitions
-// ============================================================================
+// Bring IMU/GPS types into the local scope (backward compat with
+// existing code that uses IMUData, GPSData, FusedPose unqualified).
+using imu_gps_example::IMUData;
+using imu_gps_example::GPSData;
+using imu_gps_example::FusedPose;
 
-struct IMUData {
-    float accel_x{0.0f};
-    float accel_y{0.0f};
-    float accel_z{0.0f};
-    float gyro_x{0.0f};
-    float gyro_y{0.0f};
-    float gyro_z{0.0f};
-};
-
-struct GPSData {
-    double latitude{0.0};
-    double longitude{0.0};
-    float  altitude{0.0f};
-    float  speed{0.0f};
-};
-
-struct FusedPose {
-    double latitude{0.0};
-    double longitude{0.0};
-    float  altitude{0.0f};
-    float  velocity_x{0.0f};
-    float  velocity_y{0.0f};
-    float  velocity_z{0.0f};
-    bool   gps_valid{false};
-};
-
-// ============================================================================
-// Application registry — must be identical in every participant binary
-// ============================================================================
-
-using ImuGpsApp = commrat::CommRaT<
-    commrat::Message::Data<IMUData>,
-    commrat::Message::Data<GPSData>,
-    commrat::Message::Data<FusedPose>
->;
+// ImuGpsApp is now the full AllExamplesApp registry so that imu/gps
+// modules are observable alongside every other example from ratgui.
+using ImuGpsApp = AllExamplesApp;

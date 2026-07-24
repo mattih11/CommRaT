@@ -3,8 +3,10 @@
  * @brief Main introspection header - include this for schema export
  * 
  * Provides complete introspection capabilities for CommRaT applications:
- * - MessageSchema: Combines CommRaT metadata with SeRTial layout
- * - IntrospectionHelper: Registry-wide export to any rfl format
+ * - CommRaTSchemaOutput: typed schema file format (extends sertial::SchemaOutputT)
+ * - CommRaTMessageRecord: per-message record (layout + commrat metadata)
+ * - IntrospectionHelper: registry-wide export to any rfl format
+ * - MessageSchema: compile-time schema for a single type (full StructLayout)
  * 
  * **Quick Start:**
  * @code
@@ -12,11 +14,11 @@
  * 
  * using MyApp = CommRaT<Message::Data<TempData>, Message::Data<StatusData>>;
  * 
- * // Export single message to JSON
- * auto json = MyApp::Introspection::export_as<TempData, rfl::json>();
+ * // Export all messages as CommRaTSchemaOutput JSON
+ * auto json = MyApp::Introspection::export_all();
  * 
- * // Export all messages to file
- * MyApp::Introspection::write_to_file<rfl::json>("schemas.json");
+ * // Write to file (readable by sertial-inspect and commrat inspect)
+ * MyApp::Introspection::write_to_file("schemas.json");
  * @endcode
  * 
  * @author CommRaT Development Team
@@ -25,16 +27,6 @@
 
 #pragma once
 
+#include "commrat/introspection/commrat_schema_output.hpp"
 #include "commrat/introspection/message_schema.hpp"
 #include "commrat/introspection/introspection_helper.hpp"
-
-/**
- * @namespace commrat
- * @brief CommRaT introspection provides complete schema export
- * 
- * Exports both:
- * - CommRaT metadata (message IDs, type names, size bounds)
- * - SeRTial layout (fields, types, offsets, sizes, variable flags)
- * 
- * Supports any rfl format: JSON, YAML, TOML, XML, etc.
- */

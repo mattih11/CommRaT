@@ -13,8 +13,9 @@ find_dependency(Threads REQUIRED)
 # Include the targets file
 include("${CMAKE_CURRENT_LIST_DIR}/CommRaTTargets.cmake")
 
-# Make commrat_module() available to downstream projects
+# Make commrat_module() and commrat_generate_schema() available to downstream projects
 include("${CMAKE_CURRENT_LIST_DIR}/CommRaTMacros.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/CommRaTSchemaGen.cmake")
 
 # Provide CommRaT::commrat target
 check_required_components(CommRaT)

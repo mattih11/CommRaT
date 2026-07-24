@@ -21,31 +21,12 @@
  *   ./module_main_with_config config.json
  */
 
-#include <commrat/commrat.hpp>
+#include <commrat/examples/all_examples_app.hpp>
 #include <commrat/module_main.hpp>
-#include <cstdint>
 #include <cmath>
 
-// Input message (from producer)
-struct SensorData {
-    uint64_t sensor_id;
-    float temperature_c;
-    float humidity_percent;
-};
-
-// Output message (filtered)
-struct FilteredData {
-    uint64_t sensor_id;
-    float smoothed_temperature_c;
-    float smoothed_humidity_percent;
-    uint32_t sample_count;
-};
-
-// Application definition
-using MyApp = commrat::CommRaT<
-    commrat::Message::Data<SensorData>,
-    commrat::Message::Data<FilteredData>
->;
+using namespace sensor_filter_example;
+using MyApp = AllExamplesApp;
 
 /**
  * @brief Filter module - applies moving average to sensor data
@@ -101,6 +82,5 @@ private:
 // Deploy as standalone binary with config file!
 COMMRAT_MODULE_MAIN(FilterModule)
 
-// Debug: Print message IDs at compile time
 static_assert(MyApp::get_message_id<SensorData>() != 0, "SensorData has ID");
 static_assert(MyApp::get_message_id<FilteredData>() != 0, "FilteredData has ID");

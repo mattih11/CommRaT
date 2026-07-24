@@ -3,14 +3,20 @@
  * @file module_description.hpp
  * @brief Serialisable structs describing CommRaT module configurations.
  *
- * Load from YAML/JSON/TOML via reflectcpp:
- *   auto desc = rfl::yaml::read<AppDescription>(text).value();
+ * All structs are rfl-reflectable aggregates and can be loaded from any
+ * format supported by reflectcpp:
  *
- * The structs mirror ModuleConfig but use string type names instead of
- * C++ types so they can be expressed in human-editable config files.
- * The Launcher<App> translates them to ModuleConfig at startup using
+ *   auto desc = rfl::json::read<AppDescription>(text).value();
+ *   auto desc = rfl::yaml::read<AppDescription>(text).value();
+ *   auto desc = rfl::toml::read<AppDescription>(text).value();
+ *
+ * The structs mirror ModuleConfig but use plain data types instead of
+ * C++ template arguments so they can be expressed in human-editable config
+ * files.  The Launcher<App> translates them to ModuleConfig at startup using
  * App::get_address().
  */
+
+#include <rfl.hpp>
 
 #include <cstdint>
 #include <optional>

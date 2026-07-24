@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Use GNUInstallDirs for standard installation directories
 include(GNUInstallDirs)
 include(cmake/CommRaTMacros.cmake)
+include(cmake/CommRaTSchemaGen.cmake)
 
 find_package(CoreRaT REQUIRED)
 
@@ -97,7 +98,15 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/CommRaTConfigVersion.cmake
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CommRaTMacros.cmake
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CommRaTSchemaGen.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CommRaT
+)
+
+# Install commrat-inspect tools (web viewer + schema-gen driver source)
+install(FILES
+    tools/commrat-inspect/viewer.html
+    tools/commrat-inspect/schema_gen_driver.cpp
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/commrat/commrat-inspect
 )
 
 #-----------------------------------------------------------------------------

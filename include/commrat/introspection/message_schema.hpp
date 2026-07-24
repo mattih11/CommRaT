@@ -61,13 +61,13 @@ struct MessageSchema {
     struct CommRaTMetadata {
         uint32_t message_id = Registry::template get_message_id<PayloadT>();
         std::string payload_type = rfl::type_name_t<PayloadT>().str();
-        std::string full_type = rfl::type_name_t<TimsMessage<PayloadT>>().str();
+        std::string full_type = rfl::type_name_t<corerat::WireMessage<PayloadT>>().str();
         size_t max_message_size = Registry::max_message_size;
         std::string registry_name = rfl::type_name_t<Registry>().str();
     };
     
     CommRaTMetadata commrat;
-    sertial::StructLayout<TimsMessage<PayloadT>> layout;
+    sertial::StructLayout<corerat::WireMessage<PayloadT>> layout;
 };
 
 } // namespace commrat
