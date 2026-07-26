@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo getml/reflect-cpp \
+          gh release download --repo mattih11/reflect-cpp \
             --pattern "reflectcpp_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/reflectcpp_*_amd64.deb
 
