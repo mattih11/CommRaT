@@ -18,16 +18,45 @@ on:
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: Build and test with the standard Linux platform backend.
-  #        Runs inside the ratos-dev-image container where all deps are installed.
+  #        Runs on bare ubuntu-latest. Dependencies (reflectcpp, SeRTial,
+  #        CoreRaT STD) are installed from their GitHub release .deb packages.
   # ---------------------------------------------------------------------------
   build-std:
     name: Build & Test (STD platform)
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config
+
+      - name: Install reflectcpp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo getml/reflect-cpp \
+            --pattern "reflectcpp_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/reflectcpp_*_amd64.deb
+
+      - name: Install SeRTial
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo mattih11/SeRTial \
+            --pattern "sertial_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/sertial_*_amd64.deb
+
+      - name: Install CoreRaT (STD)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo mattih11/CoreRaT \
+            --pattern "corerat-std_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/corerat-std_*_amd64.deb
 
       - name: Configure
         run: cmake --preset default
@@ -39,7 +68,7 @@ jobs:
         run: |
           corerat-router-tcp > /dev/null 2>&1 &
           sleep 1
-          ctest --preset default
+          ctest --preset default --output-on-failure
           kill %1 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
