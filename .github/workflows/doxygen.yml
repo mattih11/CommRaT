@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Same image as CI so all CommRaT deps (CoreRaT, SeRTial, reflectcpp) are present.
-      image: ghcr.io/mattih11/ratos-dev-image:latest
+      image: ghcr.io/mattih11/ratos-dev-image:v0.1.1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
