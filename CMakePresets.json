@@ -16,6 +16,7 @@
       "description": "Standard Linux platform, Release build with examples. Use inside the dev container or when all dependencies are installed locally.",
       "inherits": "base",
       "cacheVariables": {
+        "COMMRAT_PLATFORM": "STD",
         "COMMRAT_BUILD_EXAMPLES": "ON",
         "COMMRAT_BUILD_TESTS": "ON"
       }

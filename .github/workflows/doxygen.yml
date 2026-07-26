@@ -19,17 +19,42 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      # Same image as CI so all CommRaT deps (CoreRaT, SeRTial, reflectcpp) are present.
-      image: ghcr.io/mattih11/ratos-dev-image:latest
+    # No container — deps installed from release packages below.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Doxygen
-        run: apt-get update -qq && apt-get install -y -qq doxygen graphviz
+      - name: Install build tools and Doxygen
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config doxygen graphviz
+
+      - name: Install reflectcpp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo getml/reflect-cpp \
+            --pattern "reflectcpp_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/reflectcpp_*_amd64.deb
+
+      - name: Install SeRTial
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo mattih11/SeRTial \
+            --pattern "sertial_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/sertial_*_amd64.deb
+
+      - name: Install CoreRaT (STD)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo mattih11/CoreRaT \
+            --pattern "corerat-std_*_amd64.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/corerat-std_*_amd64.deb
 
       - name: Generate Doxygen documentation
         run: doxygen Doxyfile
