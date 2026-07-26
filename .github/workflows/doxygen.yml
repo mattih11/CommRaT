@@ -34,9 +34,10 @@ jobs:
 
       - name: Install reflectcpp
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
         run: |
-          gh release download --repo mattih11/reflect-cpp \
+          tag=$(grep '^RATOS_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/RaTOS \
             --pattern "reflectcpp_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/reflectcpp_*_amd64.deb
 
