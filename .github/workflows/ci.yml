@@ -24,7 +24,7 @@ jobs:
     name: Build & Test (STD platform)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/mattih11/ratos-dev-image:v0.1.1
+      image: ghcr.io/mattih11/ratos-dev-image:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
