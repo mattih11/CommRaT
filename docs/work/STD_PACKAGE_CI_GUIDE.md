@@ -7,6 +7,10 @@ Debian packages so that STD-platform CI builds are self-contained on bare
 The EVL build/test job continues to use the `ratos-dev-image` container and
 RaTOS QEMU, and is unaffected by these changes.
 
+Related: `docs/layered-development-guide.md` in the RaTOS repo defines the
+same stack as ISAR image layers (Layer 0–4). This document is the CI-side
+counterpart for STD platform builds.
+
 ---
 
 ## Dependency chain
@@ -23,19 +27,33 @@ Each repo must:
 1. **Publish** a `<package>_<version>_amd64.deb` as a GitHub release asset.
 2. **Install** all upstream `.deb` files before configuring CMake.
 
+### Mapping to RaTOS ISAR image layers
+
+| RaTOS layer | Image recipe | What it contains | Corresponds to |
+|---|---|---|---|
+| 0 — EVL base | `ratos-evl-image` | EVL kernel + libevl + reflect-cpp | reflectcpp install step |
+| 1 — SeRTial | `ratos-sertial-image` | Layer 0 + SeRTial + CoreRaT | SeRTial + CoreRaT install steps |
+| 2 — CommRaT | `ratos-commrat-image` | Layer 1 + CommRaT | CommRaT install step |
+| 3 — RaTGUI | `ratos-ratgui-image` | Layer 2 + RaTGUI | RaTGUI install step |
+| 4 — Full | `ratos-image` | Complete production image | — |
+
 ---
 
 ## Package naming convention
 
 | Repository | GitHub repo | Release asset name |
 |---|---|---|
-| reflectcpp | `getml/reflect-cpp` | `reflectcpp_<version>_amd64.deb` |
+| reflectcpp | `mattih11/RaTOS` (bundled) | `libreflect-cpp-dev_*.deb` |
 | SeRTial | `mattih11/SeRTial` | `sertial_<version>_amd64.deb` |
 | CoreRaT | `mattih11/CoreRaT` | `corerat-std_<version>_amd64.deb` |
 | CommRaT | `mattih11/CommRaT` | `commrat_<version>_amd64.deb` |
 | RaTGUI | `mattih11/RaTGUI` | `ratgui_<version>_amd64.deb` |
 
 The `corerat-std` suffix distinguishes it from a future `corerat-evl` package.
+
+reflectcpp is bundled in the RaTOS release (same tag used for SDK/QEMU artifacts)
+and requires `RATOS_RELEASE_TOKEN` to download. All other packages are from public
+repos and use `github.token`.
 
 ---
 
@@ -126,15 +144,17 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Install reflectcpp
-      # All repos need this step.
+      # All repos need this step. Bundled in the RaTOS release; requires
+      # RATOS_RELEASE_TOKEN. Tag is pinned in the repo's .<repo>.env file.
       # -----------------------------------------------------------------------
       - name: Install reflectcpp
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RATOS_RELEASE_TOKEN }}
         run: |
-          gh release download --repo getml/reflect-cpp \
-            --pattern "reflectcpp_*_amd64.deb" --dir /tmp/pkgs
-          sudo dpkg -i /tmp/pkgs/reflectcpp_*_amd64.deb
+          tag=$(grep '^RATOS_RELEASE_TAG=' .<repo>.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/RaTOS \
+            --pattern "libreflect-cpp-dev_*.deb" --dir /tmp/pkgs
+          sudo dpkg -i /tmp/pkgs/libreflect-cpp-dev_*.deb
 
       # -----------------------------------------------------------------------
       # Install SeRTial
@@ -207,15 +227,17 @@ jobs:
         run: |
           cmake --preset default -DCMAKE_INSTALL_PREFIX=/usr/local
           cmake --build --preset default --parallel $(nproc)
-          # CPack or manual dpkg-deb to produce <package>_<version>_amd64.deb
-          cpack -G DEB --preset default
+          cd build/default && cpack -G DEB
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes || true
           gh release upload "${{ github.ref_name }}" \
-            build/default/*.deb --clobber
+            build/default/<package>_*.deb --clobber
 ```
 
 ---
