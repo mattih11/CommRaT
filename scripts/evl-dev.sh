@@ -319,7 +319,7 @@ _do_download() {
             --repo "$RATOS_RELEASE_REPO" \
             --pattern "vmlinuz" \
             --pattern "initrd.img" \
-            --pattern "*container-amd64*.ext4.gz" \
+            --pattern "ratos-sertial-image-container-amd64.ext4.gz" \
             --dir "$dl_dir"
     fi
 
