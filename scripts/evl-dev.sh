@@ -264,9 +264,11 @@ if [[ -n "$DO_CROSS" ]]; then
         # GCC sysroot wrapper to point at the extraction dir.
         # Requires patchelf on the host (apt install patchelf).
         if command -v patchelf &>/dev/null; then
-            "$EVL_SDK_DIR/relocate-sdk.sh"
+            "$EVL_SDK_DIR/relocate-sdk.sh" 2>/dev/null || \
+                sed -i "s|^GCC_SYSROOT=.*|GCC_SYSROOT=\"${EVL_SDK_DIR}\"|" \
+                    "$EVL_SDK_DIR/usr/bin/gcc-sysroot-wrapper.sh"
         else
-            echo "WARNING: patchelf not found — SDK ar/ranlib may fail. Install patchelf." >&2
+            echo "WARNING: patchelf not found — patching gcc wrapper manually." >&2
             sed -i "s|^GCC_SYSROOT=.*|GCC_SYSROOT=\"${EVL_SDK_DIR}\"|" \
                 "$EVL_SDK_DIR/usr/bin/gcc-sysroot-wrapper.sh"
         fi
@@ -586,33 +588,45 @@ if [[ "$DO_TEST" -eq 1 ]]; then
 
     if [[ -z "$DO_BUILD" && -n "$DO_CROSS" ]]; then
         # Binary cache case: source not on guest yet.
-        # Sync source and deploy binaries into the CMake build tree, then configure
-        # (fast, ~0.5s — no build, just generates CTestTestfile.cmake with guest paths).
-        echo "Deploying source + build/${DO_CROSS}/ to guest for ctest..."
+        # Patch CTestTestfile.cmake on the host to replace host paths with guest
+        # paths, then deploy. This avoids running cmake on the guest (which would
+        # require all deps to be installed there).
+        echo "Deploying source to guest /root/CommRaT/ ..."
         rsync -az --delete \
             --exclude=build --exclude=.git --exclude=.evl-cache \
             -e "ssh ${SSH_OPTS}" \
             ./ "root@127.0.0.1:/root/CommRaT/"
+
+        echo "Patching build paths in CTestTestfile.cmake for guest (host-side)..."
+        _host_build_dir="$(realpath "${REPO_ROOT}/build/${DO_CROSS}")"
+        find "${REPO_ROOT}/build/${DO_CROSS}" -name 'CTestTestfile.cmake' \
+            -exec sed -i \
+                -e "s|${_host_build_dir}|/root/CommRaT/build/evl|g" \
+                -e "s|${REPO_ROOT}|/root/CommRaT|g" \
+            '{}' '+'
+
+        echo "Deploying build/${DO_CROSS}/ to guest /root/CommRaT/build/evl/ ..."
         ssh ${SSH_OPTS} root@127.0.0.1 mkdir -p "/root/CommRaT/build/evl"
         rsync -az \
             -e "ssh ${SSH_OPTS}" \
             "build/${DO_CROSS}/" "root@127.0.0.1:/root/CommRaT/build/evl/"
-        echo "Configuring on guest (generates CTestTestfile.cmake)..."
+    fi
+
+    # Run ctest against the deployed build tree.
+    if [[ -n "$DO_BUILD" ]]; then
+        # In-guest build: cmake ran on guest so ctest preset is valid.
+        echo "Running ctest --preset ${CTEST_PRESET} on EVL guest..."
         ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
             set -euo pipefail
             cd /root/CommRaT
-            rm -f build/evl/CMakeCache.txt build/evl/CMakeFiles/cmake.check_cache
-            cmake --preset evl 2>&1
+            ctest --preset ${CTEST_PRESET} --output-on-failure --timeout 120 2>&1
         "
+    else
+        # Cross-compile: paths were patched above; use --test-dir directly.
+        echo "Running ctest on EVL guest (/root/CommRaT/build/evl)..."
+        ssh ${SSH_OPTS} root@127.0.0.1 \
+            ctest --test-dir /root/CommRaT/build/evl --output-on-failure --timeout 120
     fi
-
-    # Single source of truth: CMakeLists.txt defines all tests, timeouts, and pass conditions.
-    echo "Running ctest --preset ${CTEST_PRESET} on EVL guest..."
-    ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
-        set -euo pipefail
-        cd /root/CommRaT
-        ctest --preset ${CTEST_PRESET} --timeout 120 2>&1
-    "
 fi
 
 # Run specific binaries
