@@ -32,8 +32,9 @@ protected:
             .speed     = 1.5f    + std::sin(t) * 0.2f
         };
         if (counter_ % 10 == 0)
-            std::cout << "[GPS] sample " << counter_
-                      << " lat=" << output.latitude << "\n";
+            (void)0;  // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[GPS] sample " << counter_
+            //           << " lat=" << output.latitude << "\n";
     }
 
 private:

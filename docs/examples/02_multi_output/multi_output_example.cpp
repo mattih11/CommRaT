@@ -116,8 +116,9 @@ protected:
             .altitude_m = altitude_dist_(gen_)
         };
         
-        std::cout << "[WeatherStation] Generated: Temp=" << temp_out.temperature_c 
-                  << "°C, Pressure=" << pressure_out.pressure_hpa << " hPa\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[WeatherStation] Generated: Temp=" << temp_out.temperature_c
+        //           << "°C, Pressure=" << pressure_out.pressure_hpa << " hPa\n";
     }
 
 private:
@@ -158,20 +159,14 @@ protected:
     void process(const TemperatureData& input, TemperatureData& output) override {
         count_++;
         
-        std::cout << "[TempMonitor] #" << count_ 
-                  << " Station " << input.station_id
-                  << ": " << input.temperature_c << "°C"
-                  << ", " << input.humidity_percent << "% humidity";
-        
-        // Check for extreme conditions
-        if (input.temperature_c > 26.0f) {
-            std::cout << " ⚠ HIGH TEMP";
-        }
-        if (input.temperature_c < 20.0f) {
-            std::cout << " ❄ LOW TEMP";
-        }
-        
-        std::cout << "\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[TempMonitor] #" << count_
+        //           << " Station " << input.station_id
+        //           << ": " << input.temperature_c << "°C"
+        //           << ", " << input.humidity_percent << "% humidity";
+        // if (input.temperature_c > 26.0f) { std::cout << " HIGH TEMP"; }
+        // if (input.temperature_c < 20.0f) { std::cout << " LOW TEMP"; }
+        // std::cout << "\n";
         output = input;  // Pass-through
     }
 
@@ -207,20 +202,14 @@ protected:
     void process(const PressureData& input, PressureData& output) override {
         count_++;
         
-        std::cout << "[PressureMonitor] #" << count_
-                  << " Station " << input.station_id
-                  << ": " << input.pressure_hpa << " hPa"
-                  << ", alt=" << input.altitude_m << "m";
-        
-        // Check for extreme conditions
-        if (input.pressure_hpa < 990.0f) {
-            std::cout << " LOW PRESSURE";
-        }
-        if (input.pressure_hpa > 1010.0f) {
-            std::cout << " HIGH PRESSURE";
-        }
-        
-        std::cout << "\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[PressureMonitor] #" << count_
+        //           << " Station " << input.station_id
+        //           << ": " << input.pressure_hpa << " hPa"
+        //           << ", alt=" << input.altitude_m << "m";
+        // if (input.pressure_hpa < 990.0f)  { std::cout << " LOW PRESSURE"; }
+        // if (input.pressure_hpa > 1010.0f) { std::cout << " HIGH PRESSURE"; }
+        // std::cout << "\n";
         
         output = input;  // Pass-through
     }

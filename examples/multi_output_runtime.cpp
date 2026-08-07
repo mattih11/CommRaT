@@ -61,10 +61,11 @@ public:
 protected:
     // Multi-output signature: void process(T1& out1, T2& out2)
     void process(TemperatureData& temp, PressureData& pressure) override {
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()
-        ).count();
+        // RT-safe: std::cout not OOB-safe.
+        // auto now = std::chrono::system_clock::now();
+        // auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        //     now.time_since_epoch()).count();
+        auto timestamp = commrat::Time::now();  // nanoseconds, OOB-safe
 
         // Generate synthetic sensor readings
         temp.timestamp = timestamp;
@@ -77,9 +78,10 @@ protected:
 
         reading_count_++;
 
-        std::cout << "[Producer] Generated reading #" << reading_count_ 
-                  << " - Temp: " << temp.temperature_c << "°C"
-                  << ", Pressure: " << pressure.pressure_pa << " Pa\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[Producer] Generated reading #" << reading_count_
+        //           << " - Temp: " << temp.temperature_c << "°C"
+        //           << ", Pressure: " << pressure.pressure_pa << " Pa\n";
     }
 
 private:
@@ -102,9 +104,10 @@ public:
 protected:
     void process(const TemperatureData& input, TemperatureData& output) override {
         received_count_++;
-        std::cout << "[TempReceiver] Received temp #" << received_count_ 
-                  << ": " << input.temperature_c << "°C"
-                  << " (sensor " << input.sensor_id << ")\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[TempReceiver] Received temp #" << received_count_
+        //           << ": " << input.temperature_c << "°C"
+        //           << " (sensor " << input.sensor_id << ")\n";
         
         // Just pass through
         output = input;
@@ -130,9 +133,10 @@ public:
 protected:
     void process(const PressureData& input, PressureData& output) override {
         received_count_++;
-        std::cout << "[PressureReceiver] Received pressure #" << received_count_ 
-                  << ": " << input.pressure_pa << " Pa"
-                  << " (sensor " << input.sensor_id << ")\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[PressureReceiver] Received pressure #" << received_count_
+        //           << ": " << input.pressure_pa << " Pa"
+        //           << " (sensor " << input.sensor_id << ")\n";
         
         // Just pass through
         output = input;

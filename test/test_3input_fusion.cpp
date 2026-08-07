@@ -108,9 +108,9 @@ protected:
     void process(IMUData& output) override {
         uint32_t count = imu_count.fetch_add(1);
         
-        if (count < 3) {
-            std::cout << "[IMU] process() called, count=" << count << "\n";
-        }
+        // if (count < 3) {
+        //     std::cout << "[IMU] process() called, count=" << count << "\n";
+        // }
         
         // Simulate IMU readings
         float t = count * 0.01f;  // 100Hz = 10ms period
@@ -124,11 +124,11 @@ protected:
             .gyro_z = std::sin(t * 0.5f) * 0.05f
         };
         
-        if (count % 10 == 0) {  // Every 0.5s
-            std::cout << "[IMU] Published #" << count 
-                      << " | accel=(" << std::fixed << std::setprecision(2)
-                      << data.accel_x << "," << data.accel_y << "," << data.accel_z << ")\n";
-        }
+        // if (count % 10 == 0) {  // Every 0.5s
+        //     std::cout << "[IMU] Published #" << count
+        //               << " | accel=(" << std::fixed << std::setprecision(2)
+        //               << data.accel_x << "," << data.accel_y << "," << data.accel_z << ")\n";
+        // }
         
         output = data;
     }
@@ -152,13 +152,12 @@ protected:
             .altitude = 400.0f + std::sin(t * 0.5f) * 5.0f,
             .accuracy = 2.5f + std::sin(t) * 0.5f
         };
-        if(count % 10 == 0) {
-            std::cout << "[GPS] Published #" << count 
-                    << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
-                    << ", lon=" << data.longitude << "\n";
-            
-            output = data;
-        }
+        // if (count % 10 == 0) {
+        //     std::cout << "[GPS] Published #" << count
+        //             << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
+        //             << ", lon=" << data.longitude << "\n";
+        // }
+        output = data;
     }
 };
 
@@ -180,11 +179,11 @@ protected:
             .point_count = static_cast<uint32_t>(1000 + std::sin(t * 2.0f) * 200)
         };
         
-        if (count % 10 == 0) {  // Every 0.5s
-            std::cout << "[Lidar] Published #" << count 
-                      << " | dist=" << std::fixed << std::setprecision(2)
-                      << data.distance << "m, points=" << data.point_count << "\n";
-        }
+        // if (count % 10 == 0) {  // Every 0.5s
+        //     std::cout << "[Lidar] Published #" << count
+        //               << " | dist=" << std::fixed << std::setprecision(2)
+        //               << data.distance << "m, points=" << data.point_count << "\n";
+        // }
         
         output = data;
     }
@@ -229,12 +228,12 @@ protected:
             .inputs_used = 0x7  // All 3 inputs used (0x1 | 0x2 | 0x4)
         };
         
-        if (count % 10 == 0) {  // Every 0.5s
-            std::cout << "[FUSION] Output #" << count << " | quality=" << std::fixed << std::setprecision(2)
-                      << fused.fusion_quality << " | pos=(" << fused.position_x << "," << fused.position_y 
-                      << "," << fused.position_z << ") | vel=(" << fused.velocity_x << "," << fused.velocity_y 
-                      << "," << fused.velocity_z << ")\n";
-        }
+        // if (count % 10 == 0) {  // Every 0.5s
+        //     std::cout << "[FUSION] Output #" << count << " | quality=" << std::fixed << std::setprecision(2)
+        //               << fused.fusion_quality << " | pos=(" << fused.position_x << "," << fused.position_y
+        //               << "," << fused.position_z << ") | vel=(" << fused.velocity_x << "," << fused.velocity_y
+        //               << "," << fused.velocity_z << ")\n";
+        // }
         
         output = fused;
     }
