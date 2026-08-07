@@ -37,10 +37,9 @@ protected:
         static float temp = 20.0f;
         temp += 0.1f * (std::rand() % 10 - 5);  // Random walk
         
-        std::cout << "[Producer] Published temperature: " << temp << "°C\n";
+        // std::cout << "[Producer] Published temperature: " << temp << "°C\n";
         
         output = {
-            .sensor_id = 42,
             .temperature_c = temp,
             .confidence = 1.0f
         };
@@ -72,11 +71,10 @@ protected:
         }
         float filtered = sum / HISTORY_SIZE;
         
-        std::cout << "[Consumer] Received: " << input.temperature_c << "°C "
-                  << "→ Filtered: " << filtered << "°C\n";
+        // std::cout << "[Consumer] Received: " << input.temperature_c << "°C "
+        //           << "→ Filtered: " << filtered << "°C\n";
         
         output = {
-            .sensor_id = input.sensor_id,
             .temperature_c = filtered,
             .confidence = input.confidence
         };

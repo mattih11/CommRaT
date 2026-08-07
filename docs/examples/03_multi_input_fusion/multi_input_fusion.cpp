@@ -252,17 +252,18 @@ protected:
         // ====================================================================
         
         if (!gps_fresh && gps_stale_warnings_ < 5) {
-            std::cout << "[Fusion] GPS stale (age: " << gps_age_ms << " ms) "
-                      << "- expected at " << (gps_valid ? "multi-rate" : "startup") << "\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[Fusion] GPS stale (age: " << gps_age_ms << " ms) "
+            //           << "- expected at " << (gps_valid ? "multi-rate" : "startup") << "\n";
             gps_stale_warnings_++;
-            if (gps_stale_warnings_ == 5) {
-                std::cout << "[Fusion] (suppressing further stale messages...)\n";
-            }
+            // if (gps_stale_warnings_ == 5) {
+            //     std::cout << "[Fusion] (suppressing further stale messages...)\n";
+            // }
         }
         
         if (!gps_valid && gps_invalid_warnings_ < 3) {
-            std::cerr << "[Fusion] WARNING: GPS data unavailable "
-                      << "(tolerance may be too tight for GPS rate)\n";
+            // std::cerr << "[Fusion] WARNING: GPS data unavailable "
+            //           << "(tolerance may be too tight for GPS rate)\n";
             gps_invalid_warnings_++;
         }
         
@@ -293,11 +294,12 @@ protected:
         // ====================================================================
         
         if (imu_count_ % 100 == 0) {  // Every second (100 samples @ 100Hz)
-            std::cout << "[Fusion] #" << imu_count_ 
-                      << " | IMU: [" << imu.accel_x << ", " << imu.accel_y << ", " << imu.accel_z << "] m/s²"
-                      << " | GPS: (" << gps_data.latitude << ", " << gps_data.longitude << ") "
-                      << (gps_fresh ? "fresh" : "stale")
-                      << " age=" << gps_age_ms << "ms\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[Fusion] #" << imu_count_
+            //           << " | IMU: [" << imu.accel_x << ", " << imu.accel_y << ", " << imu.accel_z << "] m/s²"
+            //           << " | GPS: (" << gps_data.latitude << ", " << gps_data.longitude << ") "
+            //           << (gps_fresh ? "fresh" : "stale")
+            //           << " age=" << gps_age_ms << "ms\n";
         }
         
         // ====================================================================
@@ -350,11 +352,12 @@ protected:
         
         // Display every 10th sample (10Hz output for 100Hz input)
         if (count_ % 10 == 0) {
-            std::cout << "[Monitor] Fused #" << input.imu_count
-                      << " | Pos: (" << input.latitude << ", " << input.longitude 
-                      << "), alt=" << input.altitude << "m"
-                      << " | Vel: [" << input.velocity_x << ", " << input.velocity_y << "] m/s"
-                      << " | GPS: " << (input.gps_fresh ? "fresh" : "stale") << "\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[Monitor] Fused #" << input.imu_count
+            //           << " | Pos: (" << input.latitude << ", " << input.longitude
+            //           << "), alt=" << input.altitude << "m"
+            //           << " | Vel: [" << input.velocity_x << ", " << input.velocity_y << "] m/s"
+            //           << " | GPS: " << (input.gps_fresh ? "fresh" : "stale") << "\n";
         }
         
         output = input;

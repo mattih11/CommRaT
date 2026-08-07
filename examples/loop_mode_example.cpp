@@ -51,47 +51,35 @@ public:
         : Module2(config)
         , value_(0)
         , iteration_count_(0)
-        , last_report_time_(std::chrono::steady_clock::now())
+        , last_report_time_(Time::now())
     {}
 
 protected:
     void process(CounterData& output) override {
         output.value = value_++;
         
-        // Calculate throughput every second
+        // Calculate throughput every second using OOB-safe Time::now()
         ++iteration_count_;
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - last_report_time_
-        ).count();
-        
-        if (elapsed >= 1) {
+        Timestamp now = Time::now();
+        Duration elapsed = Duration::nanoseconds(static_cast<int64_t>(now - last_report_time_));
+        if (elapsed >= Seconds(1)) {
             output.iterations_per_second = iteration_count_;
-            
-            // Print throughput report (using fprintf for thread-safe output)
-            fprintf(stdout, "[FastCounter] Count: %12lu | Throughput: %10lu iterations/sec\n", 
-                    value_, iteration_count_);
-            fflush(stdout);
-            
-            // Reset counters
+            // RT-safe: fprintf/fflush are not OOB-safe.
+            // TODO: replace with a realtime-safe logging mechanism (e.g. GDOS or RT cout).
+            // fprintf(stdout, "[FastCounter] Count: %12lu | Throughput: %10lu iterations/sec\n",
+            //         value_, iteration_count_);
+            // fflush(stdout);
             iteration_count_ = 0;
             last_report_time_ = now;
         } else {
-            output.iterations_per_second = 0;  // Not ready yet
+            output.iterations_per_second = 0;
         }
     }
 
 private:
-    uint64_t get_timestamp() const {
-        auto now = std::chrono::system_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch()
-        ).count();
-    }
-    
     uint64_t value_;
     uint64_t iteration_count_;
-    std::chrono::steady_clock::time_point last_report_time_;
+    Timestamp last_report_time_;
 };
 
 // ============================================================================
@@ -128,10 +116,10 @@ protected:
             sum_throughput_ += input.iterations_per_second;
             ++count_throughput_;
             
-            // Print monitor update
-            fprintf(stdout, "[ThroughputMonitor] Received %lu messages | Current throughput: %lu iter/sec\n",
-                    total_messages_, input.iterations_per_second);
-            fflush(stdout);
+            // RT-safe: fprintf/fflush not OOB-safe.
+            // fprintf(stdout, "[ThroughputMonitor] Received %lu messages | Current throughput: %lu iter/sec\n",
+            //         total_messages_, input.iterations_per_second);
+            // fflush(stdout);
         }
         
         // Return pass-through data
@@ -139,14 +127,15 @@ protected:
     }
     
     void on_stop() override {
-        fprintf(stdout, "\n[ThroughputMonitor] Final Statistics:\n");
-        fprintf(stdout, "  Total messages received: %lu\n", total_messages_);
-        if (count_throughput_ > 0) {
-            fprintf(stdout, "  Min throughput: %lu iter/sec\n", min_throughput_);
-            fprintf(stdout, "  Max throughput: %lu iter/sec\n", max_throughput_);
-            fprintf(stdout, "  Avg throughput: %lu iter/sec\n", sum_throughput_ / count_throughput_);
-        }
-        fflush(stdout);
+        // RT-safe: fprintf/fflush not OOB-safe.
+        // fprintf(stdout, "\n[ThroughputMonitor] Final Statistics:\n");
+        // fprintf(stdout, "  Total messages received: %lu\n", total_messages_);
+        // if (count_throughput_ > 0) {
+        //     fprintf(stdout, "  Min throughput: %lu iter/sec\n", min_throughput_);
+        //     fprintf(stdout, "  Max throughput: %lu iter/sec\n", max_throughput_);
+        //     fprintf(stdout, "  Avg throughput: %lu iter/sec\n", sum_throughput_ / count_throughput_);
+        // }
+        // fflush(stdout);
     }
 
 private:

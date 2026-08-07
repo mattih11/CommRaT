@@ -112,7 +112,8 @@ protected:
             .count = counter_++                  // Increment counter
         };
         
-        std::cout << "[Counter] Generated: count=" << msg.count << "\n";
+        // RT-safe: std::cout not allowed in OOB thread
+        // std::cout << "[Counter] Generated: count=" << msg.count << "\n";
         
         // Return value is automatically published to all subscribers
         output = msg;
@@ -173,14 +174,14 @@ protected:
     void process(const CounterMessage& msg, CounterMessage& output) override {
         message_count_++;
         
-        // Display the received counter value
-        std::cout << "[Display] Received: count=" << msg.count << "\n";
-        
-        // Could add logic here:
-        // - Log to file
-        // - Check thresholds
-        // - Accumulate statistics
-        // - etc.
+        // RT-safe: std::cout not allowed in OOB thread
+        // // Display the received counter value
+        // std::cout << "[Display] Received: count=" << msg.count << "\n";
+        // // Could add logic here:
+        // // - Log to file
+        // // - Check thresholds
+        // // - Accumulate statistics
+        // // - etc.
         
         output = msg;  // Pass through (not published since no subscribers)
     }

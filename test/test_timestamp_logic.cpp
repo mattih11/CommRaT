@@ -142,9 +142,9 @@ protected:
         }
         
         messages_received++;
-        std::cout << "[TimestampChecker] ts=" << timestamp 
-                  << " valid=" << is_valid 
-                  << " fresh=" << is_fresh << "\n";
+        // std::cout << "[TimestampChecker] ts=" << timestamp
+        //           << " valid=" << is_valid
+        //           << " fresh=" << is_fresh << "\n";
         
         // Pass through (workaround for NoOutput issue)
         output = input;

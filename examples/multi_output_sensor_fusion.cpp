@@ -92,11 +92,12 @@ public:
 protected:
     // Multi-output signature: void process(T1& out1, T2& out2, T3& out3)
     void process(RawSensorData& raw, FilteredData& filtered, DiagnosticsData& diag) override {
-        auto start = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()
-        ).count();
+        // RT-safe: std::chrono::high_resolution_clock and system_clock not OOB-safe.
+        // auto now = std::chrono::system_clock::now();
+        // auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        //     now.time_since_epoch()).count();
+        commrat::Timestamp start = commrat::Time::now();  // OOB-safe, used for both timestamp and processing time
+        auto timestamp = start;  // nanoseconds
 
         // Simulate sensor readings with some noise
         float t = sample_count_ * 0.1f;
@@ -129,8 +130,12 @@ protected:
         filtered.confidence = std::max(0.0f, 1.0f - std::abs(acc_mag - 9.81f) / 9.81f);
 
         // Output 3: Diagnostics data
-        auto end = std::chrono::high_resolution_clock::now();
-        auto processing_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        // RT-safe: use Time::now() instead of std::chrono::high_resolution_clock.
+        // auto end = std::chrono::high_resolution_clock::now();
+        // auto processing_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        commrat::Timestamp end_ts = commrat::Time::now();
+        auto processing_time_us = static_cast<long>(
+            commrat::Duration::nanoseconds(static_cast<int64_t>(end_ts - start)).count_ns() / 1000);
         total_processing_time_us_ += processing_time_us;
         
         diag.timestamp = timestamp;
@@ -145,10 +150,11 @@ protected:
 
         // Log occasionally
         if (sample_count_ % 10 == 0) {
-            std::cout << "[Fusion] Sample #" << sample_count_ 
-                      << " - Roll: " << filtered.orientation_roll * 180.0f / M_PI << "°"
-                      << ", Confidence: " << filtered.confidence * 100.0f << "%"
-                      << ", AvgTime: " << diag.average_processing_time_us << "µs\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[Fusion] Sample #" << sample_count_
+            //           << " - Roll: " << filtered.orientation_roll * 180.0f / M_PI << "°"
+            //           << ", Confidence: " << filtered.confidence * 100.0f << "%"
+            //           << ", AvgTime: " << diag.average_processing_time_us << "µs\n";
         }
     }
 
@@ -176,10 +182,11 @@ protected:
         log_count_++;
         
         if (log_count_ % 20 == 0) {
-            std::cout << "[RawLogger] Logged sample #" << input.sample_count
-                      << " - Accel: [" << input.accelerometer_x 
-                      << ", " << input.accelerometer_y
-                      << ", " << input.accelerometer_z << "]\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[RawLogger] Logged sample #" << input.sample_count
+            //           << " - Accel: [" << input.accelerometer_x
+            //           << ", " << input.accelerometer_y
+            //           << ", " << input.accelerometer_z << "]\n";
         }
         
         output = input;  // Pass through
@@ -207,10 +214,11 @@ protected:
         consume_count_++;
         
         if (consume_count_ % 15 == 0) {
-            std::cout << "[FilterConsumer] Using filtered data #" << consume_count_
-                      << " - Orientation: Roll=" << input.orientation_roll * 180.0f / M_PI << "°"
-                      << ", Pitch=" << input.orientation_pitch * 180.0f / M_PI << "°"
-                      << " (Confidence: " << input.confidence * 100.0f << "%)\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[FilterConsumer] Using filtered data #" << consume_count_
+            //           << " - Orientation: Roll=" << input.orientation_roll * 180.0f / M_PI << "°"
+            //           << ", Pitch=" << input.orientation_pitch * 180.0f / M_PI << "°"
+            //           << " (Confidence: " << input.confidence * 100.0f << "%)\n";
         }
         
         output = input;  // Pass through
@@ -238,11 +246,12 @@ protected:
         monitor_count_++;
         
         if (monitor_count_ % 25 == 0) {
-            std::cout << "[DiagMonitor] Health check #" << monitor_count_
-                      << " - Samples: " << input.total_samples_processed
-                      << ", AvgTime: " << input.average_processing_time_us << "µs"
-                      << ", Calibrated: " << (input.calibration_valid ? "YES" : "NO")
-                      << ", Dropped: " << input.dropped_samples << "\n";
+            // RT-safe: std::cout not allowed in OOB thread
+            // std::cout << "[DiagMonitor] Health check #" << monitor_count_
+            //           << " - Samples: " << input.total_samples_processed
+            //           << ", AvgTime: " << input.average_processing_time_us << "µs"
+            //           << ", Calibrated: " << (input.calibration_valid ? "YES" : "NO")
+            //           << ", Dropped: " << input.dropped_samples << "\n";
         }
         
         output = input;  // Pass through

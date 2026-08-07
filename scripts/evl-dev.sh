@@ -623,9 +623,16 @@ if [[ "$DO_TEST" -eq 1 ]]; then
         "
     else
         # Cross-compile: paths were patched above; use --test-dir directly.
+        # Lift the guest CPU-time ulimit inline so EVL threads don't die with
+        # SIGXCPU. Using a multi-line bash -c (not bash -lc) avoids the SSH
+        # argument-joining bug where "bash -lc <single-line>" collapses the
+        # quoted command string into bare words, stripping --test-dir.
         echo "Running ctest on EVL guest (/root/CommRaT/build/evl)..."
-        ssh ${SSH_OPTS} root@127.0.0.1 \
+        ssh ${SSH_OPTS} root@127.0.0.1 bash -c "
+            ulimit -H -t unlimited 2>/dev/null || true
+            ulimit -t unlimited 2>/dev/null || true
             ctest --test-dir /root/CommRaT/build/evl --output-on-failure --timeout 120
+        "
     fi
 fi
 
