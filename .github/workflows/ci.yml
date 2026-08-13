@@ -47,7 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo mattih11/SeRTial \
+          tag=$(grep '^SERTIAL_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/SeRTial \
             --pattern "sertial_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/sertial_*_amd64.deb
 
@@ -55,7 +56,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo mattih11/CoreRaT \
+          tag=$(grep '^CORERAT_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/CoreRaT \
             --pattern "corerat-std_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/corerat-std_*_amd64.deb
 
@@ -197,7 +199,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo mattih11/SeRTial \
+          tag=$(grep '^SERTIAL_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/SeRTial \
             --pattern "sertial_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/sertial_*_amd64.deb
 
@@ -205,7 +208,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo mattih11/CoreRaT \
+          tag=$(grep '^CORERAT_RELEASE_TAG=' .commrat.env | cut -d= -f2)
+          gh release download "${tag}" --repo mattih11/CoreRaT \
             --pattern "corerat-std_*_amd64.deb" --dir /tmp/pkgs
           sudo dpkg -i /tmp/pkgs/corerat-std_*_amd64.deb
 
