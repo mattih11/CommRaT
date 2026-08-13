@@ -40,10 +40,25 @@
 #   scripts/evl-dev.sh --run /root/commrat/test/test_io_spec \
 #                      --run /root/commrat/test/test_registry_utils
 #
+#   # Point at a local ISAR image directory (multiple images in the same folder):
+#   scripts/evl-dev.sh --images-dir /path/to/isar/deploy/images/container-amd64 \
+#                      --image-name ratos-evl-image
+#   # Or put these in .commrat.env.local to avoid passing them every time:
+#   #   LOCAL_IMAGES_DIR=/path/to/ratos/build/tmp/deploy/images/container-amd64
+#   #   LOCAL_IMAGE_NAME=ratos-evl-image
+#
 #   # Use pre-downloaded artifacts:
 #   scripts/evl-dev.sh [flags] --ext4 path/to/ratos.ext4 \
 #                               --kernel path/to/vmlinuz \
 #                               --initrd path/to/initrd.img
+#
+#   # Skip all downloads with a local SDK and local image (no gh, no network):
+#   # Put these in .commrat.env.local once, then just run scripts/evl-dev.sh:
+#   #   EVL_SDK_DIR=/path/to/ratos-sdk
+#   #   LOCAL_EXT4=/path/to/ratos.ext4
+#   #   LOCAL_KERNEL=/path/to/vmlinuz
+#   #   LOCAL_INITRD=/path/to/initrd.img
+#   scripts/evl-dev.sh --cross --test
 #
 #   # Download from a specific run or release tag:
 #   RATOS_RUN_ID=12345678 scripts/evl-dev.sh [flags]
@@ -86,8 +101,10 @@ _load_env() {
 }
 
 _EARLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_load_env "${_EARLY_SCRIPT_DIR}/../.commrat.env"
+# Load .commrat.env.local FIRST so user overrides take precedence,
+# then .commrat.env fills in any remaining unset defaults.
 _load_env "${_EARLY_SCRIPT_DIR}/../.commrat.env.local"
+_load_env "${_EARLY_SCRIPT_DIR}/../.commrat.env"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -102,6 +119,16 @@ QEMU_MEMORY="${QEMU_MEMORY:-4G}"
 QEMU_CPUS="${QEMU_CPUS:-4}"
 SSH_PORT="${SSH_PORT:-22222}"
 EVL_SDK_DIR="${EVL_SDK_DIR:-.evl-cache/sdk}"
+# LOCAL_EXT4 / LOCAL_KERNEL / LOCAL_INITRD may be set in .commrat.env.local
+# to skip online artifact download entirely (useful for offline/iterative work).
+LOCAL_EXT4="${LOCAL_EXT4:-}"
+LOCAL_KERNEL="${LOCAL_KERNEL:-}"
+LOCAL_INITRD="${LOCAL_INITRD:-}"
+# LOCAL_IMAGES_DIR + LOCAL_IMAGE_NAME: point at an ISAR deploy directory.
+# The script globs for <image>-*-container-*.ext4 / -vmlinuz / -initrd.img.
+# LOCAL_IMAGE_NAME selects which image when multiple images share the folder.
+LOCAL_IMAGES_DIR="${LOCAL_IMAGES_DIR:-}"
+LOCAL_IMAGE_NAME="${LOCAL_IMAGE_NAME:-}"
 
 DO_CROSS=""          # preset for host cross-compile (empty = skip)
 DO_BUILD=""          # preset for in-guest build (empty = skip)
@@ -129,6 +156,10 @@ while [[ $# -gt 0 ]]; do
         --run-id)  RATOS_RUN_ID="$2";               shift 2 ;;
         --tag)     RATOS_RELEASE_TAG="$2";          shift 2 ;;
         --sdk-dir) EVL_SDK_DIR="$2";                shift 2 ;;
+        --images-dir)
+            LOCAL_IMAGES_DIR="$(realpath "$2")"; shift 2 ;;
+        --image-name)
+            LOCAL_IMAGE_NAME="$2";               shift 2 ;;
         --cross)
             if [[ $# -gt 1 && "$2" != --* ]]; then
                 DO_CROSS="$2"; shift 2
@@ -203,6 +234,141 @@ if [[ -n "${RATOS_RELEASE_TOKEN:-}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Helper: resolve ext4/kernel/initrd from an ISAR images directory.
+# ISAR naming convention:
+#   <image>-<machine>-container-<arch>.ext4
+#   <image>-<machine>-container-<arch>-vmlinuz
+#   <image>-<machine>-container-<arch>-initrd.img
+#
+# Errors if the image name is ambiguous (zero or multiple matches).
+# Sets EXT4_PATH, KERNEL_PATH, INITRD_PATH in the caller's scope.
+# ---------------------------------------------------------------------------
+_resolve_isar_images() {
+    local dir="$1" name="$2"
+
+    # Glob each artifact type — only exact ISAR suffixes to avoid .wic.gz etc.
+    local ext4_files kernel_files initrd_files
+    mapfile -t ext4_files   < <(ls "$dir/${name}"*container*.ext4    2>/dev/null | grep -v '\.wic\.' || true)
+    mapfile -t kernel_files < <(ls "$dir/${name}"*container*-vmlinuz  2>/dev/null || true)
+    mapfile -t initrd_files < <(ls "$dir/${name}"*container*-initrd.img 2>/dev/null || true)
+
+    # Validate: exactly one match required for each
+    local ok=1
+    if [[ ${#ext4_files[@]} -eq 0 ]]; then
+        echo "ERROR: No .ext4 found for image '${name}' in ${dir}" >&2
+        echo "       Available images:" >&2
+        ls "$dir"/*.ext4 2>/dev/null | grep -v '\.wic\.' | \
+            sed 's|-[^-]*-container.*||;s|.*/||' | sort -u | sed 's/^/         /' >&2
+        ok=0
+    elif [[ ${#ext4_files[@]} -gt 1 ]]; then
+        echo "ERROR: Multiple .ext4 files match '${name}' in ${dir}:" >&2
+        printf '         %s\n' "${ext4_files[@]}" >&2
+        echo "       Set LOCAL_IMAGE_NAME more specifically." >&2
+        ok=0
+    fi
+    if [[ ${#kernel_files[@]} -eq 0 ]]; then
+        echo "ERROR: No vmlinuz found for image '${name}' in ${dir}" >&2; ok=0
+    elif [[ ${#kernel_files[@]} -gt 1 ]]; then
+        echo "ERROR: Multiple vmlinuz files match '${name}' in ${dir}" >&2; ok=0
+    fi
+    if [[ ${#initrd_files[@]} -eq 0 ]]; then
+        echo "ERROR: No initrd.img found for image '${name}' in ${dir}" >&2; ok=0
+    elif [[ ${#initrd_files[@]} -gt 1 ]]; then
+        echo "ERROR: Multiple initrd.img files match '${name}' in ${dir}" >&2; ok=0
+    fi
+    [[ "$ok" -eq 1 ]] || return 1
+
+    EXT4_PATH="${ext4_files[0]}"
+    KERNEL_PATH="${kernel_files[0]}"
+    INITRD_PATH="${initrd_files[0]}"
+    echo "Resolved ISAR image '${name}' from ${dir}:"
+    echo "  ext4  : $EXT4_PATH"
+    echo "  kernel: $KERNEL_PATH"
+    echo "  initrd: $INITRD_PATH"
+}
+
+
+# Supports .gz, .xz, .zst.  Returns the decompressed path via stdout.
+# For plain files (no recognised extension) the original path is echoed back.
+# ---------------------------------------------------------------------------
+_decompress_artifact() {
+    local src="$1" dst_name="$2"   # dst_name = basename of the output file
+    local dst="$WORK_DIR/${dst_name}"
+    case "$src" in
+        *.gz)
+            echo "Decompressing ${src} -> ${dst} ..." >&2
+            gunzip -c "$src" > "$dst"
+            echo "$dst" ;;
+        *.xz)
+            echo "Decompressing ${src} -> ${dst} ..." >&2
+            xz -d -c "$src" > "$dst"
+            echo "$dst" ;;
+        *.zst)
+            echo "Decompressing ${src} -> ${dst} ..." >&2
+            zstd -d -c "$src" > "$dst"
+            echo "$dst" ;;
+        *)
+            echo "$src" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Helper: extract a SDK archive to a target directory.
+# Detects .tar.xz, .tar.gz, .tar.zst, plain .xz (single-file tarball).
+# ---------------------------------------------------------------------------
+_extract_sdk_archive() {
+    local archive="$1" dest="$2"
+    echo "Extracting SDK archive ${archive} -> ${dest} ..." >&2
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    case "$archive" in
+        *.tar.xz|*.tar.gz|*.tar.zst|*.tgz)
+            tar -xaf "$archive" -C "$dest" --strip-components=1 2>/dev/null || true ;;
+        *.xz)
+            # Single-file .xz (some RaTOS SDK releases are just a compressed tarball)
+            xz -d -c "$archive" | tar -x -C "$dest" --strip-components=1 2>/dev/null || true ;;
+        *.gz)
+            gunzip -c "$archive" | tar -x -C "$dest" --strip-components=1 2>/dev/null || true ;;
+        *)
+            echo "ERROR: unrecognised SDK archive format: ${archive}" >&2
+            return 1 ;;
+    esac
+    if [[ ! -f "$dest/usr/include/evl/evl.h" ]]; then
+        echo "ERROR: SDK extraction failed — evl/evl.h not found in ${dest}" >&2
+        return 1
+    fi
+    echo "SDK extracted to ${dest}" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Helper: ensure the SDK's gcc-sysroot-wrapper.sh points at the current
+# EVL_SDK_DIR. The wrapper ships with GCC_SYSROOT= empty (or pointing at the
+# ISAR build host). Call this after any SDK is located — whether freshly
+# downloaded, archive-extracted, or a pre-existing local directory.
+# ---------------------------------------------------------------------------
+_relocate_sdk() {
+    local sdk="$1"
+    local wrapper="${sdk}/usr/bin/gcc-sysroot-wrapper.sh"
+    [[ -f "$wrapper" ]] || return 0   # no wrapper — nothing to do
+    [[ -w "$wrapper" ]] || return 0   # not writable (e.g. root-owned sdkchroot) — skip;
+                                      # isar-sdk-toolchain.cmake uses .bin compilers directly
+
+    local current
+    current="$(grep '^GCC_SYSROOT=' "$wrapper" | head -1 | cut -d= -f2- | tr -d '"' || true)"
+    if [[ "$current" == "$sdk" ]]; then
+        return 0   # already relocated to this path
+    fi
+
+    echo "Relocating SDK gcc wrapper: GCC_SYSROOT=${sdk}"
+    if command -v patchelf &>/dev/null && [[ -x "${sdk}/relocate-sdk.sh" ]]; then
+        "${sdk}/relocate-sdk.sh" 2>/dev/null || true
+    fi
+    # Always patch the wrapper directly — relocate-sdk.sh may not update it.
+    sed -i "s|^GCC_SYSROOT=.*|GCC_SYSROOT=\"${sdk}\"|" "$wrapper"
+    echo "SDK wrapper relocated."
+}
+
+# ---------------------------------------------------------------------------
 # Cross-compile on host (--cross path, before QEMU boot)
 # ---------------------------------------------------------------------------
 if [[ -n "$DO_CROSS" ]]; then
@@ -211,12 +377,38 @@ if [[ -n "$DO_CROSS" ]]; then
     # CommRaT dependencies). We use the host compiler and add the SDK to
     # CMake search paths via cmake/isar-sdk-toolchain.cmake — no relocation,
     # no environment-setup sourcing needed.
+    #
+    # If EVL_SDK_DIR already contains a valid SDK (set via .commrat.env.local
+    # or --sdk-dir), the download/extraction step is skipped entirely.
     SDK_KEY_FILE="${CACHE_DIR}/.sdk_cache_key"
     _SDK_KEY=""
     [[ -n "$RATOS_RELEASE_TAG" ]] && _SDK_KEY="tag:${RATOS_RELEASE_TAG}"
 
     _SDK_STALE=0
-    if [[ ! -d "$EVL_SDK_DIR/usr" ]]; then
+    # If EVL_SDK_DIR is an archive file, auto-extract it to a sibling directory.
+    if [[ -f "$EVL_SDK_DIR" ]]; then
+        _SDK_ARCHIVE="$EVL_SDK_DIR"
+        # Derive extraction dir: strip all compression/tar extensions, append -extracted
+        _SDK_EXTRACT_DIR="${_SDK_ARCHIVE%.tar.*}"
+        _SDK_EXTRACT_DIR="${_SDK_EXTRACT_DIR%.xz}"
+        _SDK_EXTRACT_DIR="${_SDK_EXTRACT_DIR%.gz}"
+        _SDK_EXTRACT_DIR="${_SDK_EXTRACT_DIR%.zst}"
+        _SDK_EXTRACT_DIR="${_SDK_EXTRACT_DIR}-extracted"
+        if [[ -f "${_SDK_EXTRACT_DIR}/usr/include/evl/evl.h" ]]; then
+            echo "Using already-extracted SDK at ${_SDK_EXTRACT_DIR}"
+        else
+            echo "EVL_SDK_DIR points to archive — extracting to ${_SDK_EXTRACT_DIR} ..."
+            _extract_sdk_archive "$_SDK_ARCHIVE" "$_SDK_EXTRACT_DIR"
+        fi
+        EVL_SDK_DIR="$_SDK_EXTRACT_DIR"
+        export EVL_SDK_DIR
+    fi
+
+    if [[ -f "$EVL_SDK_DIR/usr/include/evl/evl.h" ]]; then
+        echo "Using local RaTOS SDK at ${EVL_SDK_DIR} (skipping download)"
+        _SDK_STALE=0
+        _relocate_sdk "$EVL_SDK_DIR"
+    elif [[ ! -d "$EVL_SDK_DIR/usr" ]]; then
         _SDK_STALE=1
         echo "RaTOS SDK not found at ${EVL_SDK_DIR} — will download and extract..."
     elif [[ -n "$_SDK_KEY" && \
@@ -276,6 +468,7 @@ if [[ -n "$DO_CROSS" ]]; then
         [[ -n "$_SDK_KEY" ]] && echo "$_SDK_KEY" > "$SDK_KEY_FILE"
         echo "SDK extracted and relocated."
     else
+        _relocate_sdk "$EVL_SDK_DIR"
         echo "Using RaTOS SDK at ${EVL_SDK_DIR} (${_SDK_KEY:-unversioned})"
     fi
 
@@ -334,6 +527,38 @@ _do_download() {
         gunzip "$gz"
     fi
 }
+
+if [[ -z "$EXT4_PATH" || -z "$KERNEL_PATH" || -z "$INITRD_PATH" ]]; then
+    # 1. ISAR directory (--images-dir / LOCAL_IMAGES_DIR + image name)
+    _ISAR_DIR="${LOCAL_IMAGES_DIR:-}"
+    _ISAR_NAME="${LOCAL_IMAGE_NAME:-}"
+    if [[ -n "$_ISAR_DIR" ]]; then
+        if [[ -z "$_ISAR_NAME" ]]; then
+            # Auto-detect: list unique image name prefixes in the directory
+            mapfile -t _available < <(
+                ls "$_ISAR_DIR"/*.ext4 2>/dev/null | grep -v '\.wic\.' | \
+                sed 's|-[^-]*-container.*||;s|.*/||' | sort -u || true)
+            if [[ ${#_available[@]} -eq 1 ]]; then
+                _ISAR_NAME="${_available[0]}"
+                echo "Auto-selected image: ${_ISAR_NAME}"
+            elif [[ ${#_available[@]} -eq 0 ]]; then
+                echo "ERROR: No *.ext4 images found in ${_ISAR_DIR}" >&2; exit 1
+            else
+                echo "ERROR: Multiple images in ${_ISAR_DIR} — set LOCAL_IMAGE_NAME (or --image-name):" >&2
+                printf '         %s\n' "${_available[@]}" >&2
+                exit 1
+            fi
+        fi
+        _resolve_isar_images "$_ISAR_DIR" "$_ISAR_NAME"
+    fi
+fi
+
+if [[ -z "$EXT4_PATH" || -z "$KERNEL_PATH" || -z "$INITRD_PATH" ]]; then
+    # 2. Explicit LOCAL_* env vars (single file paths)
+    [[ -z "$EXT4_PATH"    && -n "$LOCAL_EXT4"    ]] && EXT4_PATH="$(realpath "$LOCAL_EXT4")"
+    [[ -z "$KERNEL_PATH"  && -n "$LOCAL_KERNEL"  ]] && KERNEL_PATH="$(realpath "$LOCAL_KERNEL")"
+    [[ -z "$INITRD_PATH"  && -n "$LOCAL_INITRD"  ]] && INITRD_PATH="$(realpath "$LOCAL_INITRD")"
+fi
 
 if [[ -z "$EXT4_PATH" || -z "$KERNEL_PATH" || -z "$INITRD_PATH" ]]; then
     if [[ -z "$RATOS_RELEASE_REPO" ]]; then
@@ -416,6 +641,11 @@ echo "Using initrd     : $INITRD_PATH"
 # ---------------------------------------------------------------------------
 EXT4_COPY="$WORK_DIR/ratos.ext4"
 echo "Copying ext4 image to $EXT4_COPY ..."
+case "$EXT4_PATH" in
+    *.gz|*.xz|*.zst)
+        EXT4_PATH="$(_decompress_artifact "$EXT4_PATH" "ratos_decompressed.ext4")"
+        ;;
+esac
 cp "$EXT4_PATH" "$EXT4_COPY"
 # Grow the working copy by 256 MB so cross-compiled binaries fit.
 truncate -s "+256M" "$EXT4_COPY"
@@ -639,7 +869,11 @@ fi
 # Run specific binaries
 for cmd in "${RUN_CMDS[@]}"; do
     echo "Running on EVL guest: ${cmd}"
-    ssh ${SSH_OPTS} root@127.0.0.1 bash -lc "
+    # Use bash -c with multi-line heredoc to avoid SSH argument-joining bug
+    # where "bash -lc <single-line>" collapses the quoted string into bare words.
+    ssh ${SSH_OPTS} root@127.0.0.1 bash -c "
+        ulimit -H -t unlimited 2>/dev/null || true
+        ulimit -t unlimited 2>/dev/null || true
         set -euo pipefail
         ${cmd}
     "

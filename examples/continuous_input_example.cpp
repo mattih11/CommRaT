@@ -37,7 +37,7 @@ protected:
         static float temp = 20.0f;
         temp += 0.1f * (std::rand() % 10 - 5);  // Random walk
         
-        // std::cout << "[Producer] Published temperature: " << temp << "°C\n";
+        RTLOG_DEBUG(logger_) << "[SensorModule] temp=" << output.temperature_c;
         
         output = {
             .temperature_c = temp,
@@ -71,8 +71,7 @@ protected:
         }
         float filtered = sum / HISTORY_SIZE;
         
-        // std::cout << "[Consumer] Received: " << input.temperature_c << "°C "
-        //           << "→ Filtered: " << filtered << "°C\n";
+        RTLOG_DEBUG(logger_) << "[FilterModule] raw=" << input.temperature_c << " filtered=" << filtered;
         
         output = {
             .temperature_c = filtered,
@@ -81,11 +80,11 @@ protected:
     }
     
     void on_start() override {
-        std::cout << "[Consumer] Started - auto-subscribed to producer\n";
+        RTLOG_INFO(logger_) << "[FilterModule] started - auto-subscribed to producer";
     }
     
     void on_stop() override {
-        std::cout << "[Consumer] Stopped - auto-unsubscribed\n";
+        RTLOG_INFO(logger_) << "[FilterModule] stopped - auto-unsubscribed";
     }
 };
 

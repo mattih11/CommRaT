@@ -35,10 +35,11 @@ protected:
     void process(TemperatureData& output) override {
         float temp = base_temp_ + std::sin(counter_ * 0.1f) * 5.0f;
         counter_++;
-        
-        // std::cout << "[Producer] Temperature: " << temp << "°C\n";
-        
-        output ={
+
+        RTLOG_INFO(logger_) << "[Producer] Temperature: " << temp << "°C\n";
+
+        output = {
+            .temperature_celsius = temp
         };
     }
 
@@ -72,10 +73,11 @@ protected:
         }
         float filtered = sum / count_;
         
-        // std::cout << "[Consumer] Filtered: " << filtered << "°C (raw: "
-        //           << input.temperature_celsius << "°C)\n";
+        RTLOG_INFO(logger_) << "[Consumer] Filtered: " << filtered << "°C (raw: "
+                            << input.temperature_celsius << "°C)\n";
         
         output =  {
+            .temperature_celsius = filtered
         };
     }
 

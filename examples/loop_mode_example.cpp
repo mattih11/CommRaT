@@ -1,15 +1,21 @@
 /**
  * @file loop_mode_example.cpp
- * @brief Demonstrates LoopInput mode for maximum throughput processing
- * 
- * LoopInput runs as fast as possible without sleeping between iterations.
- * Use this mode for:
- * - Maximum throughput data processing
- * - CPU-bound computational tasks
- * - Counter/accumulator modules
- * - High-frequency signal generation
- * 
- * WARNING: LoopInput will consume 100% of one CPU core. Use wisely!
+ * @brief Demonstrates loop-driven mode for blocking-I/O style modules
+ *
+ * Loop-driven mode runs process() in a tight loop without any built-in sleep.
+ * The intended use case is modules whose process() call naturally blocks, e.g.:
+ *
+ *   - Device drivers: blocking read() / ioctl() on a character device
+ *   - Serial / CAN bus receivers: blocking receive call
+ *   - Simulation tick loops with their own synchronisation primitive
+ *
+ * CommRaT inserts a yield() between iterations so other threads (including the
+ * main thread that calls stop()) always get CPU time.  If process() itself
+ * blocks, the yield() is effectively free.
+ *
+ * WARNING: If process() returns immediately without blocking, this mode will
+ * consume 100% of one CPU core (modulo the yield).  Use a Period<> module
+ * instead for pure computational / timer-driven work.
  */
 
 #include <commrat/commrat.hpp>
@@ -56,6 +62,10 @@ public:
 
 protected:
     void process(CounterData& output) override {
+        // auto data = recv();  // If this were a blocking I/O module, we'd call recv() here.
+        Time::sleep(Microseconds(100));  // Simulate a blocking call (e.g., read() from a device)
+                                       // relax scheduling and allow other threads to run.
+
         output.value = value_++;
         
         // Calculate throughput every second using OOB-safe Time::now()
@@ -64,11 +74,7 @@ protected:
         Duration elapsed = Duration::nanoseconds(static_cast<int64_t>(now - last_report_time_));
         if (elapsed >= Seconds(1)) {
             output.iterations_per_second = iteration_count_;
-            // RT-safe: fprintf/fflush are not OOB-safe.
-            // TODO: replace with a realtime-safe logging mechanism (e.g. GDOS or RT cout).
-            // fprintf(stdout, "[FastCounter] Count: %12lu | Throughput: %10lu iterations/sec\n",
-            //         value_, iteration_count_);
-            // fflush(stdout);
+            RTLOG_INFO(logger_) << "[FastCounter] count=" << value_ << " throughput=" << output.iterations_per_second << " iter/s";
             iteration_count_ = 0;
             last_report_time_ = now;
         } else {
@@ -116,10 +122,7 @@ protected:
             sum_throughput_ += input.iterations_per_second;
             ++count_throughput_;
             
-            // RT-safe: fprintf/fflush not OOB-safe.
-            // fprintf(stdout, "[ThroughputMonitor] Received %lu messages | Current throughput: %lu iter/sec\n",
-            //         total_messages_, input.iterations_per_second);
-            // fflush(stdout);
+            RTLOG_INFO(logger_) << "[Monitor] msgs=" << total_messages_ << " throughput=" << input.iterations_per_second << " iter/s";
         }
         
         // Return pass-through data
@@ -127,15 +130,11 @@ protected:
     }
     
     void on_stop() override {
-        // RT-safe: fprintf/fflush not OOB-safe.
-        // fprintf(stdout, "\n[ThroughputMonitor] Final Statistics:\n");
-        // fprintf(stdout, "  Total messages received: %lu\n", total_messages_);
-        // if (count_throughput_ > 0) {
-        //     fprintf(stdout, "  Min throughput: %lu iter/sec\n", min_throughput_);
-        //     fprintf(stdout, "  Max throughput: %lu iter/sec\n", max_throughput_);
-        //     fprintf(stdout, "  Avg throughput: %lu iter/sec\n", sum_throughput_ / count_throughput_);
-        // }
-        // fflush(stdout);
+        RTLOG_INFO(logger_) << "[Monitor] final total=" << total_messages_ << " msgs";
+        if (count_throughput_ > 0) {
+            RTLOG_INFO(logger_) << "[Monitor] min=" << min_throughput_ << " max=" << max_throughput_
+                               << " avg=" << (sum_throughput_ / count_throughput_) << " iter/s";
+        }
     }
 
 private:

@@ -84,12 +84,14 @@ public:
         : WeatherApp::Module2<commrat::Output<TemperatureData>, commrat::Output<PressureData>, commrat::Period<100>>(config)
         , station_id_(station_id)
         , gen_(rd_())
-        , temp_dist_(18.0f, 28.0f)     // 18-28°C
-        , humidity_dist_(30.0f, 70.0f) // 30-70%
-        , pressure_dist_(980.0f, 1020.0f) // 980-1020 hPa
-        , altitude_dist_(0.0f, 500.0f) // 0-500m
-    {
-        std::cout << "[WeatherStation] Initialized station_id=" << station_id_ << "\n";
+        , temp_dist_(18.0f, 28.0f)
+        , humidity_dist_(30.0f, 70.0f)
+        , pressure_dist_(980.0f, 1020.0f)
+        , altitude_dist_(0.0f, 500.0f)
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[WeatherStation] station_id=" << station_id_ << " started";
     }
 
 protected:
@@ -116,9 +118,8 @@ protected:
             .altitude_m = altitude_dist_(gen_)
         };
         
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[WeatherStation] Generated: Temp=" << temp_out.temperature_c
-        //           << "°C, Pressure=" << pressure_out.pressure_hpa << " hPa\n";
+        RTLOG_DEBUG(logger_) << "[WeatherStation] temp=" << temp_out.temperature_c
+                             << " pressure=" << pressure_out.pressure_hpa;
     }
 
 private:
@@ -151,22 +152,17 @@ public:
     TemperatureMonitor(const commrat::ModuleConfig& config)
         : WeatherApp::Module2<commrat::Output<TemperatureData>, commrat::Input<TemperatureData>>(config)
         , count_(0)
-    {
-        std::cout << "[TempMonitor] Initialized\n";
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[TempMonitor] started";
     }
 
 protected:
     void process(const TemperatureData& input, TemperatureData& output) override {
         count_++;
-        
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[TempMonitor] #" << count_
-        //           << " Station " << input.station_id
-        //           << ": " << input.temperature_c << "°C"
-        //           << ", " << input.humidity_percent << "% humidity";
-        // if (input.temperature_c > 26.0f) { std::cout << " HIGH TEMP"; }
-        // if (input.temperature_c < 20.0f) { std::cout << " LOW TEMP"; }
-        // std::cout << "\n";
+        RTLOG_DEBUG(logger_) << "[TempMonitor] #" << count_
+                            << " temp=" << input.temperature_c;
         output = input;  // Pass-through
     }
 
@@ -194,22 +190,17 @@ public:
     PressureMonitor(const commrat::ModuleConfig& config)
         : WeatherApp::Module2<commrat::Output<PressureData>, commrat::Input<PressureData>>(config)
         , count_(0)
-    {
-        std::cout << "[PressureMonitor] Initialized\n";
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[PressureMonitor] started";
     }
 
 protected:
     void process(const PressureData& input, PressureData& output) override {
         count_++;
-        
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[PressureMonitor] #" << count_
-        //           << " Station " << input.station_id
-        //           << ": " << input.pressure_hpa << " hPa"
-        //           << ", alt=" << input.altitude_m << "m";
-        // if (input.pressure_hpa < 990.0f)  { std::cout << " LOW PRESSURE"; }
-        // if (input.pressure_hpa > 1010.0f) { std::cout << " HIGH PRESSURE"; }
-        // std::cout << "\n";
+        RTLOG_DEBUG(logger_) << "[PressureMonitor] #" << count_
+                            << " pressure=" << input.pressure_hpa;
         
         output = input;  // Pass-through
     }

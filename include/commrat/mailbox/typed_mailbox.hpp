@@ -150,15 +150,16 @@ public:
         static_assert(is_registered_type<PayloadT>,
                       "Message type not registered in the message registry.");
         
-        // Create TimsMessage wrapper (const → non-const copy for underlying Mailbox)
+        // Create TimsMessage wrapper
         TimsMessage<PayloadT> tims_msg{
             .header = {
                 .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,  // Will be set by serialization
-                .timestamp = 0, // Will be set by TiMS with current time
-                .seq_number = 0, // Will be set by TiMS
+                .msg_size = 0,  // Set by serialization in Mailbox::send
+                .timestamp = 0, // Caller should use the explicit-timestamp overload
+                                // if a non-zero timestamp is required
+                .seq_number = 0,
                 .dest = dest_mailbox,
-                .src = 0,       // Will be set by TiMS
+                .src = 0,       // Set by TiMS from mailbox_id at send time
                 .flags = 0
             },
             .payload = message
@@ -191,11 +192,11 @@ public:
         TimsMessage<PayloadT> tims_msg{
             .header = {
                 .msg_type = Registry::template get_message_id<PayloadT>(),
-                .msg_size = 0,  // Will be set by serialization
-                .timestamp = timestamp, // USER-PROVIDED timestamp
-                .seq_number = 0, // Will be set by TiMS
+                .msg_size = 0,  // Set by serialization in Mailbox::send
+                .timestamp = timestamp,
+                .seq_number = 0,
                 .dest = dest_mailbox,
-                .src = 0,       // Will be set by TiMS
+                .src = 0,       // Set by TiMS from mailbox_id at send time
                 .flags = 0
             },
             .payload = message
@@ -251,8 +252,10 @@ public:
         static_assert(std::is_same_v<ReplyPayload, ExpectedReply>,
                       "ReplyPayload must match RequestDef::ReplyMessageDef::Payload");
         
-        // Extract destination from request source (like RACK's getSrc())
-        return send(reply, request.header.src);
+        // Delegate to the underlying mailbox so the reply is stamped with
+        // Time::now() and src is filled from config_.mailbox_id, matching
+        // the behaviour of corerat::Mailbox::send_reply.
+        return mailbox_.send_reply(request, reply);
     }
     
     // ========================================================================

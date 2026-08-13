@@ -35,21 +35,34 @@ elseif(NOT DEFINED CACHE{_EVL_SDK})
         "or export EVL_SDK_DIR=/path/to/sdk before invoking cmake directly.")
 endif()
 
-# Use the SDK's own cross-compiler.  After relocation, the gcc-sysroot-wrapper.sh
-# script auto-injects --sysroot=<sdk> so that all system headers and libraries
-# are resolved from the SDK sysroot, not the host.
-set(CMAKE_C_COMPILER   "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-gcc" CACHE FILEPATH "C compiler"   FORCE)
-set(CMAKE_CXX_COMPILER "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-g++" CACHE FILEPATH "C++ compiler" FORCE)
+# Use the SDK's own cross-compiler.
+# The SDK's gcc-sysroot-wrapper.sh symlinks (x86_64-linux-gnu-g++ etc.) call
+# the real .bin compiler with --sysroot=<GCC_SYSROOT>.  When GCC_SYSROOT is
+# empty (un-relocated sdkchroot, e.g. a raw ISAR build output), the .bin
+# compilers exist alongside the wrappers.  We use the .bin binaries directly
+# and inject --sysroot via CMAKE_C_FLAGS / CMAKE_CXX_FLAGS so that compilation
+# is correct regardless of whether the wrapper has been relocated.
+if(EXISTS "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-g++-14.bin")
+    set(CMAKE_C_COMPILER   "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-gcc-14.bin" CACHE FILEPATH "C compiler"   FORCE)
+    set(CMAKE_CXX_COMPILER "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-g++-14.bin" CACHE FILEPATH "C++ compiler" FORCE)
+    # Inject --sysroot directly since we bypass the wrapper.
+    set(_EVL_SYSROOT_FLAG "--sysroot=${_EVL_SDK}")
+else()
+    # Relocated SDK (downloaded tarball): wrapper handles --sysroot injection.
+    set(CMAKE_C_COMPILER   "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-gcc" CACHE FILEPATH "C compiler"   FORCE)
+    set(CMAKE_CXX_COMPILER "${_EVL_SDK}/usr/bin/x86_64-linux-gnu-g++" CACHE FILEPATH "C++ compiler" FORCE)
+    set(_EVL_SYSROOT_FLAG "")
+endif()
 
-# The SDK's gcc wrapper (gcc-sysroot-wrapper.sh) already injects
-# --sysroot=<sdk> into every compiler invocation after relocation.
-# Do NOT set CMAKE_SYSROOT here: cmake probes the compiler with --sysroot,
-# discovers <sdk>/usr/include as an implicit include directory, and injects
-# -isystem <sdk>/usr/include into compile commands.  That extra -isystem
-# disrupts the C++ stdlib #include_next chain.
-#
-# Instead, set CMAKE_FIND_ROOT_PATH so cmake's find_package / find_library /
-# find_path search the SDK sysroot.  The compiler handles the actual sysroot.
+# Prepend --sysroot to the initial flags so it applies to every compilation
+# unit.  We use CACHE STRING FORCE to ensure it wins over any preset default.
+# Note: CMAKE_SYSROOT is intentionally NOT set here.  CMake would then probe
+# the compiler with --sysroot and inject -isystem <sdk>/usr/include as an
+# implicit include, disrupting the C++ stdlib #include_next chain.
+foreach(_lang C CXX)
+    set(CMAKE_${_lang}_FLAGS_INIT "${_EVL_SYSROOT_FLAG}" CACHE STRING "Initial ${_lang} flags" FORCE)
+endforeach()
+
 set(CMAKE_FIND_ROOT_PATH "${_EVL_SDK}")
 
 # Add the SDK usr/ prefix to cmake's find_package search paths so that

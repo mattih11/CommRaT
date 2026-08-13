@@ -92,9 +92,7 @@ protected:
         float raw_temp = 20.0f + std::sin(counter_++ * 0.1f) * 5.0f;
         float calibrated_temp = raw_temp + calibration_offset_;
         
-        // std::cout << "[Sensor] Mode=" << mode_
-        //           << " Temp=" << calibrated_temp << "°C"
-        //           << " (offset=" << calibration_offset_ << ")\n";
+        RTLOG_DEBUG(logger_) << "[Sensor] mode=" << mode_ << " temp=" << calibrated_temp << " offset=" << calibration_offset_;
         
         output.sensor_id = 1;
         output.temperature_c = calibrated_temp;
@@ -106,7 +104,7 @@ protected:
     
     template<size_t OutputIndex>
     void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
-        // std::cout << "[Sensor] Reset command (hard=" << cmd.hard_reset << ")\n";
+        RTLOG_INFO(logger_) << "[Sensor] Reset hard=" << static_cast<uint32_t>(cmd.hard_reset);
         
         reply.previous_mode = mode_;
         
@@ -124,7 +122,7 @@ protected:
     
     template<size_t OutputIndex>
     void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
-        // std::cout << "[Sensor] Calibrate (offset=" << cmd.offset << ")\n";
+        RTLOG_INFO(logger_) << "[Sensor] Calibrate offset=" << cmd.offset;
         
         reply.previous_offset = calibration_offset_;
         calibration_offset_ = cmd.offset;
@@ -133,7 +131,7 @@ protected:
     
     template<size_t OutputIndex>
     void on_command(const SetModeCmd& cmd, typename SetModeCmd::Reply& reply) {
-        // std::cout << "[Sensor] SetMode (mode=" << cmd.mode << ")\n";
+        RTLOG_INFO(logger_) << "[Sensor] SetMode mode=" << cmd.mode;
         
         reply.previous_mode = mode_;
         mode_ = cmd.mode;

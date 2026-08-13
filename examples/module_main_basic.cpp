@@ -45,9 +45,9 @@ protected:
             .humidity_percent = 45.0f + (counter % 20) * 1.0f
         };
         
-        std::cout << "Published: temp=" << output.temperature_c 
-                  << "°C, humidity=" << output.humidity_percent 
-                  << "% [" << counter << "]\n";
+        RTLOG_INFO(logger_) << "Published: temp=" << output.temperature_c
+                            << "C, humidity=" << output.humidity_percent
+                            << "% [" << counter << "]";
     }
 };
 

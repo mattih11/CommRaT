@@ -2,11 +2,61 @@
 
 This document tracks known issues, limitations, and areas requiring investigation in CommRaT.
 
-**Last Updated**: April 7, 2026
+**Last Updated**: August 10, 2026
 
 ---
 
 ## Active Issues
+
+### -1. EVL Tests Hang — CoreRaT `gettid()` Called from OOB Thread (CoreRaT Bug)
+
+**Status**: Active — root cause confirmed, fix required in CoreRaT  
+**Priority**: High  
+**Affects**: All EVL runtime tests that instantiate `Module2` with outputs
+
+**Root Cause**:
+`corerat::evl_detail::attach_this_thread()` in
+`corerat/ipc/evl/evl_backend.hpp` is called at the top of every
+`EvlMailbox::receive_impl()`. It calls `gettid()`, which is an in-band kernel
+syscall, from an already-attached EVL OOB thread:
+
+```cpp
+inline void attach_this_thread() noexcept {
+    const int r = evl_attach_thread(EVL_CLONE_PRIVATE,
+                                    "corerat.%d",
+                                    static_cast<int>(gettid()));  // BUG: in-band syscall from OOB
+}
+```
+
+This triggers `EVL_HMDIAG_SYSDEMOTE` (cause=2), which sends `SIGXCPU`
+(`SIGDEBUG = SIGXCPU` in libevl) to the offending thread. Because `evl_init()`
+installs a non-terminating `SIGXCPU` handler, the thread does not die but enters
+a broken state, causing `module.stop()` to hang indefinitely in `thread.join()`.
+
+**Call chain confirmed via GDB backtrace on EVL guest (RaTOS SDK v0.2.6)**:
+```
+Thread 2 (command thread, already OOB-attached via Thread::thread_entry):
+  gettid()                                       <- in-band syscall from OOB
+  corerat::EvlMailbox::receive_impl(...)
+  commrat::Module2::command_loop_impl<0>()
+  corerat::Thread::thread_entry(void*)
+```
+
+**Affected tests** (all hang or die with SIGXCPU on EVL guest):
+- `test_3input_fusion`, `test_timestamp_logic`, `test_address_collisions`
+- `example_continuous_input`, `example_loop_mode` (via `run_continuous_example.sh`)
+- Any test/example that starts a `Module2` with at least one output
+
+**Workaround**: None within CommRaT. Fix must be in CoreRaT.
+
+**Fix for CoreRaT** (options):
+1. Cache `gettid()` result before `evl_attach_self()` in `Thread::thread_entry()`,
+   so `attach_this_thread()` does not need to call it.
+2. Remove `attach_this_thread()` from the hot `receive_impl()` path — all
+   CommRaT threads are already attached; non-EVL callers should attach once
+   before the first OOB call, not on every receive.
+3. Use `evl_get_self() >= 0` as an already-attached check (OOB-safe) to skip
+   the `gettid()` branch entirely.
 
 ### 0. TiMS Router Resource Limit Under Stress
 

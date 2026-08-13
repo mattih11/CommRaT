@@ -100,12 +100,14 @@ public:
     IMUSensor(const commrat::ModuleConfig& config)
         : FusionApp::Module2<commrat::Output<IMUData>, commrat::Period<10>>(config)
         , gen_(rd_())
-        , accel_noise_(0.0f, 0.05f)  // 0.05 m/s² noise
-        , gyro_noise_(0.0f, 0.01f)   // 0.01 rad/s noise
-        , base_accel_x_(1.0f)        // Forward acceleration
+        , accel_noise_(0.0f, 0.05f)
+        , gyro_noise_(0.0f, 0.01f)
+        , base_accel_x_(1.0f)
         , phase_(0.0f)
-    {
-        std::cout << "[IMU] Initialized (100Hz)\n";
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[IMU] started (100 Hz)";
     }
 
 protected:
@@ -152,14 +154,16 @@ public:
     GPSSensor(const commrat::ModuleConfig& config, double start_lat, double start_lon)
         : FusionApp::Module2<commrat::Output<GPSData>, commrat::Period<100>>(config)
         , gen_(rd_())
-        , pos_noise_(0.0, 0.00001)   // ~1m GPS noise
-        , alt_noise_(0.0f, 2.0f)     // 2m altitude noise
+        , pos_noise_(0.0, 0.00001)
+        , alt_noise_(0.0f, 2.0f)
         , lat_(start_lat)
         , lon_(start_lon)
         , alt_(100.0f)
-        , speed_(15.0f)              // 15 m/s = 54 km/h
-    {
-        std::cout << "[GPS] Initialized (10Hz) at (" << lat_ << ", " << lon_ << ")\n";
+        , speed_(15.0f)
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[GPS] started (10 Hz) at lat=" << lat_ << " lon=" << lon_;
     }
 
 protected:
@@ -213,8 +217,10 @@ public:
         , imu_count_(0)
         , gps_stale_warnings_(0)
         , gps_invalid_warnings_(0)
-    {
-        std::cout << "[Fusion] Initialized\n";
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[Fusion] started";
     }
 
 protected:
@@ -245,25 +251,18 @@ protected:
         
         // Calculate GPS age
         uint64_t gps_age_ns = imu_ts - gps_ts;
-        double gps_age_ms = gps_age_ns / 1'000'000.0;
         
         // ====================================================================
         // Freshness Warning
         // ====================================================================
         
         if (!gps_fresh && gps_stale_warnings_ < 5) {
-            // RT-safe: std::cout not allowed in OOB thread
-            // std::cout << "[Fusion] GPS stale (age: " << gps_age_ms << " ms) "
-            //           << "- expected at " << (gps_valid ? "multi-rate" : "startup") << "\n";
+            RTLOG_WARN(logger_) << "[Fusion] GPS stale age=" << (gps_age_ns / 1000000u) << "ms";
             gps_stale_warnings_++;
-            // if (gps_stale_warnings_ == 5) {
-            //     std::cout << "[Fusion] (suppressing further stale messages...)\n";
-            // }
         }
         
         if (!gps_valid && gps_invalid_warnings_ < 3) {
-            // std::cerr << "[Fusion] WARNING: GPS data unavailable "
-            //           << "(tolerance may be too tight for GPS rate)\n";
+            RTLOG_WARN(logger_) << "[Fusion] GPS data unavailable";
             gps_invalid_warnings_++;
         }
         
@@ -293,13 +292,10 @@ protected:
         // Output Periodic Status
         // ====================================================================
         
-        if (imu_count_ % 100 == 0) {  // Every second (100 samples @ 100Hz)
-            // RT-safe: std::cout not allowed in OOB thread
-            // std::cout << "[Fusion] #" << imu_count_
-            //           << " | IMU: [" << imu.accel_x << ", " << imu.accel_y << ", " << imu.accel_z << "] m/s²"
-            //           << " | GPS: (" << gps_data.latitude << ", " << gps_data.longitude << ") "
-            //           << (gps_fresh ? "fresh" : "stale")
-            //           << " age=" << gps_age_ms << "ms\n";
+        if (imu_count_ % 100 == 0) {
+            RTLOG_INFO(logger_) << "[Fusion] #" << imu_count_
+                               << " GPS:" << (gps_fresh ? "fresh" : "stale")
+                               << " age=" << (gps_age_ns / 1000000u) << "ms";
         }
         
         // ====================================================================
@@ -342,22 +338,19 @@ public:
     FusionMonitor(const commrat::ModuleConfig& config)
         : FusionApp::Module2<commrat::Output<FusedData>, commrat::Input<FusedData>>(config)
         , count_(0)
-    {
-        std::cout << "[Monitor] Initialized\n";
+    {}
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[Monitor] started";
     }
 
 protected:
     void process(const FusedData& input, FusedData& output) override {
         count_++;
         
-        // Display every 10th sample (10Hz output for 100Hz input)
         if (count_ % 10 == 0) {
-            // RT-safe: std::cout not allowed in OOB thread
-            // std::cout << "[Monitor] Fused #" << input.imu_count
-            //           << " | Pos: (" << input.latitude << ", " << input.longitude
-            //           << "), alt=" << input.altitude << "m"
-            //           << " | Vel: [" << input.velocity_x << ", " << input.velocity_y << "] m/s"
-            //           << " | GPS: " << (input.gps_fresh ? "fresh" : "stale") << "\n";
+            RTLOG_INFO(logger_) << "[Monitor] #" << input.imu_count
+                               << " GPS:" << (input.gps_fresh ? "fresh" : "stale");
         }
         
         output = input;

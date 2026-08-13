@@ -33,6 +33,7 @@
 #include <iostream>
 #include <iomanip>
 #include <csignal>
+#include <unistd.h>     // write(), STDERR_FILENO — for unbuffered debug output
 #include <atomic>
 #include <cmath>
 
@@ -103,13 +104,16 @@ void signal_handler(int signal) {
 class IMUModule : public FusionApp::Module2<Output<IMUData>, Period<10>> {
 public:
     using FusionApp::Module2<Output<IMUData>, Period<10>>::Module2;
-    
+
 protected:
+    void on_start() override { RTLOG_INFO(logger_) << "[IMU] started"; }
+    void on_stop()  override { RTLOG_INFO(logger_) << "[IMU] stopped count=" << imu_count.load(); }
+
     void process(IMUData& output) override {
         uint32_t count = imu_count.fetch_add(1);
         
         // if (count < 3) {
-        //     std::cout << "[IMU] process() called, count=" << count << "\n";
+        //     RTLOG_DEBUG(logger_) << "[IMU] first few samples";
         // }
         
         // Simulate IMU readings
@@ -124,11 +128,8 @@ protected:
             .gyro_z = std::sin(t * 0.5f) * 0.05f
         };
         
-        // if (count % 10 == 0) {  // Every 0.5s
-        //     std::cout << "[IMU] Published #" << count
-        //               << " | accel=(" << std::fixed << std::setprecision(2)
-        //               << data.accel_x << "," << data.accel_y << "," << data.accel_z << ")\n";
-        // }
+        if (count % 100 == 0)
+            RTLOG_INFO(logger_) << "[IMU] #" << count;
         
         output = data;
     }
@@ -138,8 +139,11 @@ protected:
 class GPSModule : public FusionApp::Module2<Output<GPSData>, Period<100>> {
 public:
     using FusionApp::Module2<Output<GPSData>, Period<100>>::Module2;
-    
+
 protected:
+    void on_start() override { RTLOG_INFO(logger_) << "[GPS] started"; }
+    void on_stop()  override { RTLOG_INFO(logger_) << "[GPS] stopped count=" << gps_count.load(); }
+
     void process(GPSData& output) override {
         uint32_t count = gps_count.fetch_add(1);
         
@@ -147,16 +151,13 @@ protected:
         float t = count * 0.1f;  // 10Hz = 100ms period
         // Phase 6.10: No manual timestamp - Module auto-sets to Time::now()
         GPSData data{
-            .latitude = 47.3769 + std::sin(t * 0.1) * 0.0001,  // Freiburg
-            .longitude = 8.5417 + std::cos(t * 0.1) * 0.0001,
+            .latitude = 47.3769 + std::sin(t * 0.1) * 0.01,  // Freiburg
+            .longitude = 8.5417 + std::cos(t * 0.1) * 0.01,
             .altitude = 400.0f + std::sin(t * 0.5f) * 5.0f,
             .accuracy = 2.5f + std::sin(t) * 0.5f
         };
-        // if (count % 10 == 0) {
-        //     std::cout << "[GPS] Published #" << count
-        //             << " | lat=" << std::fixed << std::setprecision(6) << data.latitude
-        //             << ", lon=" << data.longitude << "\n";
-        // }
+        if (count % 10 == 0)
+            RTLOG_INFO(logger_) << "[GPS] #" << count << " lat=" << data.latitude;
         output = data;
     }
 };
@@ -165,8 +166,11 @@ protected:
 class LidarModule : public FusionApp::Module2<Output<LidarData>, Period<50>> {
 public:
     using FusionApp::Module2<Output<LidarData>, Period<50>>::Module2;
-    
+
 protected:
+    void on_start() override { RTLOG_INFO(logger_) << "[Lidar] started"; }
+    void on_stop()  override { RTLOG_INFO(logger_) << "[Lidar] stopped count=" << lidar_count.load(); }
+
     void process(LidarData& output) override {
         uint32_t count = lidar_count.fetch_add(1);
         
@@ -179,11 +183,8 @@ protected:
             .point_count = static_cast<uint32_t>(1000 + std::sin(t * 2.0f) * 200)
         };
         
-        // if (count % 10 == 0) {  // Every 0.5s
-        //     std::cout << "[Lidar] Published #" << count
-        //               << " | dist=" << std::fixed << std::setprecision(2)
-        //               << data.distance << "m, points=" << data.point_count << "\n";
-        // }
+        if (count % 20 == 0)
+            RTLOG_INFO(logger_) << "[Lidar] #" << count << " dist=" << data.distance;
         
         output = data;
     }
@@ -195,12 +196,15 @@ protected:
 
 class SensorFusionModule : public FusionApp::Module2<
     Output<FusedData>,
-    Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>  // IMU (first) is automatically primary
+    Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>
 > {
 public:
     using FusionApp::Module2<Output<FusedData>, Input<IMUData>, SyncedInput<GPSData>, SyncedInput<LidarData>>::Module2;
-    
+
 protected:
+    void on_start() override { RTLOG_INFO(logger_) << "[Fusion] started"; }
+    void on_stop()  override { RTLOG_INFO(logger_) << "[Fusion] stopped count=" << fusion_count.load(); }
+
     void process(const IMUData& imu, const Synced<GPSData>& gps, const Synced<LidarData>& lidar, FusedData& output) override {
         uint32_t count = fusion_count.fetch_add(1);
         
@@ -228,12 +232,8 @@ protected:
             .inputs_used = 0x7  // All 3 inputs used (0x1 | 0x2 | 0x4)
         };
         
-        // if (count % 10 == 0) {  // Every 0.5s
-        //     std::cout << "[FUSION] Output #" << count << " | quality=" << std::fixed << std::setprecision(2)
-        //               << fused.fusion_quality << " | pos=(" << fused.position_x << "," << fused.position_y
-        //               << "," << fused.position_z << ") | vel=(" << fused.velocity_x << "," << fused.velocity_y
-        //               << "," << fused.velocity_z << ")\n";
-        // }
+        if (count % 100 == 0)
+            RTLOG_INFO(logger_) << "[Fusion] #" << count << " quality=" << fused.fusion_quality;
         
         output = fused;
     }
@@ -315,9 +315,14 @@ int main() {
         
         // Start sensor modules FIRST so their WORK mailboxes exist
         std::cout << "Starting sensor modules...\n";
+#define STEP(msg) ::fprintf(stderr, msg "\n")
+        STEP("[dbg] starting IMU");
         imu_module.start();
+        STEP("[dbg] IMU started");
         gps_module.start();
+        STEP("[dbg] GPS started");
         lidar_module.start();
+        STEP("[dbg] Lidar started");
         
         // Wait for sensor WORK mailboxes to be created and work_loops to start
         std::cout << "Waiting for sensors to initialize...\n";

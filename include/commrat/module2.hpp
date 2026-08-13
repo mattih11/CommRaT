@@ -40,6 +40,7 @@
 #include <corerat/platform/timestamp.hpp>
 #include <corerat/platform/duration.hpp>
 #include <corerat/platform/platform.hpp>
+#include <corerat/logging/logging.hpp>
 #include <tuple>
 #include <type_traits>
 #include <iostream>
@@ -174,6 +175,7 @@ public:
      */
     explicit Module2(const ModuleConfig& config)
         : config_(config)
+        , logger_(compute_work_addr(config))
     {
         // Print platform info once per process
         [[maybe_unused]] static bool platform_printed = []() {
@@ -187,6 +189,9 @@ public:
 #endif
             return true;
         }();
+        // Wire up the terminal sink (done once; add_sink stores a pointer)
+        logger_.add_sink(&terminal_sink_);
+
         // Create WORK mailbox for subscription protocol
         create_work_mailbox();
         
@@ -213,6 +218,10 @@ protected:
 
     // Module identification
     ModuleConfig config_;
+
+    // Logging — TerminalSink declared before RtLogger so it outlives the drain thread.
+    corerat::TerminalSink terminal_sink_;
+    corerat::RtLogger<>   logger_;
 
     /**
      * @brief Get input timestamp by index (convenience method)
@@ -275,27 +284,48 @@ public:
      * Note: Mailboxes created in constructor, activated here
      */
     void start() {
+#define _MSTEP(msg) do { ::fprintf(stderr, "[start:%s] %s\n", config_.name.c_str(), msg); } while(0)
+        _MSTEP("drain");
+        // Start the in-band log drain thread before any RT thread is launched.
+        logger_.start_drain();
+
+        _MSTEP("work_mailbox");
         // Start WORK mailbox (enables subscription protocol)
         start_work_mailbox();
         
+        _MSTEP("outputs");
         // Start all output mailboxes (CMD + PUBLISH per output)
         this->start_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
         
+        _MSTEP("inputs");
         // Start all input mailboxes (DATA for ContinuousInput only)
         this->start_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
         
+        _MSTEP("subscribe");
         // Subscribe all inputs to their producers (delegates to IOService)
         this->subscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
         
-        // Start command thread for each output (handles GetData, Subscribe, user commands)
-        for (size_t i = 0; i < IO::Meta::num_outputs; ++i) {
-            command_threads_[i] = Thread([this, i]() { command_loop(i); });
-        }
+        _MSTEP("cmd_threads");
+        // Start command threads after all mailboxes are ready.
+        // Use compile-time index expansion so we can form the EVL thread name
+        // from the per-output CMD mailbox address (requires template get_output<N>()).
+        start_command_threads(std::make_index_sequence<IO::Meta::num_outputs>{});
         
+        _MSTEP("data_thread");
         // Start data thread (runs process() based on execution mode)
-        data_thread_ = Thread([this]() { data_loop(); });
+        {
+            char data_tname[64];
+            std::snprintf(data_tname, sizeof(data_tname), "%s-data/%08X",
+                          config_.name.c_str(),
+                          compute_work_addr(config_));
+            data_thread_.start(ThreadConfig{.name = data_tname},
+                               [this]() { data_loop(); });
+        }
 
+        _MSTEP("on_start");
         on_start();  // Call user-defined startup logic
+        _MSTEP("done");
+#undef _MSTEP
     }
     
     /**
@@ -330,6 +360,9 @@ public:
                 thread.join();
             }
         }
+
+        // Flush all buffered log entries now that all RT threads have exited.
+        logger_.stop_drain();
     }
 
 private:
@@ -344,23 +377,20 @@ private:
      * Receives: SubscribeReply, UnsubscribeReply
      * Does NOT start mailbox - call start_work_mailbox() separately.
      */
-    void create_work_mailbox() {
-        // Get module's system_id and instance_id
-        // For SimpleOutputConfig: config_.system_id() (no index)
-        // For MultiOutputConfig: config_.system_id(0) (first output)
-        // For NoOutputConfig: config_.system_id() (module-level)
+    /// Compute the WORK mailbox address for this module instance.
+    ///
+    /// Called both in the constructor initializer list (to seed the logger source_id)
+    /// and inside create_work_mailbox().  Must be a static method so it can be used
+    /// before the object is fully constructed.
+    static uint32_t compute_work_addr(const ModuleConfig& config) {
         uint8_t sys_id, inst_id;
-        if (config_.has_multi_output_config()) {
-            sys_id = config_.system_id(0);
-            inst_id = config_.instance_id(0);
+        if (config.has_multi_output_config()) {
+            sys_id = config.system_id(0);
+            inst_id = config.instance_id(0);
         } else {
-            sys_id = config_.system_id();
-            inst_id = config_.instance_id();
+            sys_id = config.system_id();
+            inst_id = config.instance_id();
         }
-        
-        // Calculate WORK mailbox address using primary output type_id
-        // This ensures modules with different output types at the same [sys][inst]
-        // get unique WORK mailbox addresses (matching their CMD/PUBLISH mailboxes)
         // Note: std::conditional_t evaluates both branches eagerly, so we guard
         // std::tuple_element_t with a non-empty fallback tuple to avoid a hard
         // error when OutputTypes is empty (input-only modules).
@@ -374,9 +404,13 @@ private:
             std::tuple_element_t<0, SafeOutputTypes>,
             void
         >;
-        uint32_t work_addr = get_mailbox_address<PrimaryOutputType, std::tuple<>, Registry>(
+        return get_mailbox_address<PrimaryOutputType, std::tuple<>, Registry>(
             sys_id, inst_id, WORK_MBX_BASE
         );
+    }
+
+    void create_work_mailbox() {
+        uint32_t work_addr = compute_work_addr(config_);
         
         // Create WorkMailbox (allocation only, no start)
         MailboxConfig work_config{
@@ -511,7 +545,10 @@ private:
             // Skip process() if primary input had no new data (poll timeout)
             if constexpr (IO::Meta::is_input_driven) {
                 bool got_data = this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
-                if (!got_data) continue;
+                if (!got_data) {
+                    RTLOG_DEBUG(logger_) << "[data_loop] input poll timeout, skipping";
+                    continue;
+                }
             }
             
             // Step 2: Call user's process() with unpacked inputs and outputs
@@ -520,15 +557,26 @@ private:
             // Step 3: Publish outputs (delegates to IOService)
             publish_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
             
-            // Step 4: Sleep if timer-driven (period - processing_time)
+            // Step 4: Sleep if timer-driven (period - processing_time);
+            // yield if loop-driven so other threads (including stop() caller) get CPU.
             if constexpr (IO::Meta::is_timer_driven) {
                 Timestamp now = Time::now();
                 Duration elapsed = Duration::nanoseconds(static_cast<int64_t>(now - loop_start));
                 auto period = IO::Meta::period;
                 if (elapsed < period) {
                     Time::sleep(period - elapsed);
+                } else {
+                    RTLOG_WARN(logger_) << "[data_loop] period overrun: elapsed="
+                                       << elapsed.count_ns() / 1'000'000
+                                       << "ms period=" << period.count_ns() / 1'000'000 << "ms";
                 }
-                // If processing took longer than period, skip sleep and continue immediately
+            } else if constexpr (IO::Meta::is_loop_driven) {
+                // Loop-driven: no sleep, but yield so other threads can run.
+                // This allows stop() to set should_stop_ and the main thread
+                // to remain responsive. The user's process() may itself block
+                // (e.g. a blocking read() call), in which case this yield is
+                // effectively free.
+                Time::yield();
             }
         }
     }
@@ -561,6 +609,29 @@ private:
     template<size_t... OutputIndices>
     void publish_outputs(std::index_sequence<OutputIndices...>) {
         this->IOService::publish_outputs(std::index_sequence<OutputIndices...>{});
+    }
+
+    /**
+     * @brief Start command threads with per-output names (compile-time index expansion)
+     *
+     * Uses template get_output<N>() to retrieve the CMD mailbox address for each
+     * output at compile time, which is then embedded in the EVL thread name.
+     * Name format: "<module>-cmd<N>/<cmd_addr_hex>"
+     */
+    template<size_t... OutputIndices>
+    void start_command_threads(std::index_sequence<OutputIndices...>) {
+        (start_command_thread<OutputIndices>(), ...);
+    }
+
+    template<size_t OutputIndex>
+    void start_command_thread() {
+        char tname[64];
+        std::snprintf(tname, sizeof(tname), "%s-cmd%zu/%08X",
+                      config_.name.c_str(),
+                      OutputIndex,
+                      this->template get_output<OutputIndex>().get_cmd_address());
+        command_threads_[OutputIndex].start(ThreadConfig{.name = tname},
+                                            [this]() { command_loop(OutputIndex); });
     }
 };
 
