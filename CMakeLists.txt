@@ -27,15 +27,20 @@ target_include_directories(commrat INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# Link the appropriate CoreRaT IPC backend
-if(TARGET CoreRaT::corerat_tims)
-    # STD platform: CoreRaT was built with the self-contained TCP/TiMS backend
+# Link the appropriate CoreRaT IPC backend.
+# CoreRaT exposes one of three targets depending on its CORERAT_IPC setting:
+#   CoreRaT::corerat_evl  — EVL OOB ring-buffer backend (CORERAT_IPC=EVL)
+#   CoreRaT::corerat_tims — TiMS TCP backend           (CORERAT_IPC=TIMS, default)
+#   CoreRaT::corerat      — header-only fallback
+if(TARGET CoreRaT::corerat_evl)
+    target_link_libraries(commrat INTERFACE CoreRaT::corerat_evl)
+    message(STATUS "CommRaT: using CoreRaT EVL backend (OOB-safe ring buffer)")
+elseif(TARGET CoreRaT::corerat_tims)
     target_link_libraries(commrat INTERFACE CoreRaT::corerat_tims)
     message(STATUS "CommRaT: using CoreRaT TiMS backend (STD platform)")
 else()
-    # EVL platform: CoreRaT was built with the EVL-native IPC backend (header-only)
     target_link_libraries(commrat INTERFACE CoreRaT::corerat)
-    message(STATUS "CommRaT: using CoreRaT EVL backend")
+    message(STATUS "CommRaT: using CoreRaT header-only backend")
 endif()
 
 if(COMMRAT_BUILD_EXAMPLES)

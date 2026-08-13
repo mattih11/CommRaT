@@ -14,6 +14,7 @@
 #include <cassert>
 #include <thread>
 #include <vector>
+#include <chrono>
 
 // Test message type with timestamp
 struct TestMessage {
@@ -210,10 +211,10 @@ int main() {
         // Producer thread
         std::thread producer([&]() {
             for (int i = 0; i < 1000; ++i) {
-                buffer.push(TestMessage{.timestamp = static_cast<uint64_t>(1000 + i), 
-                                        .value = i, 
+                buffer.push(TestMessage{.timestamp = static_cast<uint64_t>(1000 + i),
+                                        .value = i,
                                         .data = static_cast<float>(i)});
-                Time::sleep(Microseconds(10));
+                std::this_thread::sleep_for(std::chrono::microseconds(10));
             }
             done = true;
         });
@@ -228,7 +229,7 @@ int main() {
                     if (result) {
                         successful_reads++;
                     }
-                    Time::sleep(Microseconds(50));
+                    std::this_thread::sleep_for(std::chrono::microseconds(50));
                 }
             });
         }

@@ -83,15 +83,19 @@ public:
     explicit CounterModule(const commrat::ModuleConfig& config)
         : Module2(config)
         , counter_(0)
-    {
-        std::cout << "[Counter] Starting counter at " << counter_ << "\n";
-    }
+    {}
 
     /**
      * Destructor - called on shutdown
      */
-    ~CounterModule() override {
-        std::cout << "[Counter] Stopped at count=" << counter_ << "\n";
+    ~CounterModule() override = default;
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[Counter] starting at count=" << counter_;
+    }
+
+    void on_stop() override {
+        RTLOG_INFO(logger_) << "[Counter] stopped at count=" << counter_;
     }
 
 protected:
@@ -112,8 +116,9 @@ protected:
             .count = counter_++                  // Increment counter
         };
         
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[Counter] Generated: count=" << msg.count << "\n";
+        // RT-safe: std::cout not allowed in OOB thread.
+        // Use RTLOG_* — messages drain on the in-band drain thread.
+        RTLOG_DEBUG(logger_) << "[Counter] count=" << output.count;
         
         // Return value is automatically published to all subscribers
         output = msg;
@@ -148,15 +153,19 @@ public:
     explicit DisplayModule(const commrat::ModuleConfig& config)
         : Module2(config)
         , message_count_(0)
-    {
-        std::cout << "[Display] Ready to receive counter values\n";
-    }
+    {}
 
     /**
      * Destructor - called on shutdown
      */
-    ~DisplayModule() override {
-        std::cout << "[Display] Received " << message_count_ << " messages total\n";
+    ~DisplayModule() override = default;
+
+    void on_start() override {
+        RTLOG_INFO(logger_) << "[Display] ready to receive counter values";
+    }
+
+    void on_stop() override {
+        RTLOG_INFO(logger_) << "[Display] received " << message_count_ << " messages total";
     }
 
 protected:
@@ -174,14 +183,7 @@ protected:
     void process(const CounterMessage& msg, CounterMessage& output) override {
         message_count_++;
         
-        // RT-safe: std::cout not allowed in OOB thread
-        // // Display the received counter value
-        // std::cout << "[Display] Received: count=" << msg.count << "\n";
-        // // Could add logic here:
-        // // - Log to file
-        // // - Check thresholds
-        // // - Accumulate statistics
-        // // - etc.
+        RTLOG_INFO(logger_) << "[Display] count=" << msg.count;
         
         output = msg;  // Pass through (not published since no subscribers)
     }

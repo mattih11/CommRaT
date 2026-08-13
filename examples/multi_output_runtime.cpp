@@ -78,10 +78,9 @@ protected:
 
         reading_count_++;
 
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[Producer] Generated reading #" << reading_count_
-        //           << " - Temp: " << temp.temperature_c << "°C"
-        //           << ", Pressure: " << pressure.pressure_pa << " Pa\n";
+        RTLOG_DEBUG(logger_) << "[Producer] #" << reading_count_
+                             << " temp=" << temp.temperature_c
+                             << " pressure=" << pressure.pressure_pa;
     }
 
 private:
@@ -104,10 +103,7 @@ public:
 protected:
     void process(const TemperatureData& input, TemperatureData& output) override {
         received_count_++;
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[TempReceiver] Received temp #" << received_count_
-        //           << ": " << input.temperature_c << "°C"
-        //           << " (sensor " << input.sensor_id << ")\n";
+        RTLOG_DEBUG(logger_) << "[TempReceiver] #" << received_count_ << " temp=" << input.temperature_c;
         
         // Just pass through
         output = input;
@@ -133,10 +129,7 @@ public:
 protected:
     void process(const PressureData& input, PressureData& output) override {
         received_count_++;
-        // RT-safe: std::cout not allowed in OOB thread
-        // std::cout << "[PressureReceiver] Received pressure #" << received_count_
-        //           << ": " << input.pressure_pa << " Pa"
-        //           << " (sensor " << input.sensor_id << ")\n";
+        RTLOG_DEBUG(logger_) << "[PressureReceiver] #" << received_count_ << " pressure=" << input.pressure_pa;
         
         // Just pass through
         output = input;

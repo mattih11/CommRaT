@@ -68,9 +68,9 @@ protected:
             
             output.gps_valid = true;
             
-            std::cout << "Fused (GPS valid): lat=" << output.latitude 
-                      << ", lon=" << output.longitude 
-                      << ", vel=(" << output.velocity_x << "," << output.velocity_y << ")\n";
+            RTLOG_INFO(logger_) << "Fused (GPS valid): lat=" << output.latitude
+                                << " vel_x=" << output.velocity_x
+                                << " vel_y=" << output.velocity_y;
         } else {
             // GPS unavailable - dead reckoning from IMU only
             output.latitude = last_latitude_;
@@ -84,7 +84,7 @@ protected:
             
             output.gps_valid = false;
             
-            std::cout << "Fused (GPS invalid): IMU-only dead reckoning\n";
+            RTLOG_INFO(logger_) << "Fused (GPS invalid): IMU-only dead reckoning";
         }
         
         // Remember last valid GPS

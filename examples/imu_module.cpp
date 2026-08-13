@@ -34,8 +34,7 @@ protected:
             .gyro_z  = std::sin(t * 0.5f) * 0.05f
         };
         if (counter_ % 100 == 0)
-            (void)0;  // RT-safe: std::cout not allowed in OOB thread
-            // std::cout << "[IMU] sample " << counter_ << "\n";
+            RTLOG_INFO(logger_) << "[IMU] sample=" << counter_;
     }
 
 private:
