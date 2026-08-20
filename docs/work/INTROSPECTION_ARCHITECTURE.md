@@ -1,8 +1,8 @@
 # CommRaT Introspection Architecture
 
-**Status**: Partially implemented — Layer 1 and Layer 2 (partial) done; Params and CMD message extraction pending  
+**Status**: CommRaT side fully implemented — all three layers are in place. Remaining work is in RaTGUI (BridgeFactory) and the standalone editor tool.  
 **Created**: 2026-08-20  
-**Updated**: 2026-08-20 — added file organisation plan, RaTGUI compatibility analysis
+**Updated**: 2026-08-20 — all CommRaT items complete and committed on `feature-meta-introspection`
 
 ---
 
@@ -76,49 +76,29 @@ A self-describing system where:
 
 **Technology**: `ModuleType::IOBuilder::Meta` (public type alias on `Module2`), `rfl::type_name_t<T>().str()`, `rfl::json::write(ModuleDescriptor{})`.
 
-**Status**: Implemented. Two fields are missing — see below.
+**Status**: Fully implemented.
 
-**Missing: CMD messages**
-
-`DataWithCommands<Payload, Cmd1, Cmd2>` associates command types with an output. `ExtractUserCommands_t<OutputType>` already exists in `command_extraction.hpp`. The inspect step can extract them:
-
-```json
-"cmd_messages": [
-  {"output_index": 0, "types": ["CalibrateCmd", "SetRateCmd"]}
-]
-```
-
-This lets the GUI render a command panel per output and lets validators know what command types can be sent to which module output.
-
-**Missing: Parameter defaults**
-
-Module-specific parameters have no standard place yet. The proposed convention: a public `struct Params` on the module class (rfl-reflectable aggregate, no base-class changes needed). The inspect step detects it via a `requires` clause and serializes `Params{}`:
-
-```json
-"params_defaults": {
-  "device":        "/dev/i2c-1",
-  "scale_factor":  1.0,
-  "filter_window": 5
-}
-```
-
-If `ModuleType::Params` does not exist, `"params_defaults"` is absent from the descriptor. The GUI uses this to render a per-module config form with correct field names, types, and default values — zero manual schema definition.
-
-**Full target descriptor**:
+**Full descriptor format** (all fields, as produced by `--commrat-inspect` POST_BUILD):
 
 ```json
 {
-  "module_class":      "FusionModule",
-  "binary":            "/path/to/binary",
-  "outputs":           ["imu_gps_example::FusedPose"],
-  "inputs":            ["imu_gps_example::IMUData"],
-  "synced_inputs":     ["imu_gps_example::GPSData"],
-  "cmd_messages":      [{"output_index": 0, "types": ["ResetCmd"]}],
-  "execution_mode":    "input",
-  "default_period_ms": null,
-  "params_defaults":   {"alpha": 0.8, "max_age_ms": 200}
+  "module_class":       "FusionModule",
+  "binary":             "/abs/path/to/binary",
+  "outputs":            ["imu_gps_example::FusedPose"],
+  "inputs":             ["imu_gps_example::IMUData"],
+  "synced_inputs":      ["imu_gps_example::GPSData"],
+  "execution_mode":     "input",
+  "default_period_ms":  null,
+  "cmd_messages":       [{"output_index": 0, "types": ["ResetCmd"]}],
+  "params_defaults":    {"alpha": 0.8, "max_age_ms": 200}
 }
 ```
+
+`cmd_messages` is absent when the output type has no associated commands.  
+`params_defaults` is absent when the module class has no `struct Params`.  
+Both use `std::optional` in `ModuleDescriptor` so old placeholder descriptors (cmake generate-time, before binary is built) that only carry `module_class` and `binary` continue to load cleanly.
+
+**Params convention**: module authors add a public `struct Params { ... }` to their class (rfl-reflectable aggregate). `write_module_inspect` detects it via `requires { typename ModuleType::Params; }` and serializes `Params{}` as the defaults. No base-class changes needed.
 
 ---
 
@@ -130,7 +110,9 @@ If `ModuleType::Params` does not exist, `"params_defaults"` is absent from the d
 
 **Validated against**: Layer 1 (type names) + Layer 2 (expected I/O types and params schema).
 
-**Current content** (`AppDescription` / `ModuleDescription`):
+**Status**: Fully implemented.
+
+**Current format** (`AppDescription` / `ModuleDescription`):
 
 ```json
 {
@@ -142,35 +124,24 @@ If `ModuleType::Params` does not exist, `"params_defaults"` is absent from the d
       "module_class": "IMUModule",
       "outputs": [{"system_id": 10, "instance_id": 1}],
       "inputs":  [],
-      "period_ms": 10
+      "period_ms": 10,
+      "params": {}
     },
     {
       "name": "fusion",
       "module_class": "FusionModule",
       "outputs": [{"system_id": 30, "instance_id": 1}],
-      "inputs":  [{"source_system_id": 10, "source_instance_id": 1}],
-      "synced_inputs": [{"source_system_id": 20, "source_instance_id": 1}]
+      "inputs":        [{"source_system_id": 10, "source_instance_id": 1}],
+      "synced_inputs": [{"source_system_id": 20, "source_instance_id": 1}],
+      "params": {"alpha": 0.6}
     }
   ]
 }
 ```
 
-**Missing: `synced_inputs` separation**
+`synced_inputs` is optional (absent = no synced inputs). `params` is optional (absent = module uses its `Params` defaults). The `synced: bool` flag in the flat `inputs[]` array is still supported for backward compatibility but the separate `synced_inputs[]` array is preferred.
 
-`ModuleDescription.inputs` currently uses a flat array with a `synced: bool` flag. The descriptor and the launch config should align: separate `inputs[]` (continuous) and `synced_inputs[]` arrays, with positional matching to the descriptor's lists.
-
-**Missing: `params` field**
-
-```json
-{
-  "name": "fusion",
-  "module_class": "FusionModule",
-  ...
-  "params": {"alpha": 0.6, "max_age_ms": 500}
-}
-```
-
-The launcher passes this blob to the module binary via the temp config JSON. The module deserializes it as `ModuleType::Params`. The launcher does not need to know the type — it passes through the raw rfl JSON object.
+The launcher (`ProcessLauncher::to_config`) handles both formats. `params` is forwarded as an opaque `rfl::Generic` blob into `ModuleConfig`, where the module binary deserializes it as `ModuleType::Params` during startup.
 
 ---
 
@@ -213,58 +184,28 @@ SeRTial's role is specifically in Layer 1: `sertial::StructLayout<T>` provides b
 
 | Artifact | File |
 |---|---|
-| Layer 1 schema struct | `include/commrat/introspection/commrat_schema_output.hpp` |
-| Layer 1 export logic | `include/commrat/introspection/introspection_helper.hpp` |
+| Layer 1 schema struct | `include/commrat/meta/schema_output.hpp` |
+| Layer 1 export logic | `include/commrat/meta/introspection_helper.hpp` |
 | Layer 1 schema-gen driver | `tools/commrat-inspect/schema_gen_driver.cpp` |
 | Layer 1 CMake macro | `cmake/CommRaTSchemaGen.cmake` |
-| Layer 2 descriptor struct | `include/commrat/launcher/module_descriptor.hpp` |
-| Layer 2 inspect logic | `include/commrat/module/inspect.hpp` |
+| Layer 2 descriptor struct | `include/commrat/meta/descriptor.hpp` |
+| Layer 2 inspect logic | `include/commrat/meta/inspect.hpp` |
 | Layer 2 CLI intercept | `include/commrat/module_main.hpp` (`--commrat-inspect`) |
 | Layer 2 CMake macro | `cmake/CommRaTMacros.cmake` (`commrat_module()` POST_BUILD) |
 | Layer 3 description structs | `include/commrat/launcher/module_description.hpp` |
 | Layer 3 process launcher | `include/commrat/launcher/process_launcher.hpp` |
 | Layer 3 in-process launcher | `include/commrat/launcher/launcher.hpp` |
+| Message schema convenience | `include/commrat/meta/message_schema.hpp` |
 
 ---
 
-## Implementation gaps (priority order)
+## Remaining work
 
-### 1. Separate `synced_inputs` in `ModuleDescription` (trivial)
+### CommRaT: one item pending
 
-Add `std::vector<InputDescription> synced_inputs` field alongside the existing `inputs` field. Deprecate the `synced: bool` flag on `InputDescription`. This aligns the launch config shape with the descriptor shape, enabling positional matching for validation.
+**Auto-attach Layer 1 schema generation** — `commrat_generate_schema()` requires the developer to supply `APP_HEADER` and `APP_TYPE` separately. The natural owner is a `commrat_app()` macro on the launcher binary. Until then the schema is generated manually. Low priority; does not block RaTGUI work.
 
-### 2. `params` passthrough in `ModuleDescription` (trivial)
-
-Add `std::optional<rfl::Generic> params` to `ModuleDescription`. The launcher writes this blob into the temp `ModuleConfig` JSON it passes to each module process.
-
-### 3. `Params` extraction in `write_module_inspect` (small)
-
-```cpp
-// In inspect.hpp, inside write_module_inspect<ModuleType>():
-std::optional<std::string> params_defaults;
-if constexpr (requires { typename ModuleType::Params; }) {
-    params_defaults = rfl::json::write(typename ModuleType::Params{});
-}
-```
-
-No base-class changes. Module authors opt in by declaring `struct Params { ... };` publicly on their module class.
-
-### 4. CMD message extraction in `write_module_inspect` (small)
-
-Use `ExtractUserCommands_t<OutputType>` (already in `command_extraction.hpp`) in the same `split_inputs_impl` pattern already used for I/O type names. Iterate over `Meta::OutputTypes`, extract command type names per output.
-
-### 5. Launcher routing validation (medium)
-
-After loading descriptors and `AppDescription`, cross-reference input source addresses to output type names. Run before any `fork()`. Emit a clear diagnostic:
-
-```
-ERROR: Routing mismatch — fusion.inputs[0] expects 'imu_gps_example::IMUData'
-       but source module 'gps' (10:1) outputs 'imu_gps_example::GPSData'
-```
-
-### 6. Auto-attach Layer 1 schema generation (medium)
-
-`commrat_generate_schema()` currently requires the developer to supply `APP_HEADER` and `APP_TYPE` separately. The natural owner is a `commrat_app()` macro for the launcher binary — the launcher already knows the full `CommRaT<>` type. Until then, the schema must be generated manually with `commrat_generate_schema()`.
+### RaTGUI: BridgeFactory (see RaTGUI section below)
 
 ---
 
@@ -283,43 +224,14 @@ The only thing the user writes is `app.json` with system/instance IDs and param 
 
 ---
 
-## File organisation — proposed `meta/` separation
+## File organisation — `meta/` separation
 
-### The problem with the current layout
-
-Introspection and descriptor code is scattered across three directories with no clear rule about what goes where:
-
-```
-include/commrat/introspection/   ← Layer 1 schema structs
-include/commrat/module/          ← Layer 2 inspect.hpp sits alongside RT code
-include/commrat/launcher/        ← Layer 2 descriptor struct + Layer 3 runtime launcher
-```
-
-There is no hard boundary preventing hot-path RT module code from accidentally pulling in JSON serialization headers.
-
-### The separation principle
-
-Three roles, three directories:
-
-| Directory | Role | Never included by |
-|---|---|---|
-| `include/commrat/module/` | RT hot-path code (IO, services, traits) | — |
-| `include/commrat/launcher/` | Runtime launch infrastructure | RT module code |
-| `include/commrat/meta/` | Build/config/tooling metadata | RT module code |
-
-`meta/` is code that is only ever compiled into:
-- Schema gen binaries (build time)
-- Launcher and orchestrator binaries (startup time)
-- GUI bridge binaries (startup time)
-
-It is never `#include`d from anything in `module/`, `mailbox/`, or `messaging/`.
-
-### Proposed layout
+### The implemented layout
 
 ```
 include/commrat/
 ├── module2.hpp                       RT: user-facing module base
-├── commrat.hpp                       RT: CommRaT<> registry
+├── commrat.hpp                       RT: CommRaT<> registry definition
 ├── module_main.hpp                   RT+meta boundary: handles --commrat-inspect early exit
 ├── module/                           RT: all hot-path internals
 │   ├── io/
@@ -332,27 +244,15 @@ include/commrat/
 │   ├── module_description.hpp        AppDescription, ModuleDescription
 │   ├── process_launcher.hpp          ProcessLauncher (forks processes)
 │   └── launcher.hpp                  in-process Launcher
-└── meta/                             Build/config/tooling — NEW consolidation
-    ├── descriptor.hpp                ModuleDescriptor (was: launcher/module_descriptor.hpp)
-    ├── inspect.hpp                   write_module_inspect<T> (was: module/inspect.hpp)
-    ├── schema_output.hpp             CommRaTSchemaOutput (was: introspection/commrat_schema_output.hpp)
-    ├── message_schema.hpp            MessageSchema<T,R> (was: introspection/message_schema.hpp)
-    └── introspection_helper.hpp      IntrospectionHelper<R> (was: introspection/introspection_helper.hpp)
+└── meta/                             Build/config/tooling — never included from RT code
+    ├── descriptor.hpp                ModuleDescriptor + CmdMessagesForOutput
+    ├── inspect.hpp                   write_module_inspect<T>()
+    ├── schema_output.hpp             CommRaTSchemaOutput format
+    ├── message_schema.hpp            MessageSchema<T,R>
+    └── introspection_helper.hpp      IntrospectionHelper<R>
 ```
 
-`include/commrat/introspection/` and the two scattered headers merge into `include/commrat/meta/`. The existing `include/commrat/introspection.hpp` convenience header becomes a re-export shim pointing at `meta/`.
-
-### Files that move
-
-| Current path | New path |
-|---|---|
-| `include/commrat/introspection/commrat_schema_output.hpp` | `include/commrat/meta/schema_output.hpp` |
-| `include/commrat/introspection/introspection_helper.hpp` | `include/commrat/meta/introspection_helper.hpp` |
-| `include/commrat/introspection/message_schema.hpp` | `include/commrat/meta/message_schema.hpp` |
-| `include/commrat/module/inspect.hpp` | `include/commrat/meta/inspect.hpp` |
-| `include/commrat/launcher/module_descriptor.hpp` | `include/commrat/meta/descriptor.hpp` |
-
-`include/commrat/introspection.hpp` gains a `#pragma message` deprecation note and forwards to the new paths.
+The rule enforced by convention: nothing in `meta/` is `#include`d from `module/`, `mailbox/`, or `messaging/`. It is only included by schema-gen binaries, launcher binaries, and GUI bridge code.
 
 ---
 
