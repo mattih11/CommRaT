@@ -100,6 +100,20 @@ jobs:
           </body></html>
           EOF
 
+          # Root landing page
+          cat > _site/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html><head><meta charset="UTF-8">
+          <title>CommRaT</title></head>
+          <body>
+          <h1>CommRaT</h1>
+          <ul>
+            <li><a href="api/">API Reference (Doxygen)</a></li>
+            <li><a href="commrat-inspect/">Schema Viewer</a></li>
+          </ul>
+          </body></html>
+          EOF
+
           touch _site/.nojekyll
 
       - name: Upload Pages artifact
