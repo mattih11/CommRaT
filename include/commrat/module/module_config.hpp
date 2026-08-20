@@ -111,6 +111,9 @@ struct ModuleConfig {
     // Optional fields with defaults for backward compatibility
     rfl::DefaultVal<uint32_t> cmd_message_slots = DEFAULT_CMD_SLOTS;
     rfl::DefaultVal<uint32_t> data_message_slots = DEFAULT_DATA_SLOTS;
+
+    // Module-specific params forwarded from AppDescription — deserialized by ModuleType::Params.
+    std::optional<rfl::Generic> params;
     
     // ========================================================================
     // Output Configuration Accessors

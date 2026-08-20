@@ -10,7 +10,7 @@
  */
 
 #include <commrat/commrat.hpp>
-#include <commrat/introspection.hpp>
+#include <commrat/meta/introspection_helper.hpp>
 #include <iostream>
 
 // Example message types
