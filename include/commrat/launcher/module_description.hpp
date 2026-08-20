@@ -17,6 +17,7 @@
  */
 
 #include <rfl.hpp>
+#include <rfl/Generic.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -41,7 +42,7 @@ struct OutputDescription {
 struct InputDescription {
     uint8_t source_system_id{0};
     uint8_t source_instance_id{1};
-    bool    synced{false};
+    rfl::DefaultVal<bool> synced = false;  // for backward compat with flat inputs[]; absent = false
 };
 
 /**
@@ -52,8 +53,10 @@ struct ModuleDescription {
     std::string                    name;
     std::string                    module_class;
     std::vector<OutputDescription> outputs;
-    std::vector<InputDescription>  inputs;
-    std::optional<uint32_t>        period_ms;  // timer-driven modules only
+    std::vector<InputDescription>  inputs;                              // continuous inputs; synced: bool kept for backward compat
+    std::optional<std::vector<InputDescription>>  synced_inputs;        // absent = no synced inputs
+    std::optional<uint32_t>        period_ms;      // timer-driven modules only
+    std::optional<rfl::Generic>    params;         // module-specific params, forwarded to ModuleConfig
 };
 
 /**

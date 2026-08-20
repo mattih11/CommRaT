@@ -36,7 +36,7 @@
 /// This is a superset of sertial SchemaOutput: sertial-inspect reads only
 /// the "layout" field and ignores "commrat".  commrat-inspect reads both.
 
-#include <commrat/introspection.hpp>
+#include <commrat/meta/introspection_helper.hpp>
 #include <iostream>
 
 #ifndef COMMRAT_APP_HEADER

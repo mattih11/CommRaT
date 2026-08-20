@@ -63,7 +63,7 @@ namespace commrat {
 #include "commrat/messaging/system/system_registry.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include "commrat/module2.hpp"
-#include "commrat/introspection/introspection_helper.hpp"
+#include "commrat/meta/introspection_helper.hpp"
 #include "commrat/module/helpers/type_name.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
 

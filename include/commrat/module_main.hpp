@@ -1,6 +1,7 @@
 #pragma once
 
 #include <commrat/commrat.hpp>
+#include <commrat/meta/inspect.hpp>
 #include <commrat/module/module_config.hpp>
 #include <corerat/platform/threading.hpp>
 #include <rfl.hpp>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <atomic>
 #include <string>
+#include <string_view>
 
 namespace commrat {
 
@@ -112,6 +114,12 @@ int module_main(const ModuleConfig& config) {
  */
 template<typename ModuleType>
 int module_main(int argc, char** argv) {
+    // --commrat-inspect <outfile> <module_class> <binary> — write descriptor and exit.
+    if (argc == 5 && std::string_view(argv[1]) == "--commrat-inspect") {
+        commrat::write_module_inspect<ModuleType>(argv[3], argv[4], argv[2]);
+        return 0;
+    }
+
     try {
         ModuleConfig config;
         

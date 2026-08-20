@@ -19,8 +19,8 @@
 
 #pragma once
 
-#include "commrat/introspection/commrat_schema_output.hpp"
-#include "commrat/introspection/message_schema.hpp"
+#include "commrat/meta/schema_output.hpp"
+#include "commrat/meta/message_schema.hpp"
 #include <corerat/messaging/wire_message.hpp>
 #include <sertial/integration/schema_export.hpp>
 #include <rfl.hpp>

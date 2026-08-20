@@ -96,13 +96,16 @@ class Module2
     >::type
     , private IOHandler<Registry, IOSpecs...>
     , private CommandHandler<Registry, BuildIOTuple<Registry, IOSpecs...>, typename BuildIOTuple<Registry, IOSpecs...>::type> {
+public:
+    /// Compile-time I/O topology — used by write_module_inspect() for --commrat-inspect.
+    using IOBuilder = BuildIOTuple<Registry, IOSpecs...>;
+
 private:
     // ========================================================================
     // Service Aliases
     // ========================================================================
     
     using IOService = IOHandler<Registry, IOSpecs...>;
-    using IOBuilder = typename IOService::IOBuilder;
     using IOTuple = typename IOService::IOTuple;
     using CmdService = CommandHandler<Registry, IOBuilder, IOTuple>;
     
@@ -161,6 +164,7 @@ public:
      * Example: Module2<..., Input<FilteredData>> -> InputData = FilteredData
      */
     using InputData = typename IO::Meta::SingleInputType;
+
     // ========================================================================
     // Construction
     // ========================================================================

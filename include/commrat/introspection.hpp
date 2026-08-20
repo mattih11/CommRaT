@@ -26,7 +26,7 @@
  */
 
 #pragma once
-
-#include "commrat/introspection/commrat_schema_output.hpp"
-#include "commrat/introspection/message_schema.hpp"
-#include "commrat/introspection/introspection_helper.hpp"
+// Compatibility shim — headers have moved to <commrat/meta/>.
+#include <commrat/meta/schema_output.hpp>
+#include <commrat/meta/message_schema.hpp>
+#include <commrat/meta/introspection_helper.hpp>
