@@ -193,6 +193,25 @@ if(NOT DEFINED ENV{container})
 endif()
 
 #-----------------------------------------------------------------------------
+# CPack — produce commrat_<version>_amd64.deb
+#-----------------------------------------------------------------------------
+set(CPACK_PACKAGE_NAME            "commrat")
+set(CPACK_PACKAGE_VERSION         "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR          "CommRaT")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "CommRaT C++20 real-time messaging framework (STD platform)")
+set(CPACK_PACKAGE_FILE_NAME
+    "commrat_${PROJECT_VERSION}_amd64")
+
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER  "CommRaT Contributors")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "corerat-std, sertial, libreflect-cpp-dev")
+set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
+
+include(CPack)
+
+#-----------------------------------------------------------------------------
 # Documentation with Doxygen
 #-----------------------------------------------------------------------------
 find_package(Doxygen QUIET COMPONENTS dot)
