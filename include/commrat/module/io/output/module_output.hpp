@@ -7,6 +7,7 @@
 #include "commrat/mailbox/timestamped_ring_buffer.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/data_request_messages.hpp"
+#include "commrat/messaging/system/param_messages.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
 #include <corerat/platform/timestamp.hpp>
 #include <corerat/platform/duration.hpp>
@@ -62,8 +63,11 @@ public:
         GetDataRequestPayload<T>,
         GetDataReplyPayload<T>,
         GetNextDataRequestPayload<T>,
-        GetNextDataReplyPayload<T>
-        // TODO: Add user commands from DataWithCommands<T, Cmds...>
+        GetNextDataReplyPayload<T>,
+        GetParamsPayload,
+        GetParamsReplyPayload,
+        SetParamsPayload,
+        SetParamsReplyPayload
     >;
     
     // PUBLISH mailbox sends output data to subscribers (send-only)

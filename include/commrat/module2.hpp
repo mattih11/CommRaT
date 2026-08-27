@@ -28,6 +28,9 @@
 #include "commrat/module/io/output_infrastructure.hpp"
 #include "commrat/module/module_config.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/params.hpp"
+#include <sertial/containers/reflectors.hpp>
+#include "commrat/messaging/system/param_messages.hpp"
 #include "commrat/module/helpers/command_extraction.hpp"
 #include "commrat/module/services/io_handler.hpp"
 #include "commrat/module/services/command_handler.hpp"
@@ -96,9 +99,31 @@ class Module2
     >::type
     , private IOHandler<Registry, IOSpecs...>
     , private CommandHandler<Registry, BuildIOTuple<Registry, IOSpecs...>, typename BuildIOTuple<Registry, IOSpecs...>::type> {
+
+    // Extract Params<T> type from IOSpecs (void if not specified).
+    // Uses a helper struct to avoid instantiating Head::Type when Head is not Params<T>.
+    template<typename Head, bool IsParams>
+    struct ParamsTypeOf { using type = void; };
+    template<typename Head>
+    struct ParamsTypeOf<Head, true> { using type = typename Head::Type; };
+
+    template<typename... Specs>
+    struct ExtractParams { using type = void; };
+    template<typename Head, typename... Tail>
+    struct ExtractParams<Head, Tail...> {
+        using type = std::conditional_t<
+            is_params_spec_v<Head>,
+            typename ParamsTypeOf<Head, is_params_spec_v<Head>>::type,
+            typename ExtractParams<Tail...>::type>;
+    };
 public:
     /// Compile-time I/O topology — used by write_module_inspect() for --commrat-inspect.
     using IOBuilder = BuildIOTuple<Registry, IOSpecs...>;
+
+    /// Params type extracted from Params<T> IOSpec; void when no Params<T> given.
+    /// Introspection hook: meta/inspect.hpp should check ModuleType::ParamsType.
+    using ParamsType = typename ExtractParams<IOSpecs...>::type;
+    static constexpr bool has_params = !std::is_same_v<ParamsType, void>;
 
 private:
     // ========================================================================
@@ -181,6 +206,9 @@ public:
         : config_(config)
         , logger_(compute_work_addr(config))
     {
+        if constexpr (has_params) {
+            params_ = params_from_config<ParamsType>(config);
+        }
         // Print platform info once per process
         [[maybe_unused]] static bool platform_printed = []() {
 #if defined(CORERAT_PLATFORM_EVL)
@@ -222,6 +250,9 @@ protected:
 
     // Module identification
     ModuleConfig config_;
+
+    // params_ is only present when Params<T> is in the IOSpecs.
+    [[no_unique_address]] std::conditional_t<has_params, ParamsType, std::monostate> params_{};
 
     // Logging — TerminalSink declared before RtLogger so it outlives the drain thread.
     corerat::TerminalSink terminal_sink_;
@@ -275,6 +306,28 @@ protected:
 protected:
     virtual void on_start() {}  // Optional override for startup logic
     virtual void on_stop() {}   // Optional override for shutdown logic
+
+    // ---- Parameter interface — auto-implemented when Params<T> is in IOSpecs ----
+    virtual void on_params_changed() {}
+
+    virtual bool commrat_has_params_() const final { return has_params; }
+
+    virtual std::string commrat_get_params_json_() const final {
+        if constexpr (has_params)
+            return rfl::json::write(params_);
+        return "{}";
+    }
+
+    virtual bool commrat_set_params_json_(const std::string& json) final {
+        if constexpr (has_params) {
+            auto result = rfl::json::read<ParamsType, rfl::DefaultIfMissing>(json);
+            if (!result) return false;
+            params_ = result.value();
+            on_params_changed();
+            return true;
+        }
+        return false;
+    }
 public:
     /**
      * @brief Start module execution
@@ -495,6 +548,8 @@ private:
                     // Try system command visitor first
                     bool handled = visit_system_commands<OutputIndex>(received_msg);
                     
+                    if (!handled) handled = visit_param_commands<OutputIndex>(received_msg);
+
                     if (!handled) {
                         // Fall back to user command visitor
                         visit_user_commands<OutputIndex>(received_msg);
@@ -527,6 +582,38 @@ private:
     bool visit_user_commands(ReceivedMsg&& received_msg) {
         auto& output = this->template get_output<OutputIndex>();
         return CmdService::template visit_user_command<OutputIndex>(output, received_msg, this);
+    }
+
+    // Handle GetParams / SetParams commands automatically for any module
+    // that overrides commrat_has_params_() / commrat_get_params_json_() / commrat_set_params_json_().
+    template<size_t OutputIndex, typename ReceivedMsg>
+    bool visit_param_commands(ReceivedMsg&& received_msg) {
+        using CmdType = typename std::decay_t<decltype(received_msg)>::payload_type;
+        auto& output = this->template get_output<OutputIndex>();
+        auto& cmd_mailbox = output.get_cmd_mailbox();
+
+        if constexpr (std::is_same_v<CmdType, GetParamsPayload>) {
+            GetParamsReplyPayload reply{};
+            reply.has_params = commrat_has_params_();
+            if (reply.has_params) {
+                auto json = commrat_get_params_json_();
+                reply.json = sertial::fixed_string<512>(json.substr(0, 511));
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        if constexpr (std::is_same_v<CmdType, SetParamsPayload>) {
+            SetParamsReplyPayload reply{};
+            std::string json(received_msg.payload.json.data());
+            reply.success = commrat_set_params_json_(json);
+            if (!reply.success)
+                reply.error = sertial::fixed_string<128>("set_params failed");
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        return false;
     }
     
     /**
