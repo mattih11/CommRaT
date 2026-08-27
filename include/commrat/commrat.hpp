@@ -96,10 +96,10 @@ namespace commrat {
  */
 template<typename... MessageDefs>
 class CommRaT : public MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
-                                       GetParamsCmd, SetParamsCmd> {
+                                       GetParamsCmd, SetParamsCmd, ListParamsCmd> {
 public:  // Make Registry public so TypedMailbox can access it
     using Registry = MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
-                                     GetParamsCmd, SetParamsCmd>;
+                                     GetParamsCmd, SetParamsCmd, ListParamsCmd>;
     
     // Verify system messages are registered
     static_assert(Registry::template is_registered<SubscribeRequestPayload>, 
@@ -178,7 +178,7 @@ public:
      */
     template<typename PayloadT>
     using Mailbox = commrat::Mailbox<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
-                                     GetParamsCmd, SetParamsCmd>;
+                                     GetParamsCmd, SetParamsCmd, ListParamsCmd>;
     
     /**
      * @brief Module2 template bound to this application
