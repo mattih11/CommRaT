@@ -1,6 +1,6 @@
 # Parameter System
 
-**Status**: Design Phase  
+**Status**: Phase 1 implemented — plain `struct Params` + `Params<T>` IOSpec + whole-struct Get/Set commands  
 **Priority**: High  
 **Created**: February 12, 2026
 
@@ -33,58 +33,126 @@ MyConfig load_config(const std::string& path) {
 - No validation or bounds checking
 - Runtime errors instead of compile-time safety
 
-## Proposed Design
+## Current Design
 
-### Parameter Definition
+### Parameter Definition (implemented)
+
+Params are a plain rfl-reflectable aggregate. Field names and types drive
+serialization; no wrapper template is needed for Phase 1:
 
 ```cpp
-// Define parameters with metadata
-// Allowed types: primitives, sertial::fixed_string<N>, sertial::fixed_vector<T,N>
-struct MyModuleParams : Parameters<
-    Param<"gain",        float,                        Default<1.0f>,          Range<0.0f, 10.0f>>,
-    Param<"buffer_size", int,                          Default<100>,           Range<1, 1000>>,
-    Param<"device_path", sertial::fixed_string<128>,   Default<"/dev/sensor0">>,
-    Param<"enabled",     bool,                         Default<true>>,
-    Param<"coefficients",sertial::fixed_vector<float,16>, Default<{}>>   // array param
-> {};
+// include sertial/containers/reflectors.hpp to make fixed_string/fixed_vector rfl-reflectable
+#include <sertial/containers/reflectors.hpp>
+
+struct MySensorParams {
+    float gain{1.0f};
+    int   filter_window{5};
+    sertial::fixed_string<64> device{"/dev/i2c-1"};
+    sertial::fixed_vector<float, 8> coefficients{};
+};
 ```
 
-All parameter types must be **RT-safe** — no heap allocation in the hot path:
-- Primitives (`float`, `int`, `bool`, `uint32_t`, …) — always fine
-- `sertial::fixed_string<N>` — RT-safe and rfl-reflectable via `sertial/containers/reflectors.hpp` (reflected as `std::string`)
-- `sertial::fixed_vector<T, N>` — RT-safe and rfl-reflectable (reflected as `std::vector<T>`)
+Allowed types:
+- Primitives (`float`, `int`, `bool`, `uint32_t`, …)
+- `sertial::fixed_string<N>` — RT-safe; rfl-reflectable via `sertial/containers/reflectors.hpp`
+- `sertial::fixed_vector<T, N>` — RT-safe; rfl-reflectable
 - Plain POD structs with only rfl-reflectable fields
 
-Include `<sertial/containers/reflectors.hpp>` in any translation unit that serializes a `Params` struct. This is already done by `commrat/module/params.hpp`.
+`std::vector` is **not** allowed (heap allocation on modification).
+`commrat/module/params.hpp` already includes `reflectors.hpp`.
 
-`std::vector` is **not** allowed as a parameter type (heap allocation on modification).
+### Module usage (implemented)
 
-// Module uses parameters
-class MyModule : public MyApp::Module<
-    Output<Data>,
-    Input<Sensor>,
-    Params<MyModuleParams>  // NEW: Specify parameters
-> {
+Add `Params<T>` to the IOSpec. Module2 automatically:
+- stores `params_` of type `T`
+- loads it from `ModuleConfig::params` on construction (via `params_from_config<T>(config)` with `rfl::DefaultIfMissing` so partial JSON overrides work)
+- overrides `commrat_get_params_json_()` / `commrat_set_params_json_()` as `virtual final`
+- handles `GetParamsCmd` / `SetParamsCmd` on the CMD mailbox with no user code
+
+```cpp
+struct MySensorParams {
+    float gain{1.0f};
+    sertial::fixed_string<64> device{"/dev/i2c-1"};
+};
+
+class SensorModule : public MyApp::Module2<Output<SensorData>,
+                                           Period<Milliseconds(10)>,
+                                           Params<MySensorParams>> {
+public:
+    explicit SensorModule(const ModuleConfig& config) : Base(config) {}
+
 protected:
-    Data process(const Sensor& input) override {
-        // Access parameters (compile-time, zero overhead)
-        float gain = params_.get<"gain">();
-        int size = params_.get<"buffer_size">();
-        
-        return Data{input.value * gain};
+    void process(SensorData& out) override {
+        out.value = read_sensor() * params_.gain;   // zero overhead
     }
-    
-    // Optional: Custom validation
-    void on_params_changed() override {
-        RTLOG_INFO(logger_) << "Parameters updated";
-        reinitialize_filter();
+
+    void on_params_changed() override {             // optional
+        RTLOG_INFO(logger_) << "gain=" << params_.gain;
     }
 };
 ```
 
-### Automatic Features
+### Automatic features (implemented)
 
-**1. Loading from Config File**
+**1. Load from launch config**
+
+```json
+{
+  "name": "sensor",
+  "module_class": "SensorModule",
+  "outputs": [{"system_id": 10, "instance_id": 1}],
+  "params": {"gain": 2.5}    // partial — missing fields use struct defaults
+}
+```
+
+**2. Get/Set whole params via command**
+
+```cpp
+// Get all params as a JSON object
+GetParamsCmd get_cmd{};
+auto reply = send_command<GetParamsReply>(module_address, get_cmd);
+// reply.json == {"gain":2.5,"device":"/dev/i2c-1"}
+// reply.has_params == true
+
+// Replace all params from a JSON object
+SetParamsCmd set_cmd{};
+set_cmd.json = "{\"gain\":3.0}";
+auto set_reply = send_command<SetParamsReply>(module_address, set_cmd);
+// set_reply.success == true; on_params_changed() was called
+```
+
+**3. Build-time descriptor**
+
+`*.module.json` descriptor contains `params_defaults` as a nested JSON object:
+```json
+{"params_defaults": {"gain": 1.0, "filter_window": 5, "device": "/dev/i2c-1"}}
+```
+Generated automatically by `--commrat-inspect` POST_BUILD step.
+
+**4. Type safety**
+
+`params_` is accessed directly in `process()` — no function call, no lock, no copy.
+Modification only happens from the command thread via `commrat_set_params_json_()`,
+which is `virtual final` — cannot be accidentally overridden by the user module.
+
+### Not yet implemented
+
+- Thread safety: no `SharedMutex` yet — the command thread writes `params_` while
+  the data thread reads it. For Phase 1 this is acceptable for simple types; a
+  `SharedMutex` wrapper is needed for correctness under load.
+- Per-field Get/Set by name (current commands send the whole params JSON).
+- `ListParamsCmd` (enumerate all fields with type/value/range info).
+- `SaveParamsCmd` / `LoadParamsCmd` (persist to/from file).
+- `Parameters<Param<"name", T, Default<v>, Range<lo,hi>>>` typed wrapper
+  (Range validation, compile-time field indexing).
+
+---
+
+## Future Design
+
+### Automatic Features (future — `Parameters<Param<...>>` system)
+
+These require the `Parameters<>` typed wrapper (Phase 2+):
 ```cpp
 // Module constructor automatically loads from config
 MyModule module(config);  
@@ -222,65 +290,30 @@ public:
 };
 ```
 
-### Module Integration
+### Module Integration (implemented)
 
-```cpp
-template<typename OutputSpec, typename InputSpec, typename ParamSpec = NoParams>
-class Module {
-protected:
-    ParamSpec params_;
+All the boilerplate below is **auto-generated** by Module2 when `Params<T>` is in the IOSpec.
+See the "Current Design" section above for the actual user API.
 
-    // Called automatically after any parameter change (set via command or code).
-    virtual void on_params_changed() {}
-
-private:
-    // Automatic command handler — wired into the CMD mailbox visitor.
-    // No user code needed: Module2 detects 'typename ModuleType::Params'
-    // at compile time and registers these handlers automatically.
-    void handle_param_command(const ParamCommand& cmd);
-};
-```
-
-### Module2 Automatic Command Handling
+### Module2 Automatic Command Handling (implemented)
 
 Module2's existing per-output command threads already dispatch system commands
 (Subscribe, GetData) and user commands (DataWithCommands). Parameter commands
 are handled the same way — **no boilerplate in user modules**.
 
-At compile time, `command_loop_impl` detects the `Params<T>` IOSpec via `Module2::has_params`
-(a `static constexpr bool` derived from the IOSpecs) and inserts the parameter
-command handlers into the visitor. No user code is needed — declaring `Params<MyParams>`
-in the IOSpec is sufficient:
+`has_params` is a `static constexpr bool` on `Module2`, set when `Params<T>` is
+in the IOSpec. `visit_param_commands` is wired into `command_loop_impl` for
+`GetParamsCmd` (returns whole params JSON) and `SetParamsCmd` (replaces whole
+params from JSON, calls `on_params_changed()`).
 
-```cpp
-// Auto-generated inside command_loop_impl (conceptual — user sees none of this):
-if constexpr (requires { typename ModuleType::Params; }) {
-    if constexpr (std::is_same_v<CmdType, SetParamCmd>) {
-        // 1. Locate the field by name using rfl field iteration
-        // 2. Parse the JSON-encoded value into the correct type
-        // 3. Apply range validation
-        // 4. Update params_ atomically
-        // 5. Call on_params_changed()
-        // 6. Send SetParamReply via CMD mailbox
-        handle_set_param(params_, received_msg.payload, reply);
-        return;
-    }
-    if constexpr (std::is_same_v<CmdType, GetParamCmd>) { ... }
-    if constexpr (std::is_same_v<CmdType, ListParamsCmd>) { ... }
-}
-```
-
-rfl field iteration (`rfl::for_each`) is used at runtime to find the named
-field and convert its value to/from the `fixed_string<256>` wire format.
+Current: whole-struct Get/Set only. Per-field Get/Set by name is a future addition.
 
 Parameter commands are routed to **output 0's CMD mailbox** (the module's
-primary command interface). A module with no outputs would use a dedicated
-module-level CMD mailbox (not yet implemented).
+primary command interface).
 
-**Thread safety**: `params_` is read from the data thread and written from the
-command thread. A `SharedMutex` guards the struct — the data thread holds a
-shared (read) lock, the command thread holds an exclusive (write) lock during
-`handle_set_param`.
+**Thread safety**: not yet guarded — `params_` is written by the command thread
+and read by the data thread. Safe for simple atomic types in practice; a
+`SharedMutex` is planned for Phase 2.
 
 ## Benefits
 
@@ -349,31 +382,51 @@ struct ConditionalParams : Parameters<
 
 ## Implementation Plan
 
-**Phase 1**: Core parameter system (2 weeks)
-- `Param<>` template definition
-- `ParameterSet` storage and access
-- Compile-time indexing and validation
+### Done
 
-**Phase 2**: Serialization (1 week)
-- JSON/YAML loading and saving
-- Type conversion (string ↔ native type)
-- Default value handling
+- `Params<T>` IOSpec tag (`io_spec.hpp`; `CreateIOInstance` returns `void` so `BuildIOTuple` ignores it)
+- `Module2`: `ExtractParams`, `ParamsType`, `has_params`, `params_` member, constructor loading
+- `Module2`: `commrat_get_params_json_()` / `commrat_set_params_json_()` auto-overrides (`virtual final`)
+- `Module2`: `visit_param_commands` dispatches `GetParamsCmd` / `SetParamsCmd`
+- `param_messages.hpp`: `GetParamsCmd/Reply`, `SetParamsCmd/Reply` with `sertial::fixed_string<512>`
+- System registry + CommRaT<> registry include param commands
+- `CmdMailbox` in `module_output.hpp` includes param payload types
+- `params_from_config<T>(config)` helper with `rfl::DefaultIfMissing`
+- `ModuleConfig::params` field (`std::optional<rfl::Generic>`)
+- `meta/inspect.hpp`: `params_defaults` as nested JSON object in `*.module.json`
+- `on_params_changed()` virtual callback
+- Example: `module_with_params_example.cpp`
+- Test: `test/test_params.cpp` (6 cases)
 
-**Phase 3**: System commands (2 weeks)
-- Implement Get/Set/List/Save/Load commands
-- Automatic command handler in Module base
-- Reply mechanisms
+### Phase 2 — thread safety + per-field commands
 
-**Phase 4**: Advanced features (2 weeks)
-- Parameter groups and composition
-- Dynamic reconfiguration hooks
-- Conditional parameters
+- `SharedMutex` wrapping `params_` (data thread reads, command thread writes)
+- `GetParamCmd` / `SetParamCmd` with `param_name` field (per-field, not whole-struct)
+- `ListParamsCmd` — enumerate all fields with type, current value, default
 
-**Total Estimated Effort**: 7 weeks
+### Phase 3 — persistence
 
-## Related Work
+- `SaveParamsCmd` / `LoadParamsCmd` — read/write a JSON file
+- Auto-save on shutdown, auto-load on startup from a well-known path
 
-- Module base: `include/commrat/registry_module.hpp`
-- System commands: `include/commrat/messages.hpp`
-- Configuration: `ModuleConfig` structure
-- Introspection: `docs/work/INTROSPECTION_INTEGRATION_PLAN.md`
+### Phase 4 — typed `Parameters<Param<...>>` system (future)
+
+- `Param<"name", T, Default<v>, Range<lo,hi>>` typed descriptors
+- Compile-time range validation
+- `params_.get<"name">()` / `params_.set<"name">(v)` named accessors
+- Parameter groups and conditional parameters
+
+## File locations
+
+| File | Role |
+|---|---|
+| `include/commrat/module/io/io_spec.hpp` | `Params<T>` tag, `is_params_spec_v`, `CreateIOInstance` specialization |
+| `include/commrat/module2.hpp` | `ExtractParams`, `params_`, auto-overrides, `visit_param_commands` |
+| `include/commrat/module/params.hpp` | `params_from_config<T>(config)` helper |
+| `include/commrat/messaging/system/param_messages.hpp` | `GetParamsCmd/Reply`, `SetParamsCmd/Reply` |
+| `include/commrat/messaging/system/system_registry.hpp` | registers param commands as system messages |
+| `include/commrat/module/io/output/module_output.hpp` | adds param types to `CmdMailbox` |
+| `include/commrat/meta/descriptor.hpp` | `ModuleDescriptor::params_defaults` as `rfl::Generic` |
+| `include/commrat/meta/inspect.hpp` | populates `params_defaults` from `ModuleType::ParamsType` |
+| `examples/module_with_params_example.cpp` | working example |
+| `test/test_params.cpp` | 6 unit tests |
