@@ -387,10 +387,11 @@ struct ConditionalParams : Parameters<
 - `Params<T>` IOSpec tag (`io_spec.hpp`; `CreateIOInstance` returns `void` so `BuildIOTuple` ignores it)
 - `Module2`: `ExtractParams`, `ParamsType`, `has_params`, `params_` member, constructor loading
 - `Module2`: `commrat_get_params_json_()` / `commrat_set_params_json_()` auto-overrides (`virtual final`)
-- `Module2`: `visit_param_commands` dispatches `GetParamsCmd` / `SetParamsCmd`
-- `param_messages.hpp`: `GetParamsCmd/Reply`, `SetParamsCmd/Reply` with `sertial::fixed_string<512>`
-- System registry + CommRaT<> registry include param commands
-- `CmdMailbox` in `module_output.hpp` includes param payload types
+- `Module2`: `visit_param_commands` dispatches `GetParamsCmd` / `SetParamsCmd` / `ListParamsCmd`
+- `Module2`: `SharedMutex params_mutex_` guards `params_`; data thread holds shared lock during `process()`, command thread holds exclusive lock during `set_params_json_`
+- `param_messages.hpp`: `GetParamsCmd/Reply`, `SetParamsCmd/Reply`, `ListParamsCmd/Reply` with `ParamInfo` per field
+- System registry + CommRaT<> registry include all three param commands
+- `CmdMailbox` in `module_output.hpp` includes all param payload types
 - `params_from_config<T>(config)` helper with `rfl::DefaultIfMissing`
 - `ModuleConfig::params` field (`std::optional<rfl::Generic>`)
 - `meta/inspect.hpp`: `params_defaults` as nested JSON object in `*.module.json`
@@ -398,16 +399,10 @@ struct ConditionalParams : Parameters<
 - Example: `module_with_params_example.cpp`
 - Test: `test/test_params.cpp` (6 cases)
 
-### Phase 2 — thread safety + per-field commands
+### Phase 2 — per-field commands + persistence
 
-- `SharedMutex` wrapping `params_` (data thread reads, command thread writes)
 - `GetParamCmd` / `SetParamCmd` with `param_name` field (per-field, not whole-struct)
-- `ListParamsCmd` — enumerate all fields with type, current value, default
-
-### Phase 3 — persistence
-
 - `SaveParamsCmd` / `LoadParamsCmd` — read/write a JSON file
-- Auto-save on shutdown, auto-load on startup from a well-known path
 
 ### Phase 4 — typed `Parameters<Param<...>>` system (future)
 

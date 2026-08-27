@@ -253,6 +253,8 @@ protected:
 
     // params_ is only present when Params<T> is in the IOSpecs.
     [[no_unique_address]] std::conditional_t<has_params, ParamsType, std::monostate> params_{};
+    // Guards params_: data thread holds shared lock; command thread holds exclusive lock.
+    [[no_unique_address]] std::conditional_t<has_params, SharedMutex, std::monostate> params_mutex_{};
 
     // Logging — TerminalSink declared before RtLogger so it outlives the drain thread.
     corerat::TerminalSink terminal_sink_;
@@ -322,7 +324,10 @@ protected:
         if constexpr (has_params) {
             auto result = rfl::json::read<ParamsType, rfl::DefaultIfMissing>(json);
             if (!result) return false;
-            params_ = result.value();
+            {
+                UniqueLockShared lk(params_mutex_);
+                params_ = result.value();
+            }
             on_params_changed();
             return true;
         }
@@ -613,6 +618,28 @@ private:
             return true;
         }
 
+        if constexpr (std::is_same_v<CmdType, ListParamsPayload>) {
+            ListParamsReplyPayload reply{};
+            reply.has_params = has_params;
+            if constexpr (has_params) {
+                SharedLock lk(params_mutex_);
+                rfl::to_named_tuple(params_).apply([&](const auto&... fields) {
+                    ([&](const auto& field) {
+                        using FieldType = std::decay_t<decltype(field.value())>;
+                        ParamInfo info;
+                        auto name_sv = field.name();
+                        info.name = sertial::fixed_string<48>(std::string(name_sv).c_str());
+                        info.type_name = sertial::fixed_string<48>(rfl::type_name_t<FieldType>().str().c_str());
+                        auto val = rfl::json::write(field.value());
+                        info.value_json = sertial::fixed_string<128>(val.substr(0, 127).c_str());
+                        reply.params.push_back(info);
+                    }(fields), ...);
+                });
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
         return false;
     }
     
@@ -643,7 +670,13 @@ private:
             }
             
             // Step 2: Call user's process() with unpacked inputs and outputs
-            call_process(std::make_index_sequence<IO::Meta::num_inputs>{}, std::make_index_sequence<IO::Meta::num_outputs>{});
+            // Hold shared lock so the command thread cannot write params_ concurrently.
+            if constexpr (has_params) {
+                SharedLock lk(params_mutex_);
+                call_process(std::make_index_sequence<IO::Meta::num_inputs>{}, std::make_index_sequence<IO::Meta::num_outputs>{});
+            } else {
+                call_process(std::make_index_sequence<IO::Meta::num_inputs>{}, std::make_index_sequence<IO::Meta::num_outputs>{});
+            }
             
             // Step 3: Publish outputs (delegates to IOService)
             publish_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
