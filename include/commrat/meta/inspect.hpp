@@ -124,9 +124,11 @@ void write_module_inspect(
 
     auto cmds = detail::cmd_messages<typename Meta::OutputTypes>();
 
-    std::optional<std::string> params_defaults;
+    std::optional<rfl::Generic> params_defaults;
     if constexpr (ModuleType::has_params) {
-        params_defaults = rfl::json::write(typename ModuleType::ParamsType{});
+        auto json = rfl::json::write(typename ModuleType::ParamsType{});
+        auto parsed = rfl::json::read<rfl::Generic>(json);
+        if (parsed) params_defaults = parsed.value();
     }
 
     ModuleDescriptor desc{
