@@ -136,6 +136,7 @@ DO_TEST=0
 RUN_CMDS=()
 DO_SHELL=0
 DO_CONSOLE=0         # attach serial console to stdio (no SSH)
+DO_GEN_DESCRIPTORS=0 # run --commrat-inspect on all modules in QEMU, sync back
 
 WORK_DIR="$(mktemp -d /tmp/commrat-evl-XXXXXX)"
 CLEANUP_WORK_DIR=1
@@ -176,6 +177,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --test)    DO_TEST=1;          shift   ;;
         --run)     RUN_CMDS+=("$2");   shift 2 ;;
+        --generate-descriptors)
+            DO_GEN_DESCRIPTORS=1
+            if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+                DO_CROSS="$2"; shift 2
+            else
+                DO_CROSS="evl-cross"; shift 1
+            fi
+            ;;
         --shell)   DO_SHELL=1;         shift   ;;
         --console) DO_CONSOLE=1;       shift   ;;
         --help|-h) usage ;;
@@ -486,7 +495,8 @@ fi
 # or --shell were given. Useful for CI compile checks without QEMU overhead.
 # ---------------------------------------------------------------------------
 if [[ -n "$DO_CROSS" && -z "$DO_BUILD" && "$DO_TEST" -eq 0 \
-      && ${#RUN_CMDS[@]} -eq 0 && "$DO_SHELL" -eq 0 && "$DO_CONSOLE" -eq 0 ]]; then
+      && ${#RUN_CMDS[@]} -eq 0 && "$DO_SHELL" -eq 0 && "$DO_CONSOLE" -eq 0 \
+      && "$DO_GEN_DESCRIPTORS" -eq 0 ]]; then
     echo "Cross-compile complete. No guest actions requested — skipping QEMU."
     exit 0
 fi
@@ -776,7 +786,7 @@ if [[ -z "$DO_CROSS" && -z "$DO_BUILD" && ( "$DO_SHELL" -eq 1 || "$DO_TEST" -eq 
         fi
     done
 fi
-if [[ -n "$DO_CROSS" && ( "$DO_SHELL" -eq 1 || ${#RUN_CMDS[@]} -gt 0 ) ]]; then
+if [[ -n "$DO_CROSS" && ( "$DO_SHELL" -eq 1 || ${#RUN_CMDS[@]} -gt 0 || "$DO_GEN_DESCRIPTORS" -eq 1 ) ]]; then
     echo "Deploying build/${DO_CROSS}/ to guest /root/commrat/..."
     rsync -az --delete \
         -e "ssh ${SSH_OPTS}" \
@@ -878,6 +888,31 @@ for cmd in "${RUN_CMDS[@]}"; do
         ${cmd}
     "
 done
+
+# Generate module descriptors: run --commrat-inspect on every module binary
+# inside the guest (all in one QEMU session), then rsync .module.json back.
+if [[ "$DO_GEN_DESCRIPTORS" -eq 1 ]]; then
+    echo "Running --commrat-inspect on all module binaries in QEMU..."
+    ssh ${SSH_OPTS} root@127.0.0.1 bash -c '
+        set +e
+        find /root/commrat -name "*.module.json" | while IFS= read -r json; do
+            module_class=$(grep -o "\"module_class\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$json" \
+                           | grep -o "\"[^\"]*\"$" | tr -d "\"")
+            binary_host=$(grep -o "\"binary\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$json" \
+                          | grep -o "\"[^\"]*\"$" | tr -d "\"")
+            binary_name="${binary_host##*/}"
+            binary=$(find /root/commrat -name "$binary_name" -type f 2>/dev/null | head -1)
+            if [ -n "$binary" ] && [ -x "$binary" ]; then
+                "$binary" --commrat-inspect "$json" "$module_class" "$binary" 2>/dev/null
+            fi
+        done
+    '
+    echo "Syncing descriptors back to host build/${DO_CROSS}/..."
+    rsync -az --include="*/" --include="*.module.json" --exclude="*" \
+        -e "ssh ${SSH_OPTS}" \
+        "root@127.0.0.1:/root/commrat/" "build/${DO_CROSS}/"
+    echo "EVL descriptors updated."
+fi
 
 # Interactive shell
 if [[ "$DO_SHELL" -eq 1 ]]; then
