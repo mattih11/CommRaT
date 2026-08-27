@@ -26,7 +26,7 @@ struct ModuleDescriptor {
     std::optional<std::string> execution_mode;                       // "timer" | "input" | "loop"
     std::optional<int64_t> default_period_ms;                        // only present when execution_mode == "timer"
     std::optional<std::vector<CmdMessagesForOutput>> cmd_messages;   // per-output command type names
-    std::optional<std::string> params_defaults;                      // rfl::json::write(Params{})
+    std::optional<rfl::Generic> params_defaults;                      // nested JSON object of default param values
 };
 
 } // namespace commrat
