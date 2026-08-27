@@ -125,8 +125,8 @@ void write_module_inspect(
     auto cmds = detail::cmd_messages<typename Meta::OutputTypes>();
 
     std::optional<std::string> params_defaults;
-    if constexpr (requires { typename ModuleType::Params; }) {
-        params_defaults = rfl::json::write(typename ModuleType::Params{});
+    if constexpr (ModuleType::has_params) {
+        params_defaults = rfl::json::write(typename ModuleType::ParamsType{});
     }
 
     ModuleDescriptor desc{
