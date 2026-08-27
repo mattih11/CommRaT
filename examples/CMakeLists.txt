@@ -19,6 +19,10 @@ commrat_module(example_gui_producer
     SOURCES example_gui_producer.cpp
     MODULE_CLASS ExampleGUIProducerModule)
 
+commrat_module(module_with_params
+    SOURCES module_with_params_example.cpp
+    MODULE_CLASS SensorModule)
+
 add_executable(example_sensor_fusion multi_output_sensor_fusion.cpp)
 target_link_libraries(example_sensor_fusion PRIVATE commrat)
 

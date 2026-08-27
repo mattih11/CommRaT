@@ -101,6 +101,25 @@ struct SyncedInput {
     static constexpr bool is_synced = true;
 };
 
+/**
+ * @brief Module parameter set specification tag
+ *
+ * Specifies that a module has a typed parameter struct. Module2 automatically:
+ * - Stores a `params_` member of type T
+ * - Loads it from ModuleConfig::params on construction
+ * - Exposes it via commrat_get_params_json_() / commrat_set_params_json_()
+ *
+ * T must be an rfl-reflectable aggregate with RT-safe field types.
+ * Use sertial::fixed_string<N> for string params (rfl::Reflector provided by SeRTial).
+ *
+ * @tparam T Parameter struct type
+ */
+template<typename T>
+struct Params {
+    using Type = T;
+    static constexpr bool is_params = true;
+};
+
 // ============================================================================
 // Type Traits for I/O Specification Tags (for Module refactor)
 // ============================================================================
@@ -140,6 +159,15 @@ struct is_period<Period<DefaultPeriod>> : std::true_type {};
 
 template<typename T>
 inline constexpr bool is_period_v = is_period<T>::value;
+
+template<typename T>
+struct is_params_spec : std::false_type {};
+
+template<typename T>
+struct is_params_spec<Params<T>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_params_spec_v = is_params_spec<T>::value;
 
 // ============================================================================
 // Type Traits for I/O Instance Classes (for input_infrastructure.hpp)
@@ -301,6 +329,14 @@ struct CreateIOInstance<Registry, Period<DefaultPeriod>> {
     using type = void;
     using spec_type = Period<DefaultPeriod>;
     static constexpr auto default_period = DefaultPeriod;
+};
+
+// Params (no instance - stored and handled directly by Module2)
+template<typename Registry, typename T>
+struct CreateIOInstance<Registry, Params<T>> {
+    using type = void;
+    using spec_type = Params<T>;
+    using ParamsType = T;
 };
 
 template<typename Registry, typename IOSpec>

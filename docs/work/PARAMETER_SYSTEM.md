@@ -39,12 +39,25 @@ MyConfig load_config(const std::string& path) {
 
 ```cpp
 // Define parameters with metadata
+// Allowed types: primitives, sertial::fixed_string<N>, sertial::fixed_vector<T,N>
 struct MyModuleParams : Parameters<
-    Param<"gain", float, Default<1.0f>, Range<0.0f, 10.0f>>,
-    Param<"buffer_size", int, Default<100>, Range<1, 1000>>,
-    Param<"device_path", std::string, Default<"/dev/sensor0">>,
-    Param<"enabled", bool, Default<true>>
+    Param<"gain",        float,                        Default<1.0f>,          Range<0.0f, 10.0f>>,
+    Param<"buffer_size", int,                          Default<100>,           Range<1, 1000>>,
+    Param<"device_path", sertial::fixed_string<128>,   Default<"/dev/sensor0">>,
+    Param<"enabled",     bool,                         Default<true>>,
+    Param<"coefficients",sertial::fixed_vector<float,16>, Default<{}>>   // array param
 > {};
+```
+
+All parameter types must be **RT-safe** — no heap allocation in the hot path:
+- Primitives (`float`, `int`, `bool`, `uint32_t`, …) — always fine
+- `sertial::fixed_string<N>` — RT-safe and rfl-reflectable via `sertial/containers/reflectors.hpp` (reflected as `std::string`)
+- `sertial::fixed_vector<T, N>` — RT-safe and rfl-reflectable (reflected as `std::vector<T>`)
+- Plain POD structs with only rfl-reflectable fields
+
+Include `<sertial/containers/reflectors.hpp>` in any translation unit that serializes a `Params` struct. This is already done by `commrat/module/params.hpp`.
+
+`std::vector` is **not** allowed as a parameter type (heap allocation on modification).
 
 // Module uses parameters
 class MyModule : public MyApp::Module<
@@ -63,7 +76,7 @@ protected:
     
     // Optional: Custom validation
     void on_params_changed() override {
-        std::cout << "Parameters updated\n";
+        RTLOG_INFO(logger_) << "Parameters updated";
         reinitialize_filter();
     }
 };
@@ -105,7 +118,7 @@ Automatically generated commands (no user code needed):
 // Get parameter value
 GetParamCmd cmd{.param_name = "gain"};
 auto reply = send_command<GetParamReply>(module_address, cmd);
-std::cout << reply.value;  // "2.5"
+RTLOG_INFO(logger_) << "gain=" << reply.value;
 
 // Set parameter value
 SetParamCmd cmd{.param_name = "gain", .value = "3.0"};
@@ -123,51 +136,38 @@ send_command(module_address, cmd);  // Writes current values to file
 
 ### Command Definitions
 
-```cpp
-// System parameter commands
-enum class SystemMessages : uint32_t {
-    // ... existing ...
-    
-    // Parameter management
-    GetParam = 0x00000020,
-    GetParamReply = 0x00000021,
-    SetParam = 0x00000022,
-    SetParamReply = 0x00000023,
-    ListParams = 0x00000024,
-    ListParamsReply = 0x00000025,
-    SaveParams = 0x00000026,
-    LoadParams = 0x00000027
-};
+All parameter command structs use SeRTial bounded containers so they are
+safe to send over TiMS (no heap allocation, bounded size at compile time):
 
+```cpp
 struct GetParamCmd {
-    char param_name[64];
+    sertial::fixed_string<64> param_name;
 };
 
 struct GetParamReply {
-    char param_name[64];
-    char value[256];  // String representation
-    char type[32];    // "float", "int", "bool", "string"
+    sertial::fixed_string<64>  param_name;
+    sertial::fixed_string<256> value;    // JSON-encoded string representation
+    sertial::fixed_string<32>  type;     // "float", "int", "bool", "fixed_string", …
     bool valid{false};
 };
 
 struct SetParamCmd {
-    char param_name[64];
-    char value[256];
-    bool temporary{false};  // If true, don't save to file
+    sertial::fixed_string<64>  param_name;
+    sertial::fixed_string<256> value;    // JSON-encoded
+    bool temporary{false};               // if true, don't persist to file
 };
 
 struct SetParamReply {
     bool success{false};
-    char error_message[256];
+    sertial::fixed_string<128> error_message;
 };
 
 struct ParamInfo {
-    char name[64];
-    char type[32];
-    char value[256];
-    char default_value[256];
-    char range[128];  // "[min, max]" or empty
-    char description[256];
+    sertial::fixed_string<64>  name;
+    sertial::fixed_string<32>  type;
+    sertial::fixed_string<256> value;
+    sertial::fixed_string<256> default_value;
+    sertial::fixed_string<128> range;    // "[min, max]" or empty
 };
 
 struct ListParamsReply {
@@ -176,11 +176,11 @@ struct ListParamsReply {
 };
 
 struct SaveParamsCmd {
-    char path[256];  // If empty, use default location
+    sertial::fixed_string<256> path;     // empty = default location
 };
 
 struct LoadParamsCmd {
-    char path[256];
+    sertial::fixed_string<256> path;
     bool apply_immediately{true};
 };
 ```
@@ -212,11 +212,11 @@ public:
         notify_changed();
     }
     
-    // Runtime access (for commands)
-    std::optional<std::string> get_string(const std::string& name);
-    bool set_from_string(const std::string& name, const std::string& value);
-    
-    // Serialization
+    // Runtime access (for commands — not called from hot path)
+    bool get_as_json(const sertial::fixed_string<64>& name, sertial::fixed_string<256>& out) const;
+    bool set_from_json(const sertial::fixed_string<64>& name, const sertial::fixed_string<256>& value);
+
+    // Serialization (startup/shutdown only — not RT-safe)
     void load_from_json(const std::string& path);
     void save_to_json(const std::string& path);
 };
@@ -228,25 +228,59 @@ public:
 template<typename OutputSpec, typename InputSpec, typename ParamSpec = NoParams>
 class Module {
 protected:
-    // Parameter access
     ParamSpec params_;
-    
-    // Automatically called after parameter changes
+
+    // Called automatically after any parameter change (set via command or code).
     virtual void on_params_changed() {}
-    
+
 private:
-    // Automatic command handler
-    void handle_param_command(const ParamCommand& cmd) {
-        switch (cmd.type) {
-            case GetParam:
-                return handle_get_param(cmd);
-            case SetParam:
-                return handle_set_param(cmd);
-            // ... etc
-        }
-    }
+    // Automatic command handler — wired into the CMD mailbox visitor.
+    // No user code needed: Module2 detects 'typename ModuleType::Params'
+    // at compile time and registers these handlers automatically.
+    void handle_param_command(const ParamCommand& cmd);
 };
 ```
+
+### Module2 Automatic Command Handling
+
+Module2's existing per-output command threads already dispatch system commands
+(Subscribe, GetData) and user commands (DataWithCommands). Parameter commands
+are handled the same way — **no boilerplate in user modules**.
+
+At compile time, `command_loop_impl` detects the `Params<T>` IOSpec via `Module2::has_params`
+(a `static constexpr bool` derived from the IOSpecs) and inserts the parameter
+command handlers into the visitor. No user code is needed — declaring `Params<MyParams>`
+in the IOSpec is sufficient:
+
+```cpp
+// Auto-generated inside command_loop_impl (conceptual — user sees none of this):
+if constexpr (requires { typename ModuleType::Params; }) {
+    if constexpr (std::is_same_v<CmdType, SetParamCmd>) {
+        // 1. Locate the field by name using rfl field iteration
+        // 2. Parse the JSON-encoded value into the correct type
+        // 3. Apply range validation
+        // 4. Update params_ atomically
+        // 5. Call on_params_changed()
+        // 6. Send SetParamReply via CMD mailbox
+        handle_set_param(params_, received_msg.payload, reply);
+        return;
+    }
+    if constexpr (std::is_same_v<CmdType, GetParamCmd>) { ... }
+    if constexpr (std::is_same_v<CmdType, ListParamsCmd>) { ... }
+}
+```
+
+rfl field iteration (`rfl::for_each`) is used at runtime to find the named
+field and convert its value to/from the `fixed_string<256>` wire format.
+
+Parameter commands are routed to **output 0's CMD mailbox** (the module's
+primary command interface). A module with no outputs would use a dedicated
+module-level CMD mailbox (not yet implemented).
+
+**Thread safety**: `params_` is read from the data thread and written from the
+command thread. A `SharedMutex` guards the struct — the data thread holds a
+shared (read) lock, the command thread holds an exclusive (write) lock during
+`handle_set_param`.
 
 ## Benefits
 
@@ -274,8 +308,7 @@ protected:
         // Automatically called when parameters change
         float new_gain = params_.get<"gain">();
         filter_.set_gain(new_gain);
-        
-        std::cout << "Filter reconfigured with gain=" << new_gain << "\n";
+        RTLOG_INFO(logger_) << "Filter reconfigured with gain=" << new_gain;
     }
 };
 ```
@@ -285,7 +318,7 @@ protected:
 ```cpp
 // Organize related parameters
 struct NetworkParams : Parameters<
-    Param<"ip_address", std::string, Default<"127.0.0.1">>,
+    Param<"ip_address", sertial::fixed_string<64>, Default<"127.0.0.1">>,
     Param<"port", int, Default<5000>, Range<1024, 65535>>
 > {};
 
@@ -302,7 +335,7 @@ using MyModuleParams = CombineParams<NetworkParams, FilterParams>;
 
 ```cpp
 struct ConditionalParams : Parameters<
-    Param<"mode", std::string, Default<"auto">, Options<"auto", "manual", "test">>,
+    Param<"mode", sertial::fixed_string<16>, Default<"auto">, Options<"auto", "manual", "test">>,
     
     // Only used in manual mode
     Param<"manual_value", float, Default<0.0f>, 
