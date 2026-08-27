@@ -53,6 +53,9 @@ if(COMMRAT_BUILD_TESTS)
     add_subdirectory(test)
 endif()
 
+# Create the evl-descriptors target after all commrat_module() calls are done.
+commrat_finalize_evl_descriptors()
+
 #-----------------------------------------------------------------------------
 # commrat CLI binary
 #-----------------------------------------------------------------------------
