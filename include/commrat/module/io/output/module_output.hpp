@@ -69,7 +69,15 @@ public:
         SetParamsPayload,
         SetParamsReplyPayload,
         ListParamsPayload,
-        ListParamsReplyPayload
+        ListParamsReplyPayload,
+        GetParamPayload,
+        GetParamReplyPayload,
+        SetParamPayload,
+        SetParamReplyPayload,
+        SaveParamsPayload,
+        SaveParamsReplyPayload,
+        LoadParamsPayload,
+        LoadParamsReplyPayload
     >;
     
     // PUBLISH mailbox sends output data to subscribers (send-only)
