@@ -399,10 +399,12 @@ struct ConditionalParams : Parameters<
 - Example: `module_with_params_example.cpp`
 - Test: `test/test_params.cpp` (6 cases)
 
-### Phase 2 — per-field commands + persistence
+### Phase 2 — per-field commands + persistence (implemented)
 
 - `GetParamCmd` / `SetParamCmd` with `param_name` field (per-field, not whole-struct)
 - `SaveParamsCmd` / `LoadParamsCmd` — read/write a JSON file
+
+**EVL note**: both the data thread and command thread run OOB in EVL mode. `SaveParamsCmd`/`LoadParamsCmd` use `std::ofstream`/`std::ifstream` which demote the command thread to in-band. Once CoreRaT's EVL IPC backend lands (Phase 3 of CoreRaT), these handlers must use `corerat::RtFile` (EVL proxy I/O). Marked with `TODO(EVL)` comments in `module2.hpp`.
 
 ### Phase 4 — typed `Parameters<Param<...>>` system (future)
 

@@ -23,7 +23,11 @@ using SystemRegistry = MessageRegistry<
     UnsubscribeRequest,
     GetParamsCmd,
     SetParamsCmd,
-    ListParamsCmd
+    ListParamsCmd,
+    GetParamCmd,
+    SetParamCmd,
+    SaveParamsCmd,
+    LoadParamsCmd
 >;
 
 } // namespace commrat

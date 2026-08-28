@@ -30,6 +30,8 @@
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/module/params.hpp"
 #include <sertial/containers/reflectors.hpp>
+#include <rfl/json.hpp>
+#include <fstream>
 #include "commrat/messaging/system/param_messages.hpp"
 #include "commrat/module/helpers/command_extraction.hpp"
 #include "commrat/module/services/io_handler.hpp"
@@ -635,6 +637,116 @@ private:
                         reply.params.push_back(info);
                     }(fields), ...);
                 });
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        if constexpr (std::is_same_v<CmdType, GetParamPayload>) {
+            GetParamReplyPayload reply{};
+            if constexpr (has_params) {
+                std::string_view want(received_msg.payload.name.data());
+                SharedLock lk(params_mutex_);
+                rfl::to_named_tuple(params_).apply([&](const auto&... fields) {
+                    ([&](const auto& field) {
+                        if (!reply.found && field.name() == want) {
+                            using FieldType = std::decay_t<decltype(field.value())>;
+                            reply.name      = sertial::fixed_string<48>(std::string(want).c_str());
+                            reply.type_name = sertial::fixed_string<48>(rfl::type_name_t<FieldType>().str().c_str());
+                            auto val        = rfl::json::write(field.value());
+                            reply.value_json = sertial::fixed_string<256>(val.substr(0, 255).c_str());
+                            reply.found = true;
+                        }
+                    }(fields), ...);
+                });
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        if constexpr (std::is_same_v<CmdType, SetParamPayload>) {
+            SetParamReplyPayload reply{};
+            if constexpr (has_params) {
+                std::string_view name(received_msg.payload.name.data());
+                std::string_view value(received_msg.payload.value_json.data());
+                // Merge: serialize current params to Generic, update one key, parse back.
+                auto maybe_obj = rfl::json::read<rfl::Generic>(rfl::json::write(params_));
+                auto maybe_val = rfl::json::read<rfl::Generic>(std::string(value));
+                if (maybe_obj && maybe_val) {
+                    auto* obj_ptr = std::get_if<rfl::Generic::Object>(&maybe_obj.value().variant());
+                    if (obj_ptr) {
+                        (*obj_ptr)[std::string(name)] = maybe_val.value();
+                        auto merged = rfl::json::write(maybe_obj.value());
+                        auto result = rfl::json::read<ParamsType>(merged);
+                        if (result) {
+                            UniqueLockShared lk(params_mutex_);
+                            params_ = result.value();
+                            reply.success = true;
+                        } else {
+                            reply.error = sertial::fixed_string<128>("type mismatch or invalid value");
+                        }
+                    } else {
+                        reply.error = sertial::fixed_string<128>("params is not a JSON object");
+                    }
+                } else {
+                    reply.error = sertial::fixed_string<128>("invalid JSON value");
+                }
+                if (reply.success) on_params_changed();
+            } else {
+                reply.error = sertial::fixed_string<128>("module has no Params");
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        if constexpr (std::is_same_v<CmdType, SaveParamsPayload>) {
+            SaveParamsReplyPayload reply{};
+            if constexpr (has_params) {
+                std::string path(received_msg.payload.path.data());
+                if (path.empty()) {
+                    path = "/tmp/commrat_params_" + std::to_string(
+                        static_cast<int>(config_.system_id())) + "_" +
+                        std::to_string(static_cast<int>(config_.instance_id())) + ".json";
+                }
+                // TODO(EVL): std::ofstream demotes the command thread to in-band.
+                // Replace with corerat::RtFile once CoreRaT EVL IPC backend lands.
+                try {
+                    SharedLock lk(params_mutex_);
+                    std::ofstream f(path);
+                    if (f) {
+                        f << rfl::json::write(params_) << '\n';
+                        reply.success = true;
+                    } else {
+                        reply.error = sertial::fixed_string<128>("cannot open file");
+                    }
+                } catch (...) {
+                    reply.error = sertial::fixed_string<128>("write error");
+                }
+            } else {
+                reply.error = sertial::fixed_string<128>("module has no Params");
+            }
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        if constexpr (std::is_same_v<CmdType, LoadParamsPayload>) {
+            LoadParamsReplyPayload reply{};
+            if constexpr (has_params) {
+                std::string path(received_msg.payload.path.data());
+                // TODO(EVL): rfl::json::load uses std::ifstream — demotes command thread to in-band.
+                // Replace with corerat::RtFile once CoreRaT EVL IPC backend lands.
+                auto result = rfl::json::load<ParamsType>(path);
+                    {
+                        UniqueLockShared lk(params_mutex_);
+                        params_ = result.value();
+                    }
+                    on_params_changed();
+                    reply.success = true;
+                } else {
+                    reply.error = sertial::fixed_string<128>("load failed");
+                }
+            } else {
+                reply.error = sertial::fixed_string<128>("module has no Params");
             }
             cmd_mailbox.send_reply(received_msg, reply);
             return true;
