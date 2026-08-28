@@ -736,6 +736,7 @@ private:
                 // TODO(EVL): rfl::json::load uses std::ifstream — demotes command thread to in-band.
                 // Replace with corerat::RtFile once CoreRaT EVL IPC backend lands.
                 auto result = rfl::json::load<ParamsType>(path);
+                if (result) {
                     {
                         UniqueLockShared lk(params_mutex_);
                         params_ = result.value();
