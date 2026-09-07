@@ -183,8 +183,11 @@ public:
         }
 
         uint32_t duration_ms = 0;
-        // Auto-discover descriptors from the directory containing this binary
-        std::filesystem::path exe = std::filesystem::canonical(argv[0]);
+        // /proc/self/exe gives the real binary path regardless of how argv[0] was set
+        // (bare name via PATH, symlink, etc.). Fall back to argv[0] on other platforms.
+        std::error_code ec;
+        std::filesystem::path exe = std::filesystem::canonical("/proc/self/exe", ec);
+        if (ec) exe = std::filesystem::weakly_canonical(argv[0]);
         std::vector<std::string> descriptor_dirs{exe.parent_path().string()};
 
         for (int i = 2; i < argc; ++i) {
@@ -403,21 +406,24 @@ private:
     // Routing validation
     // ------------------------------------------------------------------
 
-    // Find the module in app.json that owns a given output address.
-    const ModuleDescription* find_module_by_output_addr(uint8_t sys, uint8_t inst) const {
-        for (const auto& mod : description_.modules)
-            for (const auto& out : mod.outputs)
-                if (out.system_id == sys && out.instance_id == inst)
-                    return &mod;
-        return nullptr;
-    }
-
-    // Find the output index within a module that matches a given address.
-    static size_t find_output_index(const ModuleDescription& mod, uint8_t sys, uint8_t inst) {
-        for (size_t i = 0; i < mod.outputs.size(); ++i)
-            if (mod.outputs[i].system_id == sys && mod.outputs[i].instance_id == inst)
-                return i;
-        return mod.outputs.size(); // not found
+    // Find the module + output index that matches (sys, inst) AND the expected type.
+    // Two modules may share (sys, inst) if their type_ids differ — the full address
+    // is [type][sys][inst][mbx], so only the combination of all three is unique.
+    std::pair<const ModuleDescription*, size_t>
+    find_source(uint8_t sys, uint8_t inst, const std::string& expected_type) const {
+        for (const auto& mod : description_.modules) {
+            auto it = descriptors_.find(mod.module_class);
+            if (it == descriptors_.end()) continue;
+            const auto& desc = it->second;
+            if (!desc.outputs) continue;
+            for (size_t i = 0; i < mod.outputs.size() && i < desc.outputs->size(); ++i) {
+                if (mod.outputs[i].system_id == sys &&
+                    mod.outputs[i].instance_id == inst &&
+                    (*desc.outputs)[i] == expected_type)
+                    return {&mod, i};
+            }
+        }
+        return {nullptr, 0};
     }
 
     // Check one connection: expected type (from consumer descriptor) vs actual type (from producer descriptor).
@@ -426,32 +432,28 @@ private:
                           size_t idx,
                           const std::string& expected_type,
                           uint8_t src_sys, uint8_t src_inst) const {
-        const auto* src_mod = find_module_by_output_addr(src_sys, src_inst);
+        auto [src_mod, out_idx] = find_source(src_sys, src_inst, expected_type);
         if (!src_mod) {
-            std::cerr << "[Launcher] WARNING: " << consumer_name << "." << role
-                      << "[" << idx << "] source address ("
-                      << static_cast<int>(src_sys) << ":" << static_cast<int>(src_inst)
-                      << ") not found in app.json\n";
-            return;
+            // Check whether any module exists at this address so we can give a better diagnostic.
+            bool addr_exists = false;
+            for (const auto& mod : description_.modules)
+                for (const auto& out : mod.outputs)
+                    if (out.system_id == src_sys && out.instance_id == src_inst)
+                        { addr_exists = true; break; }
+            if (!addr_exists) {
+                std::cerr << "[Launcher] WARNING: " << consumer_name << "." << role
+                          << "[" << idx << "] source address ("
+                          << static_cast<int>(src_sys) << ":" << static_cast<int>(src_inst)
+                          << ") not found in app.json\n";
+            } else {
+                throw std::runtime_error(
+                    "[Launcher] Routing mismatch: " + consumer_name + "." + role +
+                    "[" + std::to_string(idx) + "] expects '" + expected_type +
+                    "' but no output of that type exists at address ("
+                    + std::to_string(src_sys) + ":" + std::to_string(src_inst) + ")");
+            }
         }
-        const auto* src_desc = [&]() -> const ModuleDescriptor* {
-            auto it = descriptors_.find(src_mod->module_class);
-            return it != descriptors_.end() ? &it->second : nullptr;
-        }();
-        if (!src_desc || !src_desc->outputs) return; // no schema yet
-
-        size_t out_idx = find_output_index(*src_mod, src_sys, src_inst);
-        if (out_idx >= src_desc->outputs->size()) return;
-
-        const std::string& actual_type = (*src_desc->outputs)[out_idx];
-        if (actual_type != expected_type) {
-            throw std::runtime_error(
-                "[Launcher] Routing mismatch: " + consumer_name + "." + role +
-                "[" + std::to_string(idx) + "] expects '" + expected_type +
-                "' but source module '" + src_mod->name +
-                "' (" + std::to_string(src_sys) + ":" + std::to_string(src_inst) +
-                ") outputs '" + actual_type + "'");
-        }
+        // If find_source returned a match, the type is already confirmed correct.
     }
 
     void validate_routing() const {

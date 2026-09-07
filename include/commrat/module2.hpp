@@ -151,6 +151,7 @@ private:
         using IOService::initialize_inputs;
        using IOService::subscribe_inputs;
         using IOService::unsubscribe_inputs;
+        using IOService::ensure_subscribed;
         // Alias to IOBuilder::Meta for convenience
         using Meta = typename IOBuilder::Meta;
     };
@@ -310,6 +311,39 @@ protected:
 protected:
     virtual void on_start() {}  // Optional override for startup logic
     virtual void on_stop() {}   // Optional override for shutdown logic
+
+    // ========================================================================
+    // Outbound commands
+    // ========================================================================
+
+    /**
+     * @brief Send a command to another module's CMD mailbox.
+     *
+     * Sends via the module's WORK mailbox (no dedicated thread, no reply wait).
+     * Call from process(), on_start() or on_stop().
+     *
+     * @tparam TargetData  Output payload type of the target module — selects its
+     *                     type_id so the CMD mailbox address can be derived.
+     * @tparam CmdT        Command payload type (must be registered).
+     */
+    template<typename TargetData, typename CmdT>
+    bool send_command(uint8_t target_system_id, uint8_t target_instance_id, CmdT cmd) {
+        if (!work_mailbox_) return false;
+        const uint32_t cmd_addr =
+            calculate_base_address<TargetData, std::tuple<TargetData>, Registry>(
+                target_system_id, target_instance_id);
+        return static_cast<bool>(work_mailbox_->send(cmd, cmd_addr));
+    }
+
+    /// Overload for a pre-computed CMD mailbox address.
+    template<typename CmdT>
+    bool send_command(uint32_t target_cmd_address, CmdT cmd) {
+        if (!work_mailbox_) return false;
+        return static_cast<bool>(work_mailbox_->send(cmd, target_cmd_address));
+    }
+
+    /// This module's WORK mailbox address — use as a caller identity token.
+    [[nodiscard]] uint32_t work_address() const { return compute_work_addr(config_); }
 
     // ---- Parameter interface — auto-implemented when Params<T> is in IOSpecs ----
     virtual void on_params_changed() {}
@@ -775,6 +809,12 @@ private:
             // Step 1: Fetch input data (if input-driven, delegates to IOService)
             // Skip process() if primary input had no new data (poll timeout)
             if constexpr (IO::Meta::is_input_driven) {
+                // Retry subscription each iteration until the producer is ready
+                // (mirrors RACK moduleOn() loop-until-first-data pattern)
+                if (!this->ensure_subscribed(std::make_index_sequence<IO::Meta::num_inputs>{})) {
+                    Time::sleep(Milliseconds(100));
+                    continue;
+                }
                 bool got_data = this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
                 if (!got_data) {
                     RTLOG_DEBUG(logger_) << "[data_loop] input poll timeout, skipping";

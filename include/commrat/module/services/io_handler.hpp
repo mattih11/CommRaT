@@ -425,10 +425,32 @@ protected:
         using InputWrapper = std::decay_t<decltype(input)>;
         if constexpr (is_continuous_input_v<InputWrapper>) {
             Duration actual_period;
-            if (!input.subscribe(actual_period)) {
-                // TODO: Handle subscription failure
+            input.subscribe(actual_period);  // Best-effort; data_loop retries if producer not ready
+        }
+    }
+
+    /**
+     * @brief Ensure all ContinuousInputs are subscribed, subscribing now if not yet.
+     * Returns true only when every ContinuousInput is subscribed.
+     * Called from data_loop so the module retries until the producer is ready
+     * (mirrors RACK's moduleOn() loop-until-first-data pattern).
+     */
+    template<size_t... InputIndices>
+    bool ensure_subscribed(std::index_sequence<InputIndices...>) {
+        return (ensure_input_subscribed<InputIndices>() && ...);
+    }
+
+    template<size_t InputIndex>
+    bool ensure_input_subscribed() {
+        auto& input = get_input<InputIndex>();
+        using InputWrapper = std::decay_t<decltype(input)>;
+        if constexpr (is_continuous_input_v<InputWrapper>) {
+            if (!input.is_subscribed()) {
+                Duration actual_period;
+                return input.subscribe(actual_period);
             }
         }
+        return true;
     }
     
     /**
