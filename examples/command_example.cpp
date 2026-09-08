@@ -8,6 +8,7 @@
 #include <csignal>
 #include <atomic>
 #include <cmath>
+#include <optional>
 #include <corerat/platform/timestamp.hpp>
 
 using namespace example_messages;
@@ -84,7 +85,11 @@ class CommandableSensor : public CommandApp::Module2<
 > {
 public:
     explicit CommandableSensor(const ModuleConfig& config) 
-        : CommandApp::Module2<Output<TemperatureData>, Period<200>>(config) {}
+        : CommandApp::Module2<Output<TemperatureData>, Period<200>>(config) {
+        this->template register_command_handler<0, ResetCmd, &CommandableSensor::handle_reset>(*this);
+        this->template register_command_handler<0, CalibrateCmd, &CommandableSensor::handle_calibrate>(*this);
+        this->template register_command_handler<0, SetModeCmd, &CommandableSensor::handle_set_mode>(*this);
+    }
     
 protected:
     // Periodic data generation
@@ -99,11 +104,8 @@ protected:
         output.confidence = 1.0f;
     }
     
-    // Command handlers - framework calls the right one automatically!
-    // OutputIndex template parameter allows multi-output modules with different commands per output
-    
-    template<size_t OutputIndex>
-    void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+private:
+    void handle_reset(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
         RTLOG_INFO(logger_) << "[Sensor] Reset hard=" << static_cast<uint32_t>(cmd.hard_reset);
         
         reply.previous_mode = mode_;
@@ -120,8 +122,7 @@ protected:
         }
     }
     
-    template<size_t OutputIndex>
-    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+    void handle_calibrate(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
         RTLOG_INFO(logger_) << "[Sensor] Calibrate offset=" << cmd.offset;
         
         reply.previous_offset = calibration_offset_;
@@ -129,8 +130,7 @@ protected:
         reply.success = true;
     }
     
-    template<size_t OutputIndex>
-    void on_command(const SetModeCmd& cmd, typename SetModeCmd::Reply& reply) {
+    void handle_set_mode(const SetModeCmd& cmd, typename SetModeCmd::Reply& reply) {
         RTLOG_INFO(logger_) << "[Sensor] SetMode mode=" << cmd.mode;
         
         reply.previous_mode = mode_;
@@ -138,7 +138,6 @@ protected:
         reply.success = true;
     }
 
-private:
     float calibration_offset_ = 0.0f;
     uint32_t mode_ = 0;
     int counter_ = 0;
@@ -170,7 +169,8 @@ int main() {
         .name = "CommandableSensor",
         .outputs = commrat::SimpleOutputConfig{.system_id = 10, .instance_id = 1},
         .inputs = commrat::NoInputConfig{},
-        .period = std::chrono::milliseconds(200)
+        .period = std::chrono::milliseconds(200),
+        .params = std::nullopt
     };
     
     CommandableSensor sensor(sensor_config);
@@ -196,7 +196,7 @@ int main() {
     std::cout << "Commands associated with data:\n";
     std::cout << "  DataWithCommands<TempData, ResetCmd, CalibrateCmd, SetModeCmd>\n\n";
     std::cout << "Command handlers:\n";
-    std::cout << "  template<size_t OutIdx> void on_command(const CmdType&, Reply&)\n\n";
+    std::cout << "  register_command_handler<OutIdx, CmdType, &Module::handler>(*this)\n\n";
     std::cout << "Benefits:\n";
     std::cout << "  - No variadic template pollution in module declaration\n";
     std::cout << "  - Commands grouped with their data type\n";

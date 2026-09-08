@@ -104,6 +104,44 @@ struct ExtractCommands<DataWithCommands<PayloadType, CommandTypes...>> {
 template<typename T>
 using extract_commands_t = typename ExtractCommands<T>::type;
 
+template<typename T, typename = void>
+struct HasUserMessageDefs : std::false_type {};
+
+template<typename T>
+struct HasUserMessageDefs<T, std::void_t<typename T::UserMessageDefs>> : std::true_type {};
+
+template<typename DataType, typename Candidate>
+struct CommandsForCandidate {
+    using type = std::tuple<>;
+};
+
+template<typename DataType, typename PayloadType, typename... CommandTypes>
+struct CommandsForCandidate<DataType, DataWithCommands<PayloadType, CommandTypes...>> {
+    using type = std::conditional_t<
+        std::is_same_v<DataType, PayloadType>,
+        std::tuple<CommandPayloadType_t<CommandTypes>...>,
+        std::tuple<>
+    >;
+};
+
+template<typename DataType, typename Tuple>
+struct CommandsForPayloadInTuple;
+
+template<typename DataType, typename... Candidates>
+struct CommandsForPayloadInTuple<DataType, std::tuple<Candidates...>> {
+    using type = decltype(std::tuple_cat(std::declval<typename CommandsForCandidate<DataType, Candidates>::type>()...));
+};
+
+template<typename DataType, typename Registry, bool HasUserDefs = HasUserMessageDefs<Registry>::value>
+struct CommandsForPayloadFromRegistry {
+    using type = std::tuple<>;
+};
+
+template<typename DataType, typename Registry>
+struct CommandsForPayloadFromRegistry<DataType, Registry, true> {
+    using type = typename CommandsForPayloadInTuple<DataType, typename Registry::UserMessageDefs>::type;
+};
+
 } // namespace detail
 
 /**
@@ -114,11 +152,12 @@ using extract_commands_t = typename ExtractCommands<T>::type;
  */
 template<typename DataType, typename Registry>
 struct GetCommandsFor {
-    using type = std::conditional_t<
+    using direct_type = std::conditional_t<
         detail::IsDataWithCommands<DataType>::value,
         detail::extract_commands_t<DataType>,
-        std::tuple<>
+        typename detail::CommandsForPayloadFromRegistry<DataType, Registry>::type
     >;
+    using type = direct_type;
 };
 
 template<typename DataType, typename Registry>

@@ -90,6 +90,10 @@ add_executable(test_subscription_protocol test_subscription_protocol.cpp)
 target_link_libraries(test_subscription_protocol PRIVATE commrat)
 add_test(NAME test_subscription_protocol COMMAND test_subscription_protocol)
 
+add_executable(test_command_rpc test_command_rpc.cpp)
+target_link_libraries(test_command_rpc PRIVATE commrat)
+add_test(NAME test_command_rpc COMMAND test_command_rpc)
+
 # Example run tests (only if examples were built)
 if(COMMRAT_BUILD_EXAMPLES)
     add_test(NAME example_continuous_input

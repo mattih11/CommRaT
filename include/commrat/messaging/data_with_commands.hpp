@@ -72,6 +72,19 @@ struct DataWithCommands {
     static constexpr bool needs_auto_id = DataMessage::needs_auto_id;
 };
 
+template<typename CommandT, typename = void>
+struct CommandPayloadType {
+    using type = CommandT;
+};
+
+template<typename CommandT>
+struct CommandPayloadType<CommandT, std::void_t<typename CommandT::Payload>> {
+    using type = typename CommandT::Payload;
+};
+
+template<typename CommandT>
+using CommandPayloadType_t = typename CommandPayloadType<CommandT>::type;
+
 /**
  * @brief Helper to check if a type is DataWithCommands
  */
@@ -94,7 +107,7 @@ struct ExtractCommands {
 
 template<typename PayloadT, typename... CommandTypes>
 struct ExtractCommands<DataWithCommands<PayloadT, CommandTypes...>> {
-    using type = std::tuple<CommandTypes...>;
+    using type = std::tuple<CommandPayloadType_t<CommandTypes>...>;
 };
 
 template<typename T>

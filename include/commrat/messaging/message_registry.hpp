@@ -31,13 +31,96 @@ using TimsMessage = corerat::WireMessage<T>;
 template<typename UserRegistry, typename OutputSpec_, typename InputSpec_, typename... CommandTypes>
 class Module;
 template<typename... MessageDefs> class MessageRegistry;
+template<typename... MessageDefs> struct AutoAssignIDs;
+template<typename PayloadT, typename... CommandTypes> struct DataWithCommands;
+
+template<typename T, typename = void>
+struct HasNestedReply : std::false_type {};
+
+template<typename T>
+struct HasNestedReply<T, std::void_t<typename T::Reply>> : std::true_type {};
+
+template<typename T, typename = void>
+struct IsMessageDefinition : std::false_type {};
+
+template<typename T>
+struct IsMessageDefinition<T, std::void_t<typename T::is_message_definition_tag>> : std::true_type {};
+
+template<typename CommandT>
+struct NormalizeCommandMessageDef {
+    static_assert(HasNestedReply<CommandT>::value,
+                  "DataWithCommands command payloads must define a nested Reply type");
+    using type = MessageDefinition<
+        CommandT,
+        MessagePrefix::UserDefined,
+        UserSubPrefix::Commands,
+        DefaultMessageDef::id,
+        typename CommandT::Reply
+    >;
+};
+
+template<typename CommandT>
+    requires IsMessageDefinition<CommandT>::value
+struct NormalizeCommandMessageDef<CommandT> {
+    using type = CommandT;
+};
+
+template<typename T>
+struct NormalizeDataWithCommands {
+    using type = T;
+};
+
+template<typename T>
+struct IsTuple : std::false_type {};
+
+template<typename... Ts>
+struct IsTuple<std::tuple<Ts...>> : std::true_type {};
+
+template<typename PayloadT, typename... CommandTypes>
+struct NormalizeDataWithCommands<DataWithCommands<PayloadT, CommandTypes...>> {
+    using type = std::tuple<
+        MessageDefinition<PayloadT, MessagePrefix::UserDefined, UserSubPrefix::Data, DefaultMessageDef::id>,
+        typename NormalizeCommandMessageDef<CommandTypes>::type...
+    >;
+};
+
+template<typename... MessageDefs>
+struct NormalizeMessageDefs;
+
+template<>
+struct NormalizeMessageDefs<> {
+    using type = std::tuple<>;
+};
+
+template<typename First, typename... Rest>
+struct NormalizeMessageDefs<First, Rest...> {
+private:
+    using FirstNormalized = typename NormalizeDataWithCommands<First>::type;
+    using FirstTuple = std::conditional_t<
+        IsTuple<FirstNormalized>::value,
+        FirstNormalized,
+        std::tuple<FirstNormalized>
+    >;
+    using RestTuple = typename NormalizeMessageDefs<Rest...>::type;
+
+public:
+    using type = decltype(std::tuple_cat(std::declval<FirstTuple>(), std::declval<RestTuple>()));
+};
+
+template<typename Tuple>
+struct TupleToAutoAssignIDs;
+
+template<typename... Defs>
+struct TupleToAutoAssignIDs<std::tuple<Defs...>> {
+    using type = typename AutoAssignIDs<Defs...>::Result;
+};
 
 // ============================================================================
 // Registry to Mailbox Type Extraction
 // ============================================================================
 
 /**
- * @brief Helper to detect if a type has ::Registry member (CommRaT pattern)
+ * @brief Helper to detect if a type has a nested Registry alias (CommRaT pattern)
  */
 template<typename T, typename = void>
 struct HasRegistryMember : std::false_type {};
@@ -276,9 +359,11 @@ using corerat::CheckCollisions;
 template<typename... MessageDefs>
 class MessageRegistry {
 private:
+    using NormalizedMessageDefs = typename NormalizeMessageDefs<MessageDefs...>::type;
+
     // Step 1: Auto-assign IDs to user messages (includes automatic GetData message creation)
     // AutoAssignIDs now handles GetData message creation with matching IDs
-    using IDsAssigned = typename AutoAssignIDs<MessageDefs...>::Result;
+    using IDsAssigned = typename TupleToAutoAssignIDs<NormalizedMessageDefs>::type;
     
     // Step 2: Expand request messages to include their replies
     template<typename Tuple>

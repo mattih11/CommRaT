@@ -770,39 +770,72 @@ using MyApp = commrat::CommRaT<
 
 ### 9.2 Implementing Command Handlers
 
-Use `on_command<OutputIndex>()` templates in your module:
+Register typed handlers in your module constructor. Registration is fixed-capacity and does not allocate.
 
 ```cpp
 class CommandableSensor : public MyApp::Module2<
     Output<TemperatureData>,
     Period<200>
 > {
+public:
+    explicit CommandableSensor(const ModuleConfig& config)
+        : MyApp::Module2<Output<TemperatureData>, Period<200>>(config) {
+        this->template register_command_handler<0, CalibrateCmd, &CommandableSensor::handle_calibrate>(*this);
+        this->template register_command_handler<0, ResetCmd, &CommandableSensor::handle_reset>(*this);
+    }
+
 protected:
     void process(TemperatureData& output) override {
         output.temperature_c = read_sensor() + calibration_offset_;
     }
 
-    template<size_t OutputIndex>
-    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+private:
+    void handle_calibrate(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
         reply.previous_offset = calibration_offset_;
         calibration_offset_ = cmd.offset;
         reply.success = true;
     }
 
-    template<size_t OutputIndex>
-    void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+    void handle_reset(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
         calibration_offset_ = 0.0f;
         reply.success = true;
     }
 
-private:
     float calibration_offset_ = 0.0f;
 };
 ```
 
 ### 9.3 Command Dispatch
 
-Commands arrive on the output's CMD mailbox. The framework dispatches to the correct `on_command` handler based on message type. System commands (SubscribeRequest, UnsubscribeRequest, GetDataRequest) are handled automatically.
+Commands arrive on the output's CMD mailbox. The framework dispatches to the registered handler based on output index and command message type. System commands (SubscribeRequest, UnsubscribeRequest, GetDataRequest) are handled automatically.
+
+### 9.4 Sending Commands and Receiving Replies
+
+Use the timeout-taking `send_command` overload when the target module is known by address:
+
+```cpp
+auto reply = this->template send_command<TemperatureData, CalibrateCmd>(
+    10,
+    1,
+    CalibrateCmd{.offset = 0.25f},
+    Milliseconds(100)
+);
+
+if (reply && reply->payload.success) {
+    float previous = reply->payload.previous_offset;
+}
+```
+
+Use `send_command_to_input` when the target is one of this module's configured inputs:
+
+```cpp
+auto reply = this->template send_command_to_input<0, CalibrateCmd>(
+    CalibrateCmd{.offset = 0.25f},
+    Milliseconds(100)
+);
+```
+
+Both APIs send through the module WORK mailbox, wait with a bounded timeout, filter replies by source address, and return `std::nullopt` on timeout or send failure. The existing bool-returning `send_command<TargetData>(sys, inst, cmd)` remains the fire-and-forget form.
 
 ---
 

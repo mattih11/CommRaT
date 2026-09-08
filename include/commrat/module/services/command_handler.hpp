@@ -92,11 +92,12 @@ protected:
      * @brief Get user commands for specific output
      */
     template<size_t OutputIndex>
-    using UserCommandsFor = ExtractUserCommands_t<
+    using UserCommandsFor = registry::get_commands_for_t<
         typename std::tuple_element_t<
             get_output_tuple_index<OutputIndex>(),
             IOTuple
-        >::message_def_type
+        >::Type,
+        Registry
     >;
     
     // ========================================================================
@@ -148,14 +149,8 @@ protected:
         if constexpr (has_reply_type_v<CmdType>) {
             // Simple tuple membership check
             if constexpr (is_in_tuple_v<CmdType, UserCommands>) {
-                // CRTP: derived module must implement on_command<OutputIndex>(cmd, reply)
-                typename CmdType::Reply reply{};
-                derived->template on_command<OutputIndex>(received_msg.payload, reply);
-                
-                // Send reply via CMD mailbox (same pattern as system commands)
                 auto& cmd_mailbox = output.get_cmd_mailbox();
-                cmd_mailbox.send_reply(received_msg, reply);
-                return true;
+                return derived->template dispatch_registered_command<OutputIndex>(received_msg, cmd_mailbox);
             }
         }
         

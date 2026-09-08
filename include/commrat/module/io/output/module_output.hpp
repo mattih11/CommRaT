@@ -8,6 +8,7 @@
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/data_request_messages.hpp"
 #include "commrat/messaging/system/param_messages.hpp"
+#include "commrat/messaging/registry_utils.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
 #include <corerat/platform/timestamp.hpp>
 #include <corerat/platform/duration.hpp>
@@ -53,9 +54,30 @@ public:
     // Type introspection for infrastructure helpers
     using DataMessage = Message::Data<T>;
     using message_def_type = DataMessage;  // Alias for command_handler compatibility
+
+private:
+    template<typename Tuple>
+    struct CommandRepliesFor;
+
+    template<typename... CmdTypes>
+    struct CommandRepliesFor<std::tuple<CmdTypes...>> {
+        using type = std::tuple<typename CmdTypes::Reply...>;
+    };
+
+    template<typename Tuple>
+    struct CmdMailboxFromPayloadTuple;
+
+    template<typename... PayloadTypes>
+    struct CmdMailboxFromPayloadTuple<std::tuple<PayloadTypes...>> {
+        using type = TypedMailbox<CommratApp, PayloadTypes...>;
+    };
+
+public:
+    using UserCommandPayloads = registry::get_commands_for_t<T, CommratApp>;
+    using UserCommandReplyPayloads = typename CommandRepliesFor<UserCommandPayloads>::type;
     
     // CMD mailbox handles system commands and data request messages
-    using CmdMailbox = TypedMailbox<CommratApp,
+    using SystemCommandPayloads = std::tuple<
         SubscribeRequestPayload,
         SubscribeReplyPayload,
         UnsubscribeRequestPayload,
@@ -79,6 +101,14 @@ public:
         LoadParamsPayload,
         LoadParamsReplyPayload
     >;
+
+    using CmdMailboxPayloads = decltype(std::tuple_cat(
+        std::declval<SystemCommandPayloads>(),
+        std::declval<UserCommandPayloads>(),
+        std::declval<UserCommandReplyPayloads>()
+    ));
+
+    using CmdMailbox = typename CmdMailboxFromPayloadTuple<CmdMailboxPayloads>::type;
     
     // PUBLISH mailbox sends output data to subscribers (send-only)
     using PublishMailbox = TypedMailbox<CommratApp, T>;

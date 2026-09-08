@@ -159,6 +159,36 @@ template<size_t InputIndex> bool is_input_valid() const;
 
 All require `InputIndex < IO::Meta::num_inputs`.
 
+### Protected Command APIs
+
+Commands are associated with an output payload using `DataWithCommands<Payload, Cmds...>`.
+Each command payload must define a nested `Reply` payload type.
+
+```cpp
+template<size_t OutputIndex, typename CmdT, auto Handler, typename ModuleT>
+bool register_command_handler(ModuleT& module);
+
+template<typename TargetData, typename CmdT>
+bool send_command(uint8_t target_system_id, uint8_t target_instance_id, CmdT cmd);
+
+template<typename TargetData, typename CmdT>
+std::optional<TimsMessage<typename CmdT::Reply>> send_command(
+    uint8_t target_system_id,
+    uint8_t target_instance_id,
+    const CmdT& cmd,
+    Duration timeout);
+
+template<size_t InputIndex, typename CmdT>
+std::optional<TimsMessage<typename CmdT::Reply>> send_command_to_input(
+    const CmdT& cmd,
+    Duration timeout = Milliseconds(100));
+```
+
+`register_command_handler` stores a fixed-capacity typed thunk and performs no heap allocation.
+The timeout-taking send APIs use the module WORK mailbox for bounded request/reply RPC and
+return `std::nullopt` on send failure or timeout. The bool-returning overload remains the
+fire-and-forget form.
+
 ### Protected Member
 
 ```cpp

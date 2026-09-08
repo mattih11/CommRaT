@@ -19,22 +19,29 @@
 ### What Works Today
 
 #### Receiving Commands (Producer Side)
-- **Mechanism**: `on_command<OutputIndex>(cmd, reply)` CRTP override
+- **Mechanism**: `register_command_handler<OutputIndex, Cmd, &Module::handler>(*this)`
 - **Per-Output**: Each output has a dedicated command thread
 - **Automatic Dispatch**: Framework routes commands to correct handler via visitor pattern
 - **Location**: `module2.hpp` line 580-660 (`command_loop_impl()`)
 - **System Commands**: Subscribe/Unsubscribe/GetData handled automatically
-- **User Commands**: Custom commands dispatched to user's `on_command<>` override
+- **User Commands**: Custom commands dispatched through a fixed-capacity handler table
 - **Replies**: Sent via `cmd_mailbox.send_reply(received_msg, reply)`
 
 **Example**:
 ```cpp
-template<size_t OutputIndex>
-void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+class Sensor : public App::Module2<Output<TemperatureData>, Period<Milliseconds(100)>> {
+public:
+    explicit Sensor(const ModuleConfig& config) : App::Module2<...>(config) {
+        this->template register_command_handler<0, CalibrateCmd, &Sensor::handle_calibrate>(*this);
+    }
+
+private:
+void handle_calibrate(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
     reply.previous_offset = calibration_offset_;
     calibration_offset_ = cmd.offset;
     reply.success = true;
 }
+};
 ```
 
 #### Sending Commands (Consumer Side)
@@ -245,30 +252,36 @@ if (reply) { ... }
 
 ### Producer API (Receiving Commands)
 
-#### Current (Still Good)
+#### Current: Registered Typed Handlers
 ```cpp
-template<size_t OutputIndex>
-void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+class Sensor : public App::Module2<Output<TemperatureData>, Period<Milliseconds(100)>> {
+public:
+    explicit Sensor(const ModuleConfig& config) : App::Module2<...>(config) {
+        this->template register_command_handler<0, CalibrateCmd, &Sensor::handle_calibrate>(*this);
+    }
+
+private:
+void handle_calibrate(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
     reply.previous_offset = calibration_offset_;
     calibration_offset_ = cmd.offset;
     reply.success = true;
 }
+};
 ```
 
 #### Enhancement: Multi-Command Convenience
 
 ```cpp
-template<size_t OutputIndex>
-void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) { ... }
+this->template register_command_handler<0, ResetCmd, &Sensor::handle_reset>(*this);
+this->template register_command_handler<0, CalibrateCmd, &Sensor::handle_calibrate>(*this);
+this->template register_command_handler<0, SetModeCmd, &Sensor::handle_set_mode>(*this);
 
-template<size_t OutputIndex>
-void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) { ... }
-
-template<size_t OutputIndex>
-void on_command(const SetModeCmd& cmd, typename SetModeCmd::Reply& reply) { ... }
+void handle_reset(const ResetCmd& cmd, ResetCmd::Reply& reply) { ... }
+void handle_calibrate(const CalibrateCmd& cmd, CalibrateCmd::Reply& reply) { ... }
+void handle_set_mode(const SetModeCmd& cmd, SetModeCmd::Reply& reply) { ... }
 ```
 
-**Status**: Already works! Multiple overloads dispatch automatically via visitor pattern.
+**Status**: Implemented. Registration is explicit and allocation-free. A future convenience layer can reduce the constructor boilerplate, but the dispatch core is now type-safe and test-covered.
 
 #### Enhancement: Unknown Command Handler (Graceful Degradation)
 
@@ -482,7 +495,9 @@ class CommandableSensor : public RPCExampleApp::Module2<
 > {
 public:
     explicit CommandableSensor(const ModuleConfig& config) 
-        : RPCExampleApp::Module2<Output<TemperatureData>, Period<commrat::Milliseconds(200)>>(config) {}
+        : RPCExampleApp::Module2<Output<TemperatureData>, Period<commrat::Milliseconds(200)>>(config) {
+        this->template register_command_handler<0, CalibrateCmd, &CommandableSensor::handle_calibrate>(*this);
+    }
 
 protected:
     void process(TemperatureData& output) override {
@@ -490,15 +505,14 @@ protected:
         output.temperature_c = 20.0f + calibration_offset_;
         output.confidence = 1.0f;
     }
-    
-    template<size_t OutputIndex>
-    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+
+private:
+    void handle_calibrate(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
         reply.previous_offset = calibration_offset_;
         calibration_offset_ = cmd.offset;
         reply.success = true;
     }
 
-private:
     float calibration_offset_ = 0.0f;
 };
 
@@ -631,30 +645,33 @@ class MultiSensor : public MultiOutputSensor::Module2<
     Output<SensorDataB>,
     Period<Milliseconds(100)>
 > {
+public:
+    explicit MultiSensor(const ModuleConfig& config) : MultiOutputSensor::Module2<...>(config) {
+        this->template register_command_handler<0, ResetCmd, &MultiSensor::reset_a>(*this);
+        this->template register_command_handler<1, ResetCmd, &MultiSensor::reset_b>(*this);
+        this->template register_command_handler<1, CalibrateCmd, &MultiSensor::calibrate_b>(*this);
+    }
+
 protected:
     void process(SensorDataA& out_a, SensorDataB& out_b) override {
         out_a.value = read_sensor_a();
         out_b.value = read_sensor_b();
     }
-    
-    // Command handlers: OutputIndex disambiguates which output
-    template<size_t OutputIndex>
-    void on_command(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
-        if constexpr (OutputIndex == 0) {
-            reset_sensor_a();
-        } else if constexpr (OutputIndex == 1) {
-            reset_sensor_b();
-        }
+
+private:
+    void reset_a(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+        reset_sensor_a();
         reply.success = true;
     }
-    
-    template<size_t OutputIndex>
-    void on_command(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
-        if constexpr (OutputIndex == 1) {  // Only output 1 handles this
-            calibrate_sensor_b(cmd.offset);
-            reply.success = true;
-        }
-        // Output 0 doesn't have this command - won't compile
+
+    void reset_b(const ResetCmd& cmd, typename ResetCmd::Reply& reply) {
+        reset_sensor_b();
+        reply.success = true;
+    }
+
+    void calibrate_b(const CalibrateCmd& cmd, typename CalibrateCmd::Reply& reply) {
+        calibrate_sensor_b(cmd.offset);
+        reply.success = true;
     }
 };
 ```
@@ -664,27 +681,27 @@ protected:
 ## Migration Path
 
 ### Current Status (Today)
-- ✅ `on_command<OutputIndex>(cmd, reply)` receiving works
-- ✅ Fire-and-forget `send_command<TargetData>(sys, inst, cmd)` works
-- ✅ RPC pattern via `CmdInput` works (but clunky in process function)
-- ❌ No integrated RPC from process function
-- ❌ No command metadata/reflection
+- DONE: Registered typed command receiving works through `register_command_handler<OutputIndex, Cmd, &Module::handler>(*this)`.
+- DONE: Fire-and-forget `send_command<TargetData>(sys, inst, cmd)` works.
+- DONE: RPC pattern via `CmdInput` works and now has an optional-return payload overload.
+- DONE: Integrated RPC from Module2 works via timeout-taking `send_command<OutputDataType, CmdType>(...)` and `send_command_to_input<InputIndex, CmdType>(...)`.
+- TODO: Command metadata/reflection.
 
-### Phase 1 (Recommended Next): RPC from Process
+### Phase 1: RPC from Process
 
 1. Add to `module2.hpp`:
    - `send_command_to_input<InputIndex, CmdType>(cmd, timeout)` → `std::optional<TimsMessage<Reply>>`
    - `send_command<OutputDataType, CmdType>(sys, inst, cmd, timeout)` → `std::optional<TimsMessage<Reply>>`
 
-2. Add to `io_handler.hpp`:
-   - Helper `get_input_producer_id<InputIndex>()` → `{sys_id, inst_id}`
-   - Used by `send_command_to_input` to look up producer
+2. Add to `cmd_input.hpp`:
+    - Payload-based `send_command(cmd, timeout)` → `std::optional<TimsMessage<Reply>>`
+    - Source filtering and timeout reuse the existing lower-level RPC loop
 
 3. **Backward Compatibility**: Keep old fire-and-forget functions, mark as "for async use"
 
-4. **Documentation**: Update API_REFERENCE.md with new patterns
+4. **Command Dispatch**: Replace the non-functional CRTP call path with registered typed handlers.
 
-**Effort**: Medium (1-2 days) — mainly template code, reuses existing CmdInput pattern
+**Status**: Implemented with `test_command_rpc` coverage.
 
 ### Phase 2: Command Metadata
 
@@ -707,10 +724,10 @@ protected:
 
 All proposed enhancements are **additive**:
 - Old `send_command<TargetData>(sys, inst, cmd)` stays fire-and-forget
-- New `send_command<OutputDataType, CmdType>(...)` returns optional
+- New timeout-taking `send_command<OutputDataType, CmdType>(...)` returns optional
 - New `send_command_to_input<InputIndex, CmdType>(...)` is additional overload
-- Old `on_command` CRTP stays as-is
-- Command definitions unchanged
+- Command handler registration replaces the documented-but-non-functional CRTP `on_command` path
+- Command definitions remain payload structs with nested `Reply` types
 
 ---
 

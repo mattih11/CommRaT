@@ -4,9 +4,12 @@
 #include "commrat/module/helpers/type_name.hpp"
 #include <corerat/ipc/mailbox.hpp>
 #include "commrat/messaging/data_with_commands.hpp"
+#include "commrat/messaging/registry_utils.hpp"
+#include "commrat/module/helpers/command_extraction.hpp"
 #include <corerat/platform/timestamp.hpp>
 #include <corerat/platform/duration.hpp>
 #include <cstdint>
+#include <optional>
 
 namespace commrat {
 
@@ -57,7 +60,7 @@ public:
     using DataMessage = ExtractDataMessage_t<OutputType>;
     
     // Extract command list (empty tuple if no commands)
-    using CommandList = ExtractCommands_t<OutputType>;
+    using CommandList = registry::get_commands_for_t<OutputType, Registry>;
     
     // Compile-time type_id calculation from output payload type
     static constexpr uint32_t output_message_id = Registry::template get_message_id<OutputType>();
@@ -177,6 +180,49 @@ public:
         // Timeout - no reply from producer
         return false;
     }
+
+    /**
+     * @brief Send a command payload and receive its typed reply.
+     *
+     * This is the convenience RPC form for user modules. It uses the same
+     * bounded, source-filtered WORK-mailbox receive loop as the lower-level
+     * TimsMessage overload.
+     */
+    template<typename CmdType>
+    std::optional<TimsMessage<typename CmdType::Reply>> send_command(
+        const CmdType& command,
+        Duration timeout = Duration::zero()) {
+        static_assert(is_in_tuple_v<CmdType, CommandList>,
+                      "Command type is not associated with this target output type");
+        static_assert(Registry::template is_registered<CmdType>,
+                      "Command type is not registered in the message registry");
+        static_assert(Registry::template is_registered<typename CmdType::Reply>,
+                      "Command reply type is not registered in the message registry");
+
+        TimsMessage<CmdType> request{
+            .header = {
+                .msg_type = Registry::template get_message_id<CmdType>(),
+                .msg_size = 0,
+                .timestamp = Time::now(),
+                .seq_number = 0,
+                .dest = producer_cmd_address_,
+                .src = work_mbx_ ? work_mbx_->mailbox_id() : 0,
+                .flags = 0
+            },
+            .payload = command
+        };
+
+        TimsMessage<typename CmdType::Reply> reply;
+        if (!send_command(request, reply, timeout)) {
+            return std::nullopt;
+        }
+
+        return reply;
+    }
+
+    [[nodiscard]] uint8_t producer_system_id() const { return producer_system_id_; }
+    [[nodiscard]] uint8_t producer_instance_id() const { return producer_instance_id_; }
+    [[nodiscard]] uint32_t producer_cmd_address() const { return producer_cmd_address_; }
     
 protected:
     typename Registry::System::WorkMailbox* work_mbx_;  ///< Shared work mailbox for RPC (pointer for default construction, non-owning)

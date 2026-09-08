@@ -115,6 +115,7 @@ public:  // Make Registry public so TypedMailbox can access it
 
 public:
     // User-defined messages only (for introspection of user types)
+    using UserMessageDefs = std::tuple<MessageDefs...>;
     using UserRegistry = MessageRegistry<MessageDefs...>;
     
     // System registry access (all system messages in main registry now)
