@@ -421,8 +421,22 @@ public:
     static constexpr size_t calc_max_size(std::tuple<Payloads...>*) {
         return std::max({sertial::Message<TimsMessage<Payloads>>::max_buffer_size...});
     }
+
+    template<typename... Defs>
+    static consteval size_t calc_max_reply_size(std::tuple<Defs...>*) {
+        size_t result = 0;
+        ((result = Defs::local_id > MAX_MESSAGE_ID
+             ? std::max(result,
+                        sertial::Message<TimsMessage<typename Defs::Payload>>::max_buffer_size)
+             : result), ...);
+        return result;
+    }
     
     static constexpr size_t max_message_size = calc_max_size(static_cast<PayloadTypes*>(nullptr));
+
+    /// Maximum serialized size among reply payloads received through WORK.
+    static constexpr size_t max_reply_message_size =
+        calc_max_reply_size(static_cast<MessageDefsTuple*>(nullptr));
     
     /**
      * @brief Calculate maximum message size for specific payload types
@@ -771,7 +785,7 @@ public:
      * CommRaT specializes this with subscription-protocol-specific mailbox.
      */
     struct System {
-        // Generic WorkMailbox - all registered types (including GetData expansions)
+        // Generic WORK send API; Module2 allocates receive slots for replies only.
         using WorkMailbox = typename ExpandedMailbox<ProcessedDefs>::type;
     };
     

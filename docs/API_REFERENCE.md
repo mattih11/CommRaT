@@ -70,9 +70,14 @@ struct System {
     using PayloadTypes = std::tuple<SubscribeRequestPayload, SubscribeReplyPayload,
                                     UnsubscribeRequestPayload, UnsubscribeReplyPayload>;
     template<typename T> static constexpr uint32_t get_message_id();
-    using WorkMailbox = MailboxFor<Registry>;  // Unrestricted mailbox for subscription protocol
+    using WorkMailbox = MailboxFor<Registry>;  // Sends registered requests; receives replies
 };
 ```
+
+`WorkMailbox` retains registry-wide compile-time send support because compatibility
+helpers can target any registered command. Its receive slots use
+`Registry::max_reply_message_size`, not `Registry::max_message_size`; data and
+request payloads therefore do not inflate WORK mailbox storage.
 
 ### Usage
 

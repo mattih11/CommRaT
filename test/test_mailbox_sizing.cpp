@@ -25,12 +25,36 @@ struct LargeData {
     std::array<uint8_t, 3000> buffer;  // 3000 bytes payload
 };
 
+struct HugeOneWayCommand {
+    std::array<uint8_t, 4096> buffer;
+};
+
+struct TinyRequest {};
+
+struct TinyReply {
+    bool success{false};
+};
+
 // Create registry with all types
 using TestRegistry = commrat::MessageRegistry<
     commrat::MessageDefinition<TinyCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands>,
     commrat::MessageDefinition<SmallCmd, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Commands>,
     commrat::MessageDefinition<MediumData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>,
     commrat::MessageDefinition<LargeData, commrat::MessagePrefix::UserDefined, commrat::UserSubPrefix::Data>
+>;
+
+using WorkSizingRegistry = commrat::MessageRegistry<
+    commrat::MessageDefinition<
+        HugeOneWayCommand,
+        commrat::MessagePrefix::UserDefined,
+        commrat::UserSubPrefix::Commands,
+        1>,
+    commrat::MessageDefinition<
+        TinyRequest,
+        commrat::MessagePrefix::UserDefined,
+        commrat::UserSubPrefix::Commands,
+        2,
+        TinyReply>
 >;
 
 int main() {
@@ -64,6 +88,17 @@ int main() {
     // So max_message_size should be GetDataReplyPayload<LargeData>, not just LargeData
     assert(registry_max == getdata_reply_size);
     std::cout << "✓ Correct: matches GetDataReplyPayload<LargeData> size (auto-generated)\n\n";
+
+    constexpr size_t tiny_reply_size = sertial::Message<
+        commrat::TimsMessage<TinyReply>>::max_buffer_size;
+    static_assert(WorkSizingRegistry::max_reply_message_size == tiny_reply_size);
+    static_assert(WorkSizingRegistry::max_reply_message_size <
+                  WorkSizingRegistry::max_message_size);
+    std::cout << "WORK reply-only max:              "
+              << WorkSizingRegistry::max_reply_message_size << " bytes\n";
+    std::cout << "WORK registry-wide max:           "
+              << WorkSizingRegistry::max_message_size << " bytes\n";
+    std::cout << "✓ Correct: one-way messages do not inflate WORK receive slots\n\n";
     
     // Test max_size_for_types with command subset
     constexpr size_t cmd_max = TestRegistry::max_size_for_types<TinyCmd, SmallCmd>();

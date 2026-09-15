@@ -737,7 +737,7 @@ private:
         MailboxConfig work_config{
             .mailbox_id = work_addr,
             .message_slots = config_.cmd_message_slots.value(),  // Extract from rfl::DefaultVal
-            .max_message_size = Registry::max_message_size,  // Full registry max (unrestricted mailbox)
+            .max_message_size = Registry::max_reply_message_size,
             .send_priority = static_cast<uint8_t>(config_.priority),
             .realtime = config_.realtime
         };

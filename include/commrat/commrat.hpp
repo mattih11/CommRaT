@@ -171,9 +171,8 @@ public:
             typename GetLifecycleStatusReply::Payload
         >;
         
-        // WorkMailbox - unrestricted Mailbox that can send/receive any registered type.
-        // Needs full registry access because it handles subscription protocol
-        // AND GetData/GetNextData RPC (template-parameterized payload types).
+        // WORK may send any registered request. Module2 sizes its receive slots
+        // separately from Registry::max_reply_message_size.
         using WorkMailbox = MailboxFor<Registry>;
     };
     

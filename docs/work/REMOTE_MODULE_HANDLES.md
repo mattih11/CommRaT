@@ -211,18 +211,18 @@ sequence number. Do not let multiple callers receive directly from WORK.
 
 ## Mailbox Sizing
 
-No mailbox-size change is required for the first implementation:
+Mailbox receive storage is derived from compile-time message sets:
 
-- WORK is an unrestricted registry mailbox and uses
-  `Registry::max_message_size`, so every registered command and reply fits.
+- WORK can send any registered request for compatibility, but its receive slots
+  use `Registry::max_reply_message_size`; request and data payload sizes do not
+  affect its allocation.
 - Per-output CMD mailboxes derive their allowed request/reply set from
   `DataWithCommands` and size themselves with `TypedMailbox::max_message_size`.
 - The lifecycle mailbox is already restricted to lifecycle payloads.
 
-A later memory optimization may derive a WORK reply tuple from all configured
-dependencies. That requires real send-only type support in `TypedMailbox` and
-must include subscription, get-data, parameter, lifecycle, and user-command
-replies. It should be measured before adding template complexity.
+Narrowing WORK below all registered replies would require removing or further
+constraining the compatibility helper that can target any command-bearing output
+in the application registry.
 
 ## Introspection Contract
 
