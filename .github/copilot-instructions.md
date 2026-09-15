@@ -15,13 +15,15 @@
 
 ## Architecture
 
-### 3-Mailbox System
-Each module has three mailboxes with distinct roles:
+### Mailbox System
+Each module uses typed mailboxes with distinct roles:
 
 ```cpp
-CMD  mailbox: base_address + 0   // Per-output: Command/request handling (blocking receive)
-WORK mailbox: base_address + 16  // Per-module: Outbound messages only (no thread)
-DATA mailbox: base_address + 32  // Per-input: Continuous data streams (blocking receive)
+CMD       mailbox: index 0     // Per-output: command/request handling
+WORK      mailbox: index 1     // Per-module: outbound RPC and inbound replies
+PUBLISH   mailbox: index 2     // Per-output: published data sends
+DATA      mailbox: index 3+N   // Per-input: continuous data streams
+LIFECYCLE mailbox: index 0xFF  // Per-module: on/off/status commands
 ```
 
 **CMD Mailbox (Per-Output)**:
@@ -38,6 +40,12 @@ DATA mailbox: base_address + 32  // Per-input: Continuous data streams (blocking
 - **Usage**: Module uses this to communicate with other modules without blocking
 - **Address**: Single mailbox per module instance
 
+**LIFECYCLE Mailbox (Per-Module)**:
+- **Purpose**: Receive on, off, and status requests while the runtime is alive
+- **Threading**: One dedicated blocking receive thread per module
+- **Behavior**: Remains active while operationally off; `stop()` is final teardown
+- **Address**: Primary output type/system/instance with mailbox index `0xFF`
+
 **DATA Mailbox (Per-Input)**:
 - **Purpose**: Receive continuous data streams from producers
 - **Messages**: Published output data (TemperatureData, SensorData, etc.)
@@ -47,9 +55,10 @@ DATA mailbox: base_address + 32  // Per-input: Continuous data streams (blocking
 
 **Threading Model (N outputs, M inputs)**:
 - **1 data_thread**: Runs process() based on execution mode (timer, input-driven, loop)
+- **1 lifecycle_thread**: Receives module-level on/off/status commands
 - **N command_threads**: One per output, blocking receive on CMD mailbox (0% CPU when idle)
 - **M input threads**: Implicit in input handlers (ContinuousInput blocks on DATA mailbox)
-- **Total**: N + 1 explicit threads (+ M implicit in inputs)
+- **Total**: N + 2 explicit threads (+ M implicit in inputs)
 
 **Message Flow Patterns**:
 - **Subscription Protocol**:
@@ -924,6 +933,9 @@ void process(const T& input) {
 - **Process launcher system**: `commrat_module()` CMake macro wraps `add_executable` and atomically emits complete `<ClassName>.module.json` descriptors through native post-build inspection, failing the module build on inspection errors. EVL cross-builds use explicit placeholders until QEMU inspection. `ProcessLauncher` discovers descriptors from `dirname(argv[0])`, fork/execs each module binary with a temp `ModuleConfig` JSON, SIGTERM on stop with SIGKILL fallback. `MyApp::Launcher` (in-process variant) forward-declared in `commrat.hpp`; requires `#include <commrat/launcher/launcher.hpp>`. Both read `AppDescription` JSON with `modules[].module_class`, `outputs`, `inputs`, `period_ms`. `--duration-ms N` for timed exit (CTest). See `include/commrat/launcher/` and `docs/work/LAUNCHER_DESIGN.md`.
 
 ### In Progress
+- **System lifecycle commands**: module-level on/off/status endpoint, deferred
+    replies, state-gated processing, and lifecycle hooks are implemented. Reset,
+    retry policy, descriptor metadata, and GUI controls remain pending.
 - EVL runtime tests passing (3 failing: test_3input_fusion, test_address_collisions, test_timestamp_logic — root cause is tims_recvmsg_timed() demoting EVL threads in-band; fixed by CoreRaT EVL IPC backend)
 - Input buffering strategies
 - Command ergonomics improvements
@@ -934,7 +946,6 @@ void process(const T& input) {
   - Phase 2: move IPC (TiMS backend) to CoreRaT; delete `tims_wrapper.cpp`, `mailbox/mailbox.hpp`, `mailbox/typed_mailbox.hpp`
   - Phase 3: EVL IPC backend in CoreRaT (OOB-safe ring buffer); removes in-band demotion on EVL guest
   - After Phase 3: CommRaT CMakeLists replaces ~60 lines of platform/RACK/EVL detection with `find_package(CoreRaT REQUIRED)`
-- System lifecycle commands (on/off/reset)
 - Parameter system (typed params with get/set/list/save)
 - ROS 2 adapter (separate repository)
 - Performance profiling tools
@@ -951,7 +962,7 @@ CoreRaT is a **separate project with its own agent**. Do not re-implement anythi
 Before suggesting code:
 1. Is this allocation-free? (No new/malloc/vector in hot paths)
 2. Can this be computed at compile time? (Use constexpr/consteval)
-3. Does this respect the 3-mailbox architecture?
+3. Does this respect the typed mailbox architecture?
 4. Is the type constraint clear and enforced? (Concepts/static_assert)
 5. Is error handling deterministic? (std::optional, no exceptions in hot paths)
 6. Would this cause unnecessary copies? (Use std::span for views)

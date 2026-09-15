@@ -1,6 +1,6 @@
 # CommRaT Development Roadmap
 
-**Last Updated**: July 15, 2026
+**Last Updated**: September 15, 2026
 
 This document tracks planned features, improvements, and long-term ideas for CommRaT. For active bugs and runtime issues, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
@@ -98,10 +98,10 @@ This document tracks planned features, improvements, and long-term ideas for Com
 - Details: See `docs/work/MODULE_TYPE_SYSTEM.md`
 
 **System Lifecycle Commands**
-- Extend SystemMessages for module lifecycle management
-- All modules automatically respond to: on, off, reset
-- Standardized lifecycle state machine
-- Status: Planned
+- Persistent module-level lifecycle endpoint independent of outputs implemented
+- On, off, and status commands implemented; reset remains pending
+- Keep process/runtime shutdown separate from operational on/off state
+- Status: In progress
 - Priority: High
 - Details: See `docs/work/LIFECYCLE_SYSTEM.md`
 

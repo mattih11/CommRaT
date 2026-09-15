@@ -34,6 +34,7 @@ constexpr uint8_t CMD_MBX_BASE = 0;  // CMD mailboxes have index 0
 constexpr uint8_t WORK_MBX_BASE = 1;  // WORK mailboxes have index 1
 constexpr uint8_t PUBLISH_MBX_BASE = 2;  // PUBLISH mailboxes have index 2
 constexpr uint8_t DATA_MBX_BASE = 3;  // DATA mailboxes start at index 3
+constexpr uint8_t LIFECYCLE_MBX_INDEX = 0xFF;  // Reserved module-level endpoint
 
 // ============================================================================
 // Address Encoding/Decoding Functions
@@ -72,10 +73,10 @@ constexpr uint8_t extract_mailbox_index(uint32_t addr) {
  */
 constexpr MailboxType extract_mailbox_type(uint32_t addr) {
     uint8_t index = extract_mailbox_index(addr);
-    // Map index back to enum (CMD=0, WORK=16, PUBLISH=32, DATA=48+)
-    if (index == 0) return MailboxType::CMD;
-    if (index == 16) return MailboxType::WORK;
-    if (index == 32) return MailboxType::PUBLISH;
+    if (index == CMD_MBX_BASE) return MailboxType::CMD;
+    if (index == WORK_MBX_BASE) return MailboxType::WORK;
+    if (index == PUBLISH_MBX_BASE) return MailboxType::PUBLISH;
+    if (index == LIFECYCLE_MBX_INDEX) return MailboxType::LIFECYCLE;
     return MailboxType::DATA;  // Any other index is DATA
 }
 
@@ -161,6 +162,19 @@ template<typename OutputData, typename OutputTypesTuple, typename UserRegistry>
 static constexpr uint32_t get_mailbox_address(uint8_t system_id, uint8_t instance_id, uint8_t mailbox_index) {
     uint32_t base = calculate_base_address<OutputData, OutputTypesTuple, UserRegistry>(system_id, instance_id);
     return base | mailbox_index;
+}
+
+/**
+ * @brief Get the module-level lifecycle command mailbox address
+ *
+ * The primary output type remains part of module identity, preserving the
+ * existing ability for different module types to share a system/instance pair.
+ * Use OutputData=void for a module with no outputs.
+ */
+template<typename OutputData, typename UserRegistry>
+static constexpr uint32_t get_lifecycle_address(uint8_t system_id, uint8_t instance_id) {
+    return get_mailbox_address<OutputData, std::tuple<>, UserRegistry>(
+        system_id, instance_id, LIFECYCLE_MBX_INDEX);
 }
 
 // ============================================================================

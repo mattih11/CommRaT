@@ -5,6 +5,7 @@
 #include "subscription_messages.hpp"
 #include "data_request_messages.hpp"
 #include "param_messages.hpp"
+#include "lifecycle_messages.hpp"
 
 namespace commrat {
 
@@ -27,7 +28,10 @@ using SystemRegistry = MessageRegistry<
     GetParamCmd,
     SetParamCmd,
     SaveParamsCmd,
-    LoadParamsCmd
+    LoadParamsCmd,
+    LifecycleOnCmd,
+    LifecycleOffCmd,
+    GetLifecycleStatusCmd
 >;
 
 } // namespace commrat

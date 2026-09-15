@@ -5,6 +5,7 @@
 
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/messaging/system/data_request_messages.hpp"
+#include "commrat/messaging/system/lifecycle_messages.hpp"
 #include <iostream>
 #include <cassert>
 
@@ -107,6 +108,22 @@ int main() {
         static_assert(GNDReq::subprefix == static_cast<uint8_t>(UserSubPrefix::GetNextData));
         
         std::cout << "  Message prefixes: PASS\n";
+    }
+
+    // Test 7: Lifecycle commands have stable system IDs and distinct replies
+    {
+        static_assert(LifecycleOnCmd::has_reply);
+        static_assert(LifecycleOffCmd::has_reply);
+        static_assert(GetLifecycleStatusCmd::has_reply);
+        static_assert(LifecycleOnCmd::prefix == MessagePrefix::System);
+        static_assert(LifecycleOnCmd::subprefix ==
+                      static_cast<uint8_t>(SystemSubPrefix::Control));
+        static_assert(LifecycleOnCmd::local_id == 0x0010);
+        static_assert(LifecycleOffCmd::local_id == 0x0011);
+        static_assert(GetLifecycleStatusCmd::local_id == 0x0012);
+        static_assert(!std::is_same_v<LifecycleOnReplyPayload, LifecycleOffReplyPayload>);
+
+        std::cout << "  Lifecycle commands: PASS\n";
     }
     
     std::cout << "\nAll tests PASSED!\n";

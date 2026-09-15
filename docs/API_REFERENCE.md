@@ -124,15 +124,46 @@ virtual ~Module2();  // Calls stop(), joins command threads, stops work mailbox
 
 ```cpp
 void start();  // Start mailboxes, subscribe inputs, launch data + command threads
-void stop();   // Set stop flag, unsubscribe inputs, stop outputs, join threads
+void stop();   // Idempotent final teardown; the runtime cannot restart afterward
+
+LifecycleState lifecycle_state() const;
+LifecycleTarget lifecycle_target() const;
+
+template<typename TargetOutput = void>
+static constexpr uint32_t lifecycle_command_address(uint8_t system_id,
+                                                     uint8_t instance_id);
+
+template<typename TargetOutput = void>
+std::optional<TimsMessage<LifecycleOnReplyPayload>> lifecycle_on(
+    uint8_t system_id, uint8_t instance_id,
+    Duration timeout = Milliseconds(100));
+template<typename TargetOutput = void>
+std::optional<TimsMessage<LifecycleOffReplyPayload>> lifecycle_off(
+    uint8_t system_id, uint8_t instance_id,
+    Duration timeout = Milliseconds(100));
+template<typename TargetOutput = void>
+std::optional<TimsMessage<LifecycleStatusReplyPayload>> get_lifecycle_status(
+    uint8_t system_id, uint8_t instance_id,
+    Duration timeout = Milliseconds(100));
 ```
+
+Remote off disables `process()` but leaves the lifecycle endpoint alive. Remote
+on re-enables processing. These operational commands are distinct from final
+runtime `stop()`. Supply the target module's primary output payload type as
+`TargetOutput`; use the default `void` for a no-output module.
 
 ### Protected Lifecycle Hooks
 
 ```cpp
-virtual void on_start();  // Called at end of start() -- user override
-virtual void on_stop();   // Called at beginning of stop() -- user override
+virtual void on_start();
+virtual void on_stop();
+virtual LifecycleResult on_enable();
+virtual void on_disable();
 ```
+
+`on_start()` and `on_stop()` run once for runtime setup and teardown.
+`on_enable()` and `on_disable()` may run repeatedly and are serialized with
+`process()` on the data thread.
 
 ### Pure Virtual -- process()
 
@@ -197,7 +228,8 @@ ModuleConfig config_;
 
 ### Threading Model
 
-- **1 data thread** -- runs `process()` in a loop (timer/input/loop driven)
+- **1 data thread** -- runs lifecycle transitions and `process()`
+- **1 lifecycle thread** -- receives module-level on/off/status commands
 - **N command threads** -- one per output, blocking receive on CMD mailbox
 - **Work mailbox** -- no dedicated thread, used for outbound sends
 

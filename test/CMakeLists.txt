@@ -94,6 +94,10 @@ add_executable(test_command_rpc test_command_rpc.cpp)
 target_link_libraries(test_command_rpc PRIVATE commrat)
 add_test(NAME test_command_rpc COMMAND test_command_rpc)
 
+add_executable(test_lifecycle_commands test_lifecycle_commands.cpp)
+target_link_libraries(test_lifecycle_commands PRIVATE commrat)
+add_test(NAME test_lifecycle_commands COMMAND test_lifecycle_commands)
+
 commrat_module(descriptor_test_module
     SOURCES descriptor_test_module.cpp
     MODULE_CLASS descriptor_test::DescriptorModule)

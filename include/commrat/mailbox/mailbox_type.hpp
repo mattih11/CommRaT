@@ -11,10 +11,11 @@ namespace commrat {
  * These values are used as mailbox index offsets.
  */
 enum class MailboxType : uint8_t {
-    CMD = 0,         // Command/subscription mailbox
-    WORK = 16,       // Subscription protocol (legacy, to be merged with CMD)
-    PUBLISH = 32,    // Publishing to subscribers (legacy, to be merged with CMD)
-    DATA = 48        // Input data reception (base index, actual is DATA+N)
+    CMD = 0,          // Per-output command/subscription mailbox
+    WORK = 1,         // Outbound RPC and reply mailbox
+    PUBLISH = 2,      // Output publishing mailbox
+    DATA = 3,         // Input data reception (base index, actual is DATA+N)
+    LIFECYCLE = 0xFF  // Module-level on/off/status mailbox
 };
 
 } // namespace commrat

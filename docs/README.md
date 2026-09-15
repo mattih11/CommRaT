@@ -23,7 +23,7 @@
 - Compile-time message IDs (0xPSMM: Prefix, SubPrefix, MessageID)
 - Zero-allocation serialization via SeRTial
 - Request/reply protocol with auto-generated reply message types
-- System messages auto-included (Subscribe, Unsubscribe, GetData, GetNextData)
+- System messages auto-included (Subscribe, Unsubscribe, GetData, GetNextData, lifecycle)
 
 ### Module2 Framework
 - `Module2<Output<T>, Input<T>, Period<D>, SyncedInput<T>>` I/O tuple architecture
@@ -32,13 +32,16 @@
 - Multi-output: separate `Output<T>` per type, each with independent CMD mailbox
 - Multi-input: `Input<T>` (primary, continuous) + `SyncedInput<T>` (secondary, time-synced)
 - `Synced<T>` wrapper with explicit fresh/stale/invalid handling
-- Lifecycle hooks: `on_init()`, `on_start()`, `on_stop()`, `on_cleanup()`
+- Runtime hooks: `on_start()`, `on_stop()`
+- Operational lifecycle: remote on/off/status with `on_enable()`, `on_disable()`
 
-### 3-Mailbox Architecture
+### Mailbox Architecture
 ```
-CMD  mailbox: per-output  - Receive commands/subscription requests (blocking receive thread)
-WORK mailbox: per-module  - Send-only for outbound messages (no thread)
-DATA mailbox: per-input   - Receive continuous data streams (blocking receive)
+CMD       mailbox: per-output - Commands and subscription requests
+PUBLISH   mailbox: per-output - Published output data
+WORK      mailbox: per-module - Outbound requests and inbound replies
+DATA      mailbox: per-input  - Continuous input data
+LIFECYCLE mailbox: per-module - On, off, and status commands
 ```
 
 ### Introspection

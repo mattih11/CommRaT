@@ -11,7 +11,8 @@
  * - Simplified configuration
  * 
  * Threading Architecture (N outputs):
- * - 1 data_thread: Runs process() based on execution mode
+ * - 1 data_thread: Runs lifecycle transitions and process()
+ * - 1 lifecycle_thread: Handles module-level on/off/status commands
  * - N command_threads: One per output, blocking receive on CMD mailbox
  *   - Handles: SubscribeRequest, GetDataRequest, user commands
  * - WorkMailbox: NO dedicated thread (used from main/data thread for sending)
@@ -39,6 +40,7 @@
 #include "commrat/module/traits/type_extraction.hpp"
 #include "commrat/module/traits/processor_bases.hpp"
 #include "commrat/messaging/message_registry.hpp"
+#include "commrat/messaging/system/lifecycle_messages.hpp"
 #include "commrat/messaging/system/subscription_messages.hpp"
 #include "commrat/mailbox/typed_mailbox.hpp"
 #include <corerat/platform/threading.hpp>
@@ -160,14 +162,48 @@ private:
     
     // Mailbox types
     using WorkMailbox = typename Registry::System::WorkMailbox;
+    using LifecycleMailbox = CommandMailbox<
+        Registry,
+        LifecycleOnPayload,
+        LifecycleOnReplyPayload,
+        LifecycleOffPayload,
+        LifecycleOffReplyPayload,
+        GetLifecycleStatusPayload,
+        LifecycleStatusReplyPayload>;
     
-    // Threading: 1 data thread + N command threads (one per output)
+    // Threading: 1 data thread + 1 lifecycle thread + N output command threads
     Thread data_thread_;                                        // Runs process() and publishes
+    Thread lifecycle_thread_;                                   // Module-level on/off/status commands
     std::array<Thread, IOService::num_outputs> command_threads_;   // One per output (CMD mailbox)
     std::atomic<bool> should_stop_{false};
+    enum class RuntimeState : uint8_t {
+        Constructed,
+        Started,
+        Stopped
+    };
+
+    std::atomic<RuntimeState> runtime_state_{RuntimeState::Constructed};
+    std::atomic<LifecycleState> lifecycle_state_{LifecycleState::Disabled};
+    std::atomic<LifecycleTarget> lifecycle_target_{LifecycleTarget::Off};
+    std::atomic<uint32_t> lifecycle_error_code_{0};
+    std::atomic<uint64_t> lifecycle_state_since_ns_{0};
+
+    enum class PendingLifecycleRequest : uint8_t {
+        None,
+        Writing,
+        OnRequested,
+        OffRequested,
+        OnCompleted,
+        OffCompleted
+    };
+
+    std::atomic<PendingLifecycleRequest> pending_lifecycle_request_{
+        PendingLifecycleRequest::None};
+    TimsHeader pending_lifecycle_header_{};
     
     // Mailbox infrastructure (CMD mailboxes owned by ModuleOutput, DATA by ModuleInput)
     std::optional<WorkMailbox> work_mailbox_ = std::nullopt;  // No dedicated thread - sends from main/data thread (default empty)
+    std::optional<LifecycleMailbox> lifecycle_mailbox_ = std::nullopt;
 
     static constexpr size_t max_registered_command_handlers = 32;
 
@@ -235,6 +271,48 @@ public:
         requires (OutputIndex < IO::Meta::num_outputs)
     [[nodiscard]] uint32_t output_command_address() const {
         return this->template get_output<OutputIndex>().get_cmd_address();
+    }
+
+    template<typename TargetOutput = void>
+    [[nodiscard]] static constexpr uint32_t lifecycle_command_address(
+        uint8_t system_id,
+        uint8_t instance_id) {
+        return get_lifecycle_address<TargetOutput, Registry>(system_id, instance_id);
+    }
+
+    [[nodiscard]] LifecycleState lifecycle_state() const {
+        return lifecycle_state_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] LifecycleTarget lifecycle_target() const {
+        return lifecycle_target_.load(std::memory_order_acquire);
+    }
+
+    template<typename TargetOutput = void>
+    std::optional<TimsMessage<LifecycleOnReplyPayload>> lifecycle_on(
+        uint8_t target_system_id,
+        uint8_t target_instance_id,
+        Duration timeout = Milliseconds(100)) {
+        return send_lifecycle_rpc<TargetOutput, LifecycleOnPayload, LifecycleOnReplyPayload>(
+            target_system_id, target_instance_id, LifecycleOnPayload{}, timeout);
+    }
+
+    template<typename TargetOutput = void>
+    std::optional<TimsMessage<LifecycleOffReplyPayload>> lifecycle_off(
+        uint8_t target_system_id,
+        uint8_t target_instance_id,
+        Duration timeout = Milliseconds(100)) {
+        return send_lifecycle_rpc<TargetOutput, LifecycleOffPayload, LifecycleOffReplyPayload>(
+            target_system_id, target_instance_id, LifecycleOffPayload{}, timeout);
+    }
+
+    template<typename TargetOutput = void>
+    std::optional<TimsMessage<LifecycleStatusReplyPayload>> get_lifecycle_status(
+        uint8_t target_system_id,
+        uint8_t target_instance_id,
+        Duration timeout = Milliseconds(100)) {
+        return send_lifecycle_rpc<TargetOutput, GetLifecycleStatusPayload, LifecycleStatusReplyPayload>(
+            target_system_id, target_instance_id, GetLifecycleStatusPayload{}, timeout);
     }
 
     template<size_t OutputIndex, typename CmdType, auto Handler, typename ModuleType>
@@ -323,24 +401,14 @@ public:
 
         // Create WORK mailbox for subscription protocol
         create_work_mailbox();
+        create_lifecycle_mailbox();
         
         // Initialize I/O instances (delegates to IOService)
         this->initialize_io(config_, *work_mailbox_);
     }
     
     virtual ~Module2() {
-        stop();  // Stop data processing
-        
-        // Full shutdown: join command threads and stop work mailbox
-        for (auto& thread : command_threads_) {
-            if (thread.joinable()) {
-                thread.join();
-            }
-        }
-        
-        if (work_mailbox_) {
-            work_mailbox_->stop();
-        }
+        stop();
     }
 
 protected:
@@ -405,6 +473,8 @@ protected:
 protected:
     virtual void on_start() {}  // Optional override for startup logic
     virtual void on_stop() {}   // Optional override for shutdown logic
+    virtual LifecycleResult on_enable() { return LifecycleResult::Success; }
+    virtual void on_disable() {}
 
     // ---- Parameter interface — auto-implemented when Params<T> is in IOSpecs ----
     virtual void on_params_changed() {}
@@ -443,6 +513,16 @@ public:
      * Note: Mailboxes created in constructor, activated here
      */
     void start() {
+        auto expected = RuntimeState::Constructed;
+        if (!runtime_state_.compare_exchange_strong(
+                expected, RuntimeState::Started, std::memory_order_acq_rel)) {
+            if (expected == RuntimeState::Stopped) {
+                throw std::logic_error("Module2 runtime cannot restart after stop()");
+            }
+            return;
+        }
+
+        should_stop_.store(false, std::memory_order_release);
 #define _MSTEP(msg) do { ::fprintf(stderr, "[start:%s] %s\n", config_.name.c_str(), msg); } while(0)
         _MSTEP("drain");
         // Start the in-band log drain thread before any RT thread is launched.
@@ -455,20 +535,47 @@ public:
         _MSTEP("outputs");
         // Start all output mailboxes (CMD + PUBLISH per output)
         this->start_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
+
+        _MSTEP("lifecycle_mailbox");
+        start_lifecycle_mailbox();
         
         _MSTEP("inputs");
         // Start all input mailboxes (DATA for ContinuousInput only)
         this->start_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
         
+        _MSTEP("on_start");
+        on_start();
+
+        _MSTEP("enable");
+        lifecycle_target_.store(LifecycleTarget::On, std::memory_order_release);
+        set_lifecycle_state(LifecycleState::Enabling);
+        const LifecycleResult enable_result = invoke_on_enable();
+
         _MSTEP("subscribe");
         // Subscribe all inputs to their producers (delegates to IOService)
-        this->subscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+        if (enable_result == LifecycleResult::Success) {
+            this->subscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+            lifecycle_error_code_.store(0, std::memory_order_release);
+            set_lifecycle_state(LifecycleState::Enabled);
+        } else {
+            lifecycle_error_code_.store(1, std::memory_order_release);
+            set_lifecycle_state(LifecycleState::Error);
+        }
         
         _MSTEP("cmd_threads");
         // Start command threads after all mailboxes are ready.
         // Use compile-time index expansion so we can form the EVL thread name
         // from the per-output CMD mailbox address (requires template get_output<N>()).
         start_command_threads(std::make_index_sequence<IO::Meta::num_outputs>{});
+
+        _MSTEP("lifecycle_thread");
+        {
+            char lifecycle_tname[64];
+            std::snprintf(lifecycle_tname, sizeof(lifecycle_tname), "%s-lifecycle/%08X",
+                          config_.name.c_str(), lifecycle_mailbox_->mailbox_id());
+            lifecycle_thread_.start(ThreadConfig{.name = lifecycle_tname},
+                                    [this]() { lifecycle_loop(); });
+        }
         
         _MSTEP("data_thread");
         // Start data thread (runs process() based on execution mode)
@@ -481,8 +588,6 @@ public:
                                [this]() { data_loop(); });
         }
 
-        _MSTEP("on_start");
-        on_start();  // Call user-defined startup logic
         _MSTEP("done");
 #undef _MSTEP
     }
@@ -499,18 +604,31 @@ public:
      * and any remaining commands. Call destroy() or destructor to fully shut down.
      */
     void stop() {
-        on_stop();  // Call user-defined shutdown logic
+        auto expected = RuntimeState::Started;
+        if (!runtime_state_.compare_exchange_strong(
+                expected, RuntimeState::Stopped, std::memory_order_acq_rel)) {
+            return;
+        }
+
         should_stop_.store(true, std::memory_order_release);
-        
-        // Unsubscribe all inputs from their producers (delegates to IOService)
-        this->unsubscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
-        
-        // Stop outputs (CMD and PUBLISH mailboxes)
-        this->stop_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
-        
+
         // Join data thread
         if (data_thread_.joinable()) {
             data_thread_.join();
+        }
+
+        if (lifecycle_state_.load(std::memory_order_acquire) == LifecycleState::Enabled) {
+            this->unsubscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+            invoke_on_disable();
+        }
+        lifecycle_target_.store(LifecycleTarget::Off, std::memory_order_release);
+        set_lifecycle_state(LifecycleState::Disabled);
+
+        on_stop();
+
+        this->stop_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
+        if (lifecycle_mailbox_) {
+            lifecycle_mailbox_->stop();
         }
         
         // Join command threads (one per output)
@@ -518,6 +636,14 @@ public:
             if (thread.joinable()) {
                 thread.join();
             }
+        }
+
+        if (lifecycle_thread_.joinable()) {
+            lifecycle_thread_.join();
+        }
+
+        if (work_mailbox_) {
+            work_mailbox_->stop();
         }
 
         // Flush all buffered log entries now that all RT threads have exited.
@@ -581,6 +707,41 @@ private:
         };
         
         work_mailbox_.emplace(work_config);
+    }
+
+    void create_lifecycle_mailbox() {
+        const uint8_t system_id = config_.has_multi_output_config()
+            ? config_.system_id(0)
+            : config_.system_id();
+        const uint8_t instance_id = config_.has_multi_output_config()
+            ? config_.instance_id(0)
+            : config_.instance_id();
+
+        using SafeOutputTypes = std::conditional_t<
+            IO::Meta::has_outputs,
+            typename IO::Meta::OutputTypes,
+            std::tuple<void>>;
+        using PrimaryOutputType = std::conditional_t<
+            IO::Meta::has_outputs,
+            std::tuple_element_t<0, SafeOutputTypes>,
+            void>;
+
+        MailboxConfig lifecycle_config{
+            .mailbox_id = get_lifecycle_address<PrimaryOutputType, Registry>(
+                system_id, instance_id),
+            .message_slots = config_.cmd_message_slots.value(),
+            .max_message_size = LifecycleMailbox::max_message_size,
+            .send_priority = static_cast<uint8_t>(config_.priority),
+            .realtime = config_.realtime
+        };
+        lifecycle_mailbox_.emplace(lifecycle_config);
+    }
+
+    void start_lifecycle_mailbox() {
+        auto result = lifecycle_mailbox_->start();
+        if (!result) {
+            throw std::runtime_error("Failed to start lifecycle mailbox");
+        }
     }
     
     /**
@@ -863,6 +1024,12 @@ private:
         Timestamp loop_start = 0;
         
         while (!should_stop_.load(std::memory_order_acquire)) {
+            service_lifecycle_transition();
+            if (lifecycle_state_.load(std::memory_order_acquire) != LifecycleState::Enabled) {
+                Time::sleep(Milliseconds(10));
+                continue;
+            }
+
             if constexpr (IO::Meta::is_timer_driven) {
                 loop_start = Time::now();
             }
@@ -914,6 +1081,211 @@ private:
     }
     
 private:
+    template<typename TargetOutput, typename RequestPayload, typename ReplyPayload>
+    std::optional<TimsMessage<ReplyPayload>> send_lifecycle_rpc(
+        uint8_t target_system_id,
+        uint8_t target_instance_id,
+        const RequestPayload& payload,
+        Duration timeout) {
+        const uint32_t target_address = get_lifecycle_address<TargetOutput, Registry>(
+            target_system_id, target_instance_id);
+        TimsMessage<RequestPayload> request{
+            .header = {
+                .msg_type = Registry::template get_message_id<RequestPayload>(),
+                .msg_size = 0,
+                .timestamp = Time::now(),
+                .seq_number = 0,
+                .dest = target_address,
+                .src = work_mailbox_->mailbox_id(),
+                .flags = 0
+            },
+            .payload = payload
+        };
+
+        if (!work_mailbox_->send(request, target_address)) {
+            return std::nullopt;
+        }
+
+        const Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
+        while (Time::now() < deadline) {
+            TimsMessage<ReplyPayload> reply;
+            const auto remaining_ns = static_cast<int64_t>(deadline - Time::now());
+            if (!work_mailbox_->receive(
+                    reply, Duration::nanoseconds(remaining_ns > 0 ? remaining_ns : 0))) {
+                continue;
+            }
+            if (reply.header.src == target_address) {
+                return reply;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void set_lifecycle_state(LifecycleState state) {
+        lifecycle_state_since_ns_.store(Time::now(), std::memory_order_release);
+        lifecycle_state_.store(state, std::memory_order_release);
+    }
+
+    void service_lifecycle_transition() {
+        const auto request = pending_lifecycle_request_.load(std::memory_order_acquire);
+        if (request == PendingLifecycleRequest::OffRequested) {
+            set_lifecycle_state(LifecycleState::Disabling);
+            this->unsubscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+            invoke_on_disable();
+            lifecycle_error_code_.store(0, std::memory_order_release);
+            set_lifecycle_state(LifecycleState::Disabled);
+            pending_lifecycle_request_.store(
+                PendingLifecycleRequest::OffCompleted, std::memory_order_release);
+        } else if (request == PendingLifecycleRequest::OnRequested) {
+            set_lifecycle_state(LifecycleState::Enabling);
+            const LifecycleResult result = invoke_on_enable();
+            if (result == LifecycleResult::Success) {
+                this->subscribe_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
+                lifecycle_error_code_.store(0, std::memory_order_release);
+                set_lifecycle_state(LifecycleState::Enabled);
+            } else {
+                lifecycle_error_code_.store(1, std::memory_order_release);
+                set_lifecycle_state(LifecycleState::Error);
+            }
+            pending_lifecycle_request_.store(
+                PendingLifecycleRequest::OnCompleted, std::memory_order_release);
+        }
+    }
+
+    LifecycleResult invoke_on_enable() {
+        if constexpr (has_params) {
+            SharedLock lock(params_mutex_);
+            return on_enable();
+        }
+        return on_enable();
+    }
+
+    void invoke_on_disable() {
+        if constexpr (has_params) {
+            SharedLock lock(params_mutex_);
+            on_disable();
+        } else {
+            on_disable();
+        }
+    }
+
+    template<typename ReplyPayload>
+    ReplyPayload make_lifecycle_reply(LifecycleResult result) const {
+        return ReplyPayload{
+            .result = static_cast<uint8_t>(result),
+            .state = static_cast<uint8_t>(
+                lifecycle_state_.load(std::memory_order_acquire)),
+            .target = static_cast<uint8_t>(
+                lifecycle_target_.load(std::memory_order_acquire)),
+            .error_code = lifecycle_error_code_.load(std::memory_order_acquire)
+        };
+    }
+
+    void flush_lifecycle_completion() {
+        const auto request = pending_lifecycle_request_.load(std::memory_order_acquire);
+        if (request == PendingLifecycleRequest::OnCompleted) {
+            TimsMessage<LifecycleOnPayload> original{
+                .header = pending_lifecycle_header_,
+                .payload = {}
+            };
+            auto reply = make_lifecycle_reply<LifecycleOnReplyPayload>(
+                lifecycle_state_.load(std::memory_order_acquire) == LifecycleState::Enabled
+                    ? LifecycleResult::Success
+                    : LifecycleResult::Failed);
+            lifecycle_mailbox_->send_reply(original, reply);
+            pending_lifecycle_request_.store(
+                PendingLifecycleRequest::None, std::memory_order_release);
+        } else if (request == PendingLifecycleRequest::OffCompleted) {
+            TimsMessage<LifecycleOffPayload> original{
+                .header = pending_lifecycle_header_,
+                .payload = {}
+            };
+            auto reply = make_lifecycle_reply<LifecycleOffReplyPayload>(
+                LifecycleResult::Success);
+            lifecycle_mailbox_->send_reply(original, reply);
+            pending_lifecycle_request_.store(
+                PendingLifecycleRequest::None, std::memory_order_release);
+        }
+    }
+
+    template<typename ReceivedMessage>
+    void handle_lifecycle_request(const ReceivedMessage& received_message) {
+        using Payload = typename ReceivedMessage::payload_type;
+
+        if constexpr (std::is_same_v<Payload, GetLifecycleStatusPayload>) {
+            LifecycleStatusReplyPayload reply{
+                .state = static_cast<uint8_t>(
+                    lifecycle_state_.load(std::memory_order_acquire)),
+                .target = static_cast<uint8_t>(
+                    lifecycle_target_.load(std::memory_order_acquire)),
+                .error_code = lifecycle_error_code_.load(std::memory_order_acquire),
+                .retry_count = 0,
+                .state_since_ns = lifecycle_state_since_ns_.load(std::memory_order_acquire)
+            };
+            lifecycle_mailbox_->send_reply(received_message, reply);
+        } else if constexpr (std::is_same_v<Payload, LifecycleOnPayload>) {
+            if (lifecycle_state_.load(std::memory_order_acquire) == LifecycleState::Enabled) {
+                auto reply = make_lifecycle_reply<LifecycleOnReplyPayload>(
+                    LifecycleResult::AlreadyInState);
+                lifecycle_mailbox_->send_reply(received_message, reply);
+                return;
+            }
+            queue_lifecycle_request(
+                PendingLifecycleRequest::OnRequested,
+                LifecycleTarget::On,
+                received_message);
+        } else if constexpr (std::is_same_v<Payload, LifecycleOffPayload>) {
+            if (lifecycle_state_.load(std::memory_order_acquire) == LifecycleState::Disabled) {
+                auto reply = make_lifecycle_reply<LifecycleOffReplyPayload>(
+                    LifecycleResult::AlreadyInState);
+                lifecycle_mailbox_->send_reply(received_message, reply);
+                return;
+            }
+            queue_lifecycle_request(
+                PendingLifecycleRequest::OffRequested,
+                LifecycleTarget::Off,
+                received_message);
+        }
+    }
+
+    template<typename ReceivedMessage>
+    void queue_lifecycle_request(
+        PendingLifecycleRequest requested,
+        LifecycleTarget target,
+        const ReceivedMessage& received_message) {
+        auto expected = PendingLifecycleRequest::None;
+        if (!pending_lifecycle_request_.compare_exchange_strong(
+                expected, PendingLifecycleRequest::Writing,
+                std::memory_order_acq_rel)) {
+            using Payload = typename ReceivedMessage::payload_type;
+            if constexpr (std::is_same_v<Payload, LifecycleOnPayload>) {
+                auto reply = make_lifecycle_reply<LifecycleOnReplyPayload>(
+                    LifecycleResult::Busy);
+                lifecycle_mailbox_->send_reply(received_message, reply);
+            } else {
+                auto reply = make_lifecycle_reply<LifecycleOffReplyPayload>(
+                    LifecycleResult::Busy);
+                lifecycle_mailbox_->send_reply(received_message, reply);
+            }
+            return;
+        }
+
+        pending_lifecycle_header_ = received_message.header;
+        lifecycle_target_.store(target, std::memory_order_release);
+        pending_lifecycle_request_.store(requested, std::memory_order_release);
+    }
+
+    void lifecycle_loop() {
+        while (!should_stop_.load(std::memory_order_acquire)) {
+            flush_lifecycle_completion();
+            lifecycle_mailbox_->receive_any_for(
+                Milliseconds(10),
+                [this](auto&& received_message) {
+                    handle_lifecycle_request(received_message);
+                });
+        }
+    }
+
     // ========================================================================
     // Data Loop Helpers (delegate to IOService)
     // ========================================================================

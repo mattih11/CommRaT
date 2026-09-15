@@ -226,8 +226,10 @@ Module2<Registry, IOSpecs...>
   |-- ContinuousInput (per Input<T>, owns DATA mailbox)
   |-- SyncedInput (per SyncedInput<T>, uses get_data RPC via WORK)
   |-- WorkMailbox (single, send-only)
+    |-- LifecycleMailbox (single, module-level on/off/status)
   |
-  |-- data_thread_         (1 thread: runs process())
+    |-- data_thread_         (1 thread: lifecycle transitions + process())
+    |-- lifecycle_thread_    (1 thread: module-level control)
   |-- command_threads_[]   (N threads: one per output CMD mailbox)
 ```
 
@@ -241,7 +243,7 @@ Key source files:
 
 ## Threading Model
 
-Each module runs **1 + N** threads (N = number of outputs):
+Each module runs **2 + N** threads (N = number of outputs):
 
 **1 data_thread** -- Runs `process()` based on execution mode:
 - Input-driven: blocks on `ContinuousInput::receive()`, calls process, publishes
@@ -253,6 +255,10 @@ Each module runs **1 + N** threads (N = number of outputs):
 - Dispatches system commands automatically
 - Dispatches user commands via `on_command<OutputIndex>(payload, reply)`
 - 0% CPU when no commands arrive
+
+**1 lifecycle_thread** -- Receives module-level on, off, and status commands.
+It remains active while operationally off. The data thread performs transitions
+so lifecycle hooks cannot race `process()`.
 
 No work_thread -- WORK mailbox is send-only (used from data_thread or startup).
 

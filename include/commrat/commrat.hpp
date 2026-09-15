@@ -97,11 +97,13 @@ namespace commrat {
 template<typename... MessageDefs>
 class CommRaT : public MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
                                        GetParamsCmd, SetParamsCmd, ListParamsCmd,
-                                       GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd> {
+                                                                             GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd,
+                                                                             LifecycleOnCmd, LifecycleOffCmd, GetLifecycleStatusCmd> {
 public:  // Make Registry public so TypedMailbox can access it
     using Registry = MessageRegistry<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
                                      GetParamsCmd, SetParamsCmd, ListParamsCmd,
-                                     GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd>;
+                                                                         GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd,
+                                                                         LifecycleOnCmd, LifecycleOffCmd, GetLifecycleStatusCmd>;
     
     // Verify system messages are registered
     static_assert(Registry::template is_registered<SubscribeRequestPayload>, 
@@ -126,7 +128,13 @@ public:
             SubscribeRequestPayload,
             SubscribeReplyPayload,
             UnsubscribeRequestPayload,
-            UnsubscribeReplyPayload
+            UnsubscribeReplyPayload,
+            LifecycleOnPayload,
+            LifecycleOnReplyPayload,
+            LifecycleOffPayload,
+            LifecycleOffReplyPayload,
+            GetLifecycleStatusPayload,
+            LifecycleStatusReplyPayload
         >;
         
         // Helper to get message ID from main registry
@@ -140,7 +148,13 @@ public:
             SubscribeRequest,
             typename SubscribeRequest::ReplyMessageDef,
             UnsubscribeRequest,
-            typename UnsubscribeRequest::ReplyMessageDef
+            typename UnsubscribeRequest::ReplyMessageDef,
+            LifecycleOnCmd,
+            LifecycleOnReply,
+            LifecycleOffCmd,
+            LifecycleOffReply,
+            GetLifecycleStatusCmd,
+            GetLifecycleStatusReply
         >;
         
         // Extract payload types from message definitions
@@ -148,7 +162,13 @@ public:
             typename SubscribeRequest::Payload,
             typename SubscribeRequest::ReplyMessageDef::Payload,
             typename UnsubscribeRequest::Payload,
-            typename UnsubscribeRequest::ReplyMessageDef::Payload
+            typename UnsubscribeRequest::ReplyMessageDef::Payload,
+            typename LifecycleOnCmd::Payload,
+            typename LifecycleOnReply::Payload,
+            typename LifecycleOffCmd::Payload,
+            typename LifecycleOffReply::Payload,
+            typename GetLifecycleStatusCmd::Payload,
+            typename GetLifecycleStatusReply::Payload
         >;
         
         // WorkMailbox - unrestricted Mailbox that can send/receive any registered type.
@@ -183,7 +203,8 @@ public:
     template<typename PayloadT>
     using Mailbox = commrat::Mailbox<MessageDefs..., SubscribeRequest, UnsubscribeRequest,
                                      GetParamsCmd, SetParamsCmd, ListParamsCmd,
-                                     GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd>;
+                                     GetParamCmd, SetParamCmd, SaveParamsCmd, LoadParamsCmd,
+                                     LifecycleOnCmd, LifecycleOffCmd, GetLifecycleStatusCmd>;
     
     /**
      * @brief Module2 template bound to this application

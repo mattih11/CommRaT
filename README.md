@@ -19,7 +19,7 @@ A modern C++20 communication framework that combines **RACK's TiMS IPC** message
 - **Multi-Output**: Produce multiple message types with type-specific delivery
 - **Multi-Input Synchronization**: `Input<T>` (primary) + `SyncedInput<T>` (secondary) with `Synced<T>` wrapper
 - **Auto-Subscription**: `Input<T>` handles subscription protocol automatically
-- **3-Mailbox Architecture**: CMD (per-output), WORK (send-only), DATA (per-input) with blocking receives
+- **Typed mailbox architecture**: output CMD/PUBLISH, module WORK/LIFECYCLE, and input DATA endpoints
 - **RT-Safe**: No dynamic allocation in hot paths, deterministic behavior
 - **SeRTial Integration**: `fixed_vector`, `fixed_string`, compile-time size computation
 - **TiMS IPC Backend**: Socket-based real-time messaging from RACK
@@ -194,7 +194,8 @@ Documentation will be generated in `docs/api/html/index.html`. Open in your brow
 
 ## Architecture Highlights
 
-- **3-Mailbox System**: CMD (per-output, blocking receive), WORK (per-module, send-only), DATA (per-input)
+- **Lifecycle control**: Remote on/off/status with a persistent module-level command endpoint
+- **Typed mailbox system**: CMD/PUBLISH per output, WORK/LIFECYCLE per module, DATA per input
 - **Blocking Receives**: 0% CPU when idle, immediate response when active
 - **Compile-Time IDs**: Message IDs calculated at compile time with collision detection
 - **Auto-Subscription**: `Input<T>` automatically handles subscription protocol

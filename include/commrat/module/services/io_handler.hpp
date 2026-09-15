@@ -154,11 +154,11 @@ protected:
      */
     template<size_t... OutputIndices>
     void publish_outputs(std::index_sequence<OutputIndices...>) {
-        // Get timestamp once for all outputs (consistent timestamp)
-        Timestamp now = Time::now();
-        
-        // Publish each output
-        (get_output<OutputIndices>().publish_workspace(now), ...);
+        if constexpr (sizeof...(OutputIndices) > 0) {
+            // Get timestamp once for all outputs (consistent timestamp)
+            Timestamp now = Time::now();
+            (get_output<OutputIndices>().publish_workspace(now), ...);
+        }
     }
     
     /**
