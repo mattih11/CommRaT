@@ -153,6 +153,14 @@ Current: Blocking wait (system messages only).
 Recommended: Configurable timeout with 1-second default.
 Future: Async callback mechanism.
 
+### Typed Remote Module Handles
+Implemented: `RemoteHandle<Registry, T>`, command-only `Remote<T>` dependencies,
+concise `input<N/T>()` and `remote<N/T>()` accessors, serialized RPC ownership,
+process-launcher lifecycle endpoint resolution, and generated numeric command
+and lifecycle endpoint metadata. Existing command helpers remain compatibility
+wrappers. See
+[Typed Remote Module Handles](work/REMOTE_MODULE_HANDLES.md).
+
 **DDS Compatibility Layer**
 - Direct DDS backend instead of TiMS
 - Enables interoperability with DDS-based systems

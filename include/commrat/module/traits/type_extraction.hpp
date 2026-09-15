@@ -6,6 +6,33 @@
 
 namespace commrat {
 
+template<typename T, typename Tuple>
+struct tuple_type_count;
+
+template<typename T, typename... Ts>
+struct tuple_type_count<T, std::tuple<Ts...>>
+    : std::integral_constant<size_t, (size_t{0} + ... + std::is_same_v<T, Ts>)> {};
+
+template<typename T, typename Tuple>
+inline constexpr size_t tuple_type_count_v = tuple_type_count<T, Tuple>::value;
+
+template<typename T, typename Tuple, size_t Index = 0>
+struct tuple_type_index;
+
+template<typename T, typename First, typename... Rest, size_t Index>
+struct tuple_type_index<T, std::tuple<First, Rest...>, Index>
+    : std::conditional_t<
+          std::is_same_v<T, First>,
+          std::integral_constant<size_t, Index>,
+          tuple_type_index<T, std::tuple<Rest...>, Index + 1>> {};
+
+template<typename T, size_t Index>
+struct tuple_type_index<T, std::tuple<>, Index>
+    : std::integral_constant<size_t, Index> {};
+
+template<typename T, typename Tuple>
+inline constexpr size_t tuple_type_index_v = tuple_type_index<T, Tuple>::value;
+
 // ============================================================================
 // Output Type Extraction (from BuildIOTuple)
 // ============================================================================
@@ -122,6 +149,24 @@ public:
 
 template<typename IOBuilder, typename IOTuple>
 using ExtractInputWrappers_t = typename ExtractInputWrappers<IOBuilder, IOTuple>::type;
+
+template<typename IOBuilder, typename IOTuple>
+struct ExtractRemoteTypes {
+private:
+    template<size_t... Is>
+    static constexpr auto extract_impl(std::index_sequence<Is...>) {
+        return std::tuple<typename std::tuple_element_t<
+            IOBuilder::remote_indices()[Is], IOTuple
+        >::Type...>{};
+    }
+
+public:
+    using type = decltype(extract_impl(
+        std::make_index_sequence<IOBuilder::num_remotes>{}));
+};
+
+template<typename IOBuilder, typename IOTuple>
+using ExtractRemoteTypes_t = typename ExtractRemoteTypes<IOBuilder, IOTuple>::type;
 
 /**
  * @brief Get single input type (when num_inputs == 1)

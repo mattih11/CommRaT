@@ -27,6 +27,7 @@
 
 #include <commrat/launcher/module_description.hpp>
 #include <commrat/meta/descriptor.hpp>
+#include <commrat/module/helpers/address_helpers.hpp>
 #include <commrat/module/module_config.hpp>
 #include <rfl/json.hpp>
 
@@ -343,7 +344,7 @@ private:
         return path;
     }
 
-    static ModuleConfig to_config(const ModuleDescription& desc) {
+    ModuleConfig to_config(const ModuleDescription& desc) const {
         ModuleConfig cfg;
         cfg.name = desc.name;
 
@@ -368,34 +369,84 @@ private:
         // Build a flat source list: continuous inputs first, then synced.
         // Supports both old format (synced: bool in flat inputs[]) and new
         // format (separate synced_inputs[] array).
-        struct Source { uint8_t sys; uint8_t inst; bool is_primary; };
+        struct Source {
+            uint8_t sys;
+            uint8_t inst;
+            uint32_t lifecycle_address;
+            bool is_primary;
+        };
         std::vector<Source> all_sources;
+        const auto& consumer_descriptor = find_descriptor(desc.module_class);
+        size_t continuous_index = 0;
+        size_t synced_index = 0;
         if (!desc.synced_inputs.has_value() || desc.synced_inputs->empty()) {
-            for (const auto& i : desc.inputs)
-                all_sources.push_back({i.source_system_id, i.source_instance_id, !i.synced.value()});
+            for (const auto& i : desc.inputs) {
+                const bool primary = !i.synced.value();
+                const auto& types = primary
+                    ? consumer_descriptor.inputs.value()
+                    : consumer_descriptor.synced_inputs.value();
+                const size_t type_index = primary ? continuous_index++ : synced_index++;
+                all_sources.push_back({
+                    i.source_system_id,
+                    i.source_instance_id,
+                    resolve_lifecycle_address(
+                        i.source_system_id, i.source_instance_id, types.at(type_index)),
+                    primary});
+            }
         } else {
-            for (const auto& i : desc.inputs)
-                all_sources.push_back({i.source_system_id, i.source_instance_id, true});
-            for (const auto& i : *desc.synced_inputs)
-                all_sources.push_back({i.source_system_id, i.source_instance_id, false});
+            for (const auto& i : desc.inputs) {
+                const auto& expected_type = consumer_descriptor.inputs->at(continuous_index++);
+                all_sources.push_back({
+                    i.source_system_id,
+                    i.source_instance_id,
+                    resolve_lifecycle_address(
+                        i.source_system_id, i.source_instance_id, expected_type),
+                    true});
+            }
+            for (const auto& i : *desc.synced_inputs) {
+                const auto& expected_type = consumer_descriptor.synced_inputs->at(synced_index++);
+                all_sources.push_back({
+                    i.source_system_id,
+                    i.source_instance_id,
+                    resolve_lifecycle_address(
+                        i.source_system_id, i.source_instance_id, expected_type),
+                    false});
+            }
         }
 
         if (all_sources.empty()) {
             cfg.inputs = NoInputConfig{};
         } else if (all_sources.size() == 1 && all_sources[0].is_primary) {
             cfg.inputs = SingleInputConfig{.source_system_id   = all_sources[0].sys,
-                                           .source_instance_id = all_sources[0].inst};
+                                           .source_instance_id = all_sources[0].inst,
+                                           .source_lifecycle_address = all_sources[0].lifecycle_address};
         } else {
             MultiInputConfig multi;
             for (const auto& s : all_sources)
                 multi.sources.push_back({.system_id   = s.sys,
                                          .instance_id = s.inst,
+                                         .lifecycle_address = s.lifecycle_address,
                                          .is_primary  = s.is_primary});
             cfg.inputs = multi;
         }
 
         if (desc.params.has_value())
             cfg.params = *desc.params;
+
+        if (desc.remotes.has_value()) {
+            const auto& expected_remotes = consumer_descriptor.remotes.value();
+            for (size_t index = 0; index < desc.remotes->size(); ++index) {
+                const auto& remote = desc.remotes->at(index);
+                cfg.remotes.push_back({
+                    .system_id = remote.source_system_id,
+                    .instance_id = remote.source_instance_id,
+                    .lifecycle_address = resolve_lifecycle_address(
+                        remote.source_system_id,
+                        remote.source_instance_id,
+                        expected_remotes.at(index)),
+                });
+            }
+        }
 
         return cfg;
     }
@@ -427,6 +478,25 @@ private:
             }
         }
         return {nullptr, 0};
+    }
+
+    uint32_t resolve_lifecycle_address(
+        uint8_t system_id,
+        uint8_t instance_id,
+        const std::string& expected_type) const {
+        auto [source_module, output_index] = find_source(
+            system_id, instance_id, expected_type);
+        (void)output_index;
+        if (!source_module) return 0;
+
+        const auto& source_descriptor = find_descriptor(source_module->module_class);
+        if (!source_descriptor.lifecycle_endpoint) return 0;
+        const auto& endpoint = *source_descriptor.lifecycle_endpoint;
+        return encode_address(
+            endpoint.address_type_id,
+            system_id,
+            instance_id,
+            endpoint.mailbox_index);
     }
 
     // Check one connection: expected type (from consumer descriptor) vs actual type (from producer descriptor).
@@ -496,6 +566,23 @@ private:
                     check_connection(mod.name, "synced_inputs", i, flat[i],
                                      synced[i].source_system_id,
                                      synced[i].source_instance_id);
+            }
+
+            if (desc.remotes && mod.remotes) {
+                const auto& expected = *desc.remotes;
+                const auto& configured = *mod.remotes;
+                if (expected.size() != configured.size()) {
+                    throw std::runtime_error(
+                        "[Launcher] Remote count mismatch for module '" + mod.name + "'");
+                }
+                for (size_t i = 0; i < configured.size(); ++i) {
+                    check_connection(mod.name, "remotes", i, expected[i],
+                                     configured[i].source_system_id,
+                                     configured[i].source_instance_id);
+                }
+            } else if (desc.remotes && !desc.remotes->empty()) {
+                throw std::runtime_error(
+                    "[Launcher] Missing remotes for module '" + mod.name + "'");
             }
         }
     }

@@ -63,23 +63,27 @@ public:
      * Creates DATA mailbox for receiving continuous stream.
      * Does NOT start mailbox - call start() separately.
      * 
-     * @param work_mbx Shared work mailbox (for subscription protocol)
+    * @param rpc_client Shared serialized WORK mailbox RPC client
      * @param data_mbx_config Configuration for DATA mailbox (address, buffer sizes)
      * @param producer_system_id Producer's system ID
      * @param producer_instance_id Producer's instance ID
      * @param requested_period Desired update period (0 = as fast as possible)
      * @param poll_timeout How long to wait for new data
      * @param cmd_timeout Timeout for subscription commands
+    * @param lifecycle_address Resolved producer lifecycle endpoint, or 0 to derive it
      */
-    void initialize(typename Registry::System::WorkMailbox& work_mbx,
+    void initialize(RpcClient<Registry>& rpc_client,
                     const MailboxConfig& data_mbx_config,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
                     Duration requested_period = Duration::zero(),
                     Duration poll_timeout = Milliseconds(100),
-                    Duration cmd_timeout = Milliseconds(1000)) {
+                    Duration cmd_timeout = Milliseconds(1000),
+                    uint32_t lifecycle_address = 0) {
         // Initialize base class
-        CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
+        CmdInput<Registry, OutputType>::initialize(
+            rpc_client, producer_system_id, producer_instance_id,
+            cmd_timeout, lifecycle_address);
         
         // Create DATA mailbox for receiving stream (allocation only, no start)
         data_mbx_.emplace(data_mbx_config);
@@ -167,7 +171,7 @@ public:
                 .timestamp = Time::now(),
                 .seq_number = 0,
                 .dest = 0,
-                .src = this->work_mbx_->mailbox_id(),  // Reply must reach WORK mailbox
+                .src = this->rpc_client_->mailbox_id(),  // Reply must reach WORK mailbox
                 .flags = 0
             },
             .payload = {

@@ -59,6 +59,7 @@ protected:
     static constexpr size_t num_continuous_inputs = IOBuilder::num_continuous_inputs;
     static constexpr size_t num_synced_inputs = IOBuilder::num_synced_inputs;
     static constexpr size_t num_inputs = num_continuous_inputs + num_synced_inputs;
+    static constexpr size_t num_remotes = IOBuilder::num_remotes;
     
     // ========================================================================
     // I/O Storage
@@ -110,6 +111,20 @@ protected:
     const auto& get_input() const {
         static_assert(InputIndex < num_inputs, "Input index out of range");
         constexpr auto idx = IOBuilder::input_indices()[InputIndex];
+        return std::get<idx>(get_io_tuple());
+    }
+
+    template<size_t RemoteIndex>
+    auto& get_remote() {
+        static_assert(RemoteIndex < num_remotes, "Remote index out of range");
+        constexpr auto idx = IOBuilder::remote_indices()[RemoteIndex];
+        return std::get<idx>(get_io_tuple());
+    }
+
+    template<size_t RemoteIndex>
+    const auto& get_remote() const {
+        static_assert(RemoteIndex < num_remotes, "Remote index out of range");
+        constexpr auto idx = IOBuilder::remote_indices()[RemoteIndex];
         return std::get<idx>(get_io_tuple());
     }
     
@@ -220,14 +235,33 @@ protected:
     /**
      * @brief Initialize all I/O instances
      */
-    template<typename ModuleConfig, typename WorkMailbox>
-    void initialize_io(const ModuleConfig& config, WorkMailbox& work_mailbox) {
+    template<typename ModuleConfig, typename RpcClientType>
+    void initialize_io(const ModuleConfig& config, RpcClientType& rpc_client) {
         // CRITICAL: Emplace IOTuple BEFORE accessing get_output()/get_input()!
         // get_output() dereferences io_instances_, so it MUST be initialized first.
         io_instances_.emplace();
         
         initialize_outputs(std::make_index_sequence<num_outputs>{}, config);
-        initialize_inputs(std::make_index_sequence<num_inputs>{}, config, work_mailbox);
+        initialize_inputs(std::make_index_sequence<num_inputs>{}, config, rpc_client);
+        initialize_remotes(std::make_index_sequence<num_remotes>{}, config, rpc_client);
+    }
+
+    template<size_t... RemoteIndices, typename ModuleConfig, typename RpcClientType>
+    void initialize_remotes(std::index_sequence<RemoteIndices...>,
+                            const ModuleConfig& config,
+                            RpcClientType& rpc_client) {
+        (initialize_remote<RemoteIndices>(config, rpc_client), ...);
+    }
+
+    template<size_t RemoteIndex, typename ModuleConfig, typename RpcClientType>
+    void initialize_remote(const ModuleConfig& config, RpcClientType& rpc_client) {
+        const auto& remote_config = config.remotes.at(RemoteIndex);
+        get_remote<RemoteIndex>().initialize(
+            rpc_client,
+            remote_config.system_id,
+            remote_config.instance_id,
+            Milliseconds(1000),
+            remote_config.lifecycle_address);
     }
     
     /**
@@ -300,31 +334,34 @@ protected:
     /**
      * @brief Initialize all inputs
      */
-    template<size_t... InputIndices, typename ModuleConfig, typename WorkMailbox>
-    void initialize_inputs(std::index_sequence<InputIndices...>, const ModuleConfig& config, WorkMailbox& work_mailbox) {
-        (initialize_input<InputIndices>(config, work_mailbox), ...);
+    template<size_t... InputIndices, typename ModuleConfig, typename RpcClientType>
+    void initialize_inputs(std::index_sequence<InputIndices...>, const ModuleConfig& config, RpcClientType& rpc_client) {
+        (initialize_input<InputIndices>(config, rpc_client), ...);
     }
     
     /**
      * @brief Initialize single input at index
      */
-    template<size_t InputIndex, typename ModuleConfig, typename WorkMailbox>
-    void initialize_input(const ModuleConfig& config, WorkMailbox& work_mailbox) {
+    template<size_t InputIndex, typename ModuleConfig, typename RpcClientType>
+    void initialize_input(const ModuleConfig& config, RpcClientType& rpc_client) {
         auto& input = get_input<InputIndex>();
         using InputType = std::decay_t<decltype(input)>;
         
         // Get source addresses from config
         uint8_t src_sys_id, src_inst_id;
+        uint32_t lifecycle_address;
         
         if constexpr (num_inputs == 1) {
             // Single input - use source_system_id/source_instance_id
             src_sys_id = config.source_system_id();
             src_inst_id = config.source_instance_id();
+            lifecycle_address = config.source_lifecycle_address();
         } else {
             // Multi-input - use input_sources array
             const auto& sources = config.input_sources();
             src_sys_id = sources[InputIndex].system_id;
             src_inst_id = sources[InputIndex].instance_id;
+            lifecycle_address = sources[InputIndex].lifecycle_address;
         }
         
         // Handle initialization based on input type
@@ -354,23 +391,25 @@ protected:
             
             // Initialize ContinuousInput with DATA mailbox
             input.initialize(
-                work_mailbox,
+                rpc_client,
                 data_config,
                 src_sys_id,
                 src_inst_id,
                 Duration::zero(),       // Requested period
                 Milliseconds(100),      // Poll timeout
-                Milliseconds(1000)      // Command timeout
+                Milliseconds(1000),     // Command timeout
+                lifecycle_address
             );
         } else {
             // SyncedInput: NO DATA mailbox, only work_mbx reference
             input.initialize(
-                work_mailbox,
+                rpc_client,
                 src_sys_id,
                 src_inst_id,
                 config.sync_tolerance(),
                 InterpolationMode::NEAREST,
-                Milliseconds(1000)      // Command timeout
+                Milliseconds(1000),     // Command timeout
+                lifecycle_address
             );
         }
     }

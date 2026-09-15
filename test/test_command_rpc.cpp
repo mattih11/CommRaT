@@ -60,15 +60,19 @@ private:
     float calibration_offset_{0.0f};
 };
 
-class CommandController : public CommandRpcApp::Module2<Output<ControllerData>, Period<Milliseconds(50)>> {
+class CommandController : public CommandRpcApp::Module2<
+    Output<ControllerData>,
+    Remote<SensorData>,
+    Period<Milliseconds(50)>> {
 public:
     explicit CommandController(const ModuleConfig& config)
-        : CommandRpcApp::Module2<Output<ControllerData>, Period<Milliseconds(50)>>(config) {}
+        : CommandRpcApp::Module2<
+              Output<ControllerData>,
+              Remote<SensorData>,
+              Period<Milliseconds(50)>>(config) {}
 
     std::optional<TimsMessage<CalibrateCmd::Reply>> calibrate(float offset) {
-        return this->template send_command<SensorData, CalibrateCmd>(
-            10,
-            1,
+        return this->template remote<SensorData>().template send_command<CalibrateCmd>(
             CalibrateCmd{.offset = offset},
             Milliseconds(500)
         );
@@ -86,7 +90,7 @@ public:
         : CommandRpcApp::Module2<Output<ControllerData>, Input<SensorData>>(config) {}
 
     std::optional<TimsMessage<CalibrateCmd::Reply>> calibrate_input(float offset) {
-        return this->template send_command_to_input<0, CalibrateCmd>(
+        return this->template input<SensorData>().template send_command<CalibrateCmd>(
             CalibrateCmd{.offset = offset},
             Milliseconds(500)
         );
@@ -111,6 +115,7 @@ int main() {
         .name = "CommandController",
         .outputs = SimpleOutputConfig{.system_id = 20, .instance_id = 1},
         .inputs = NoInputConfig{},
+        .remotes = {{.system_id = 10, .instance_id = 1}},
         .period = std::chrono::milliseconds(50),
         .params = std::nullopt
     };

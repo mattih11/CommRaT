@@ -2,14 +2,17 @@
 
 #include "commrat/module/helpers/address_helpers.hpp"
 #include "commrat/module/helpers/type_name.hpp"
+#include "commrat/module/rpc_client.hpp"
 #include <corerat/ipc/mailbox.hpp>
 #include "commrat/messaging/data_with_commands.hpp"
 #include "commrat/messaging/registry_utils.hpp"
+#include "commrat/messaging/system/lifecycle_messages.hpp"
 #include "commrat/module/helpers/command_extraction.hpp"
 #include <corerat/platform/timestamp.hpp>
 #include <corerat/platform/duration.hpp>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 
 namespace commrat {
 
@@ -54,8 +57,9 @@ using TimsHeader  = corerat::WireHeader;
  * Modern approach: Templates + compile-time command extraction
  */
 template<typename Registry, typename OutputType>
-class CmdInput {
+class RemoteHandle {
 public:
+    using Type = OutputType;
     // Extract data message (unwrap DataWithCommands if needed)
     using DataMessage = ExtractDataMessage_t<OutputType>;
     
@@ -63,7 +67,13 @@ public:
     using CommandList = registry::get_commands_for_t<OutputType, Registry>;
     
     // Compile-time type_id calculation from output payload type
-    static constexpr uint32_t output_message_id = Registry::template get_message_id<OutputType>();
+    static constexpr uint32_t output_message_id = []() {
+        if constexpr (std::is_void_v<OutputType>) {
+            return uint32_t{0};
+        } else {
+            return Registry::template get_message_id<OutputType>();
+        }
+    }();
     static constexpr uint8_t type_id = static_cast<uint8_t>(output_message_id & 0xFF);
     
     /**
@@ -71,11 +81,13 @@ public:
      * 
      * Creates uninitialized input. Must call initialize() or use parametrized constructor.
      */
-    CmdInput()
-        : work_mbx_(nullptr)
+    RemoteHandle()
+        : rpc_client_(nullptr)
+        , work_mbx_(nullptr)
         , producer_system_id_(0)
         , producer_instance_id_(0)
         , producer_cmd_address_(0)
+        , producer_lifecycle_address_(0)
         , cmd_timeout_(Milliseconds(100))
     {}
     
@@ -84,15 +96,21 @@ public:
      * 
      * Call this after default construction to set up the input.
      */
-    void initialize(typename Registry::System::WorkMailbox& work_mbx,
+    void initialize(RpcClient<Registry>& rpc_client,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
-                    Duration cmd_timeout = Milliseconds(100)) {
-        work_mbx_ = &work_mbx;
+                    Duration cmd_timeout = Milliseconds(100),
+                    uint32_t lifecycle_address = 0) {
+        rpc_client_ = &rpc_client;
+        work_mbx_ = nullptr;
         producer_system_id_ = producer_system_id;
         producer_instance_id_ = producer_instance_id;
         producer_cmd_address_ = encode_address(type_id, producer_system_id, 
                                                producer_instance_id, 0);  // CMD mailbox index = 0
+        producer_lifecycle_address_ = lifecycle_address != 0
+            ? lifecycle_address
+            : get_lifecycle_address<OutputType, Registry>(
+                  producer_system_id, producer_instance_id);
         cmd_timeout_ = cmd_timeout;
     }
     
@@ -103,15 +121,18 @@ public:
      * @param producer_instance_id Producer's instance ID
      * @param cmd_timeout Default timeout for commands
      */
-    CmdInput(MailboxFor<Registry>& work_mbx,
+    RemoteHandle(MailboxFor<Registry>& work_mbx,
              uint8_t producer_system_id,
              uint8_t producer_instance_id,
              Duration cmd_timeout = Milliseconds(100))
-        : work_mbx_(&work_mbx)
+        : rpc_client_(nullptr)
+        , work_mbx_(&work_mbx)
         , producer_system_id_(producer_system_id)
         , producer_instance_id_(producer_instance_id)
         , producer_cmd_address_(encode_address(type_id, producer_system_id, 
                                                producer_instance_id, 0))  // CMD mailbox index = 0
+          , producer_lifecycle_address_(get_lifecycle_address<OutputType, Registry>(
+              producer_system_id, producer_instance_id))
         , cmd_timeout_(cmd_timeout)
     {}
     
@@ -142,6 +163,11 @@ public:
         
         // Create mutable copy for send (serialize modifies header)
         TimsMessage<CmdType> cmd_copy = command;
+
+        if (rpc_client_) {
+            return rpc_client_->transact(
+                cmd_copy, reply, producer_cmd_address_, timeout);
+        }
         
         // 1. Send command to producer's CMD mailbox
         auto send_result = work_mbx_->send(cmd_copy, producer_cmd_address_);
@@ -206,7 +232,8 @@ public:
                 .timestamp = Time::now(),
                 .seq_number = 0,
                 .dest = producer_cmd_address_,
-                .src = work_mbx_ ? work_mbx_->mailbox_id() : 0,
+                .src = rpc_client_ ? rpc_client_->mailbox_id()
+                                   : (work_mbx_ ? work_mbx_->mailbox_id() : 0),
                 .flags = 0
             },
             .payload = command
@@ -220,16 +247,77 @@ public:
         return reply;
     }
 
+    std::optional<TimsMessage<LifecycleOnReplyPayload>> on(
+        Duration timeout = Duration::zero()) {
+        return send_lifecycle<LifecycleOnPayload, LifecycleOnReplyPayload>(
+            LifecycleOnPayload{}, timeout);
+    }
+
+    std::optional<TimsMessage<LifecycleOffReplyPayload>> off(
+        Duration timeout = Duration::zero()) {
+        return send_lifecycle<LifecycleOffPayload, LifecycleOffReplyPayload>(
+            LifecycleOffPayload{}, timeout);
+    }
+
+    std::optional<TimsMessage<LifecycleStatusReplyPayload>> status(
+        Duration timeout = Duration::zero()) {
+        return send_lifecycle<GetLifecycleStatusPayload, LifecycleStatusReplyPayload>(
+            GetLifecycleStatusPayload{}, timeout);
+    }
+
     [[nodiscard]] uint8_t producer_system_id() const { return producer_system_id_; }
     [[nodiscard]] uint8_t producer_instance_id() const { return producer_instance_id_; }
     [[nodiscard]] uint32_t producer_cmd_address() const { return producer_cmd_address_; }
+    [[nodiscard]] uint32_t producer_lifecycle_address() const {
+        return producer_lifecycle_address_;
+    }
+
+private:
+    template<typename RequestPayload, typename ReplyPayload>
+    std::optional<TimsMessage<ReplyPayload>> send_lifecycle(
+        const RequestPayload& payload,
+        Duration timeout) {
+        static_assert(Registry::template is_registered<RequestPayload>);
+        static_assert(Registry::template is_registered<ReplyPayload>);
+
+        if (!rpc_client_) {
+            return std::nullopt;
+        }
+        if (timeout == Duration::zero()) {
+            timeout = cmd_timeout_;
+        }
+
+        TimsMessage<RequestPayload> request{
+            .header = {
+                .msg_type = Registry::template get_message_id<RequestPayload>(),
+                .msg_size = 0,
+                .timestamp = Time::now(),
+                .seq_number = 0,
+                .dest = producer_lifecycle_address_,
+                .src = rpc_client_->mailbox_id(),
+                .flags = 0
+            },
+            .payload = payload
+        };
+        TimsMessage<ReplyPayload> reply;
+        if (!rpc_client_->transact(
+                request, reply, producer_lifecycle_address_, timeout)) {
+            return std::nullopt;
+        }
+        return reply;
+    }
     
 protected:
+    RpcClient<Registry>* rpc_client_;                         ///< Shared serialized RPC client
     typename Registry::System::WorkMailbox* work_mbx_;  ///< Shared work mailbox for RPC (pointer for default construction, non-owning)
     uint8_t producer_system_id_;                        ///< Producer's system ID
     uint8_t producer_instance_id_;                      ///< Producer's instance ID
     uint32_t producer_cmd_address_;                     ///< Producer's CMD mailbox address
+    uint32_t producer_lifecycle_address_;               ///< Producer's lifecycle mailbox address
     Duration cmd_timeout_;                          ///< Default timeout for commands
 };
+
+template<typename Registry, typename OutputType>
+using CmdInput = RemoteHandle<Registry, OutputType>;
 
 } // namespace commrat

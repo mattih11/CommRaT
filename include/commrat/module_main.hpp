@@ -141,7 +141,7 @@ int module_main(int argc, char** argv) {
             return 1;
         }
         
-        config = rfl::json::load<ModuleConfig>(filename).value();
+        config = rfl::json::load<ModuleConfig, rfl::DefaultIfMissing>(filename).value();
         
         // Call the main template function
         return module_main<ModuleType>(config);

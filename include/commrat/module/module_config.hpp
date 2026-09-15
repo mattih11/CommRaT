@@ -68,6 +68,7 @@ struct NoInputConfig {};
 struct SingleInputConfig {
     uint8_t source_system_id{0};
     uint8_t source_instance_id{0};
+    uint32_t source_lifecycle_address{0};
 };
 
 /// Multi-input - Multiple synchronized sources
@@ -75,6 +76,7 @@ struct MultiInputConfig {
     struct InputSource {
         uint8_t system_id{0};
         uint8_t instance_id{0};
+        uint32_t lifecycle_address{0};
         bool is_primary{false};  // Exactly one must be primary (drives execution)
         mutable size_t input_index{0};  // Auto-populated during subscription
     };
@@ -84,6 +86,12 @@ struct MultiInputConfig {
 };
 
 using InputConfig = rfl::TaggedUnion<"input_type", NoInputConfig, SingleInputConfig, MultiInputConfig>;
+
+struct RemoteConfig {
+    uint8_t system_id{0};
+    uint8_t instance_id{0};
+    uint32_t lifecycle_address{0};
+};
 
 // ============================================================================
 // Module Configuration
@@ -95,6 +103,7 @@ struct ModuleConfig {
     // Output and input configuration (Variant)
     OutputConfig outputs = SimpleOutputConfig{.system_id = 0, .instance_id = 0};
     InputConfig inputs = NoInputConfig{};
+    std::vector<RemoteConfig> remotes{};
     
     // Common configuration
     // Period is optional:
@@ -186,6 +195,14 @@ struct ModuleConfig {
         }
         return single->source_instance_id;
     }
+
+    [[nodiscard]] uint32_t source_lifecycle_address() const {
+        auto* single = rfl::get_if<SingleInputConfig>(&inputs.variant());
+        if (!single) {
+            throw std::logic_error("source_lifecycle_address() only valid for SingleInputConfig");
+        }
+        return single->source_lifecycle_address;
+    }
     
     /// Get input sources (MultiInput only)
     [[nodiscard]] const std::vector<MultiInputConfig::InputSource>& input_sources() const {
@@ -245,6 +262,17 @@ struct ModuleConfig {
             throw std::out_of_range("Input index out of range");
         }
         return multi->sources[index].instance_id;
+    }
+
+    [[nodiscard]] uint32_t input_lifecycle_address(size_t index) const {
+        auto* multi = rfl::get_if<MultiInputConfig>(&inputs.variant());
+        if (!multi) {
+            throw std::logic_error("input_lifecycle_address(index) only valid for MultiInputConfig");
+        }
+        if (index >= multi->sources.size()) {
+            throw std::out_of_range("Input index out of range");
+        }
+        return multi->sources[index].lifecycle_address;
     }
     
     // ========================================================================

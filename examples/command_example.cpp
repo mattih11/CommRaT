@@ -1,6 +1,6 @@
 /**
  * @file command_example.cpp
- * @brief Demonstrates simple command handling with DataWithCommands
+ * @brief Demonstrates command handling and typed Remote<T> calls
  */
 
 #include <commrat/examples/common_messages.hpp>
@@ -144,6 +144,50 @@ private:
 };
 
 // ============================================================================
+// Controller with a Typed Remote Handle
+// ============================================================================
+
+class CommandController : public CommandApp::Module2<
+    Output<StatusData>,
+    commrat::Remote<TemperatureData>,
+    Period<500>
+> {
+public:
+    explicit CommandController(const ModuleConfig& config)
+        : CommandApp::Module2<
+              Output<StatusData>,
+              commrat::Remote<TemperatureData>,
+              Period<500>>(config) {}
+
+    auto calibrate(float offset) {
+        return this->template remote<TemperatureData>().template send_command<CalibrateCmd>(
+            CalibrateCmd{.offset = offset}, Milliseconds(500));
+    }
+
+    auto set_mode(uint32_t mode) {
+        return this->template remote<TemperatureData>().template send_command<SetModeCmd>(
+            SetModeCmd{.mode = mode}, Milliseconds(500));
+    }
+
+    auto reset(bool hard_reset) {
+        return this->template remote<TemperatureData>().template send_command<ResetCmd>(
+            ResetCmd{.hard_reset = hard_reset}, Milliseconds(500));
+    }
+
+    auto sensor_status() {
+        return this->template remote<TemperatureData>().status(Milliseconds(500));
+    }
+
+protected:
+    void process(StatusData& output) override {
+        output.counter = command_cycles_++;
+    }
+
+private:
+    uint32_t command_cycles_{0};
+};
+
+// ============================================================================
 // Global Shutdown Signal
 // ============================================================================
 std::atomic<bool> shutdown_requested{false};
@@ -162,7 +206,7 @@ int main() {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
-    std::cout << "=== Simple Command Handling Example ===\n\n";
+    std::cout << "=== Typed Remote Command Example ===\n\n";
     
     // Create sensor module with command handling
     ModuleConfig sensor_config{
@@ -172,9 +216,43 @@ int main() {
         .period = std::chrono::milliseconds(200),
         .params = std::nullopt
     };
+
+    ModuleConfig controller_config{
+        .name = "CommandController",
+        .outputs = commrat::SimpleOutputConfig{.system_id = 20, .instance_id = 1},
+        .inputs = commrat::NoInputConfig{},
+        .remotes = {{.system_id = 10, .instance_id = 1}},
+        .period = std::chrono::milliseconds(500),
+        .params = std::nullopt
+    };
     
     CommandableSensor sensor(sensor_config);
+    CommandController controller(controller_config);
     sensor.start();
+    controller.start();
+
+    Time::sleep(Milliseconds(250));
+
+    auto status_reply = controller.sensor_status();
+    auto calibrate_reply = controller.calibrate(2.5f);
+    auto mode_reply = controller.set_mode(3);
+    auto reset_reply = controller.reset(false);
+
+    if (!status_reply || !calibrate_reply || !mode_reply || !reset_reply) {
+        std::cerr << "Command RPC failed.\n";
+        controller.stop();
+        sensor.stop();
+        return 1;
+    }
+
+    std::cout << "Remote handle status state="
+              << static_cast<uint32_t>(status_reply->payload.state) << "\n";
+    std::cout << "Calibrate previous_offset="
+              << calibrate_reply->payload.previous_offset << "\n";
+    std::cout << "SetMode previous_mode="
+              << mode_reply->payload.previous_mode << "\n";
+    std::cout << "Soft reset previous_mode="
+              << reset_reply->payload.previous_mode << "\n\n";
     
     std::cout << "Sensor running with command handlers registered.\n";
     std::cout << "Auto-stopping after 2 seconds...\n\n";
@@ -188,6 +266,7 @@ int main() {
     
     // Cleanup
     std::cout << "\n=== Stopping ===\n";
+    controller.stop();
     sensor.stop();
     
     std::cout << "\n=== Summary ===\n";
@@ -197,10 +276,13 @@ int main() {
     std::cout << "  DataWithCommands<TempData, ResetCmd, CalibrateCmd, SetModeCmd>\n\n";
     std::cout << "Command handlers:\n";
     std::cout << "  register_command_handler<OutIdx, CmdType, &Module::handler>(*this)\n\n";
+    std::cout << "Remote command calls:\n";
+    std::cout << "  remote<TemperatureData>().send_command<CmdType>(command)\n\n";
     std::cout << "Benefits:\n";
     std::cout << "  - No variadic template pollution in module declaration\n";
     std::cout << "  - Commands grouped with their data type\n";
     std::cout << "  - Automatic request/reply handling\n";
+    std::cout << "  - Configured target identity with no mailbox management\n";
     std::cout << "  - Type-safe at compile-time\n";
     
     return 0;

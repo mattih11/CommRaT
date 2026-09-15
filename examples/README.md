@@ -25,9 +25,11 @@ Minimal boilerplate CommRaT application using `Module2<Output<T>, Period<>>`.
 ---
 
 ### command_example.cpp
-**Command Handling**
+**Typed Command Handling**
 
-Command pattern with multiple command types and type-safe dispatch.
+Command handler registration plus a configured `Remote<TemperatureData>`
+controller using typed command and lifecycle RPCs without manual mailboxes or
+target IDs at call sites.
 
 **Run**: `./example_commands`
 

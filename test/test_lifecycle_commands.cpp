@@ -11,12 +11,30 @@ struct ControllerOutput {
     bool running{false};
 };
 
-using LifecycleApp = CommRaT<Message::Data<ControllerOutput>>;
+struct LifecycleAnchorOutput {};
 
-class LifecycleTargetModule : public LifecycleApp::Module2<Period<Milliseconds(5)>> {
+struct TargetOutput {
+    uint32_t count{0};
+};
+
+struct MissingOutput {};
+
+using LifecycleApp = CommRaT<
+    Message::Data<ControllerOutput>,
+    Message::Data<LifecycleAnchorOutput>,
+    Message::Data<TargetOutput>,
+    Message::Data<MissingOutput>>;
+
+class LifecycleTargetModule : public LifecycleApp::Module2<
+    Output<LifecycleAnchorOutput>,
+    Output<TargetOutput>,
+    Period<Milliseconds(5)>> {
 public:
     explicit LifecycleTargetModule(const ModuleConfig& config)
-        : LifecycleApp::Module2<Period<Milliseconds(5)>>(config) {}
+        : LifecycleApp::Module2<
+              Output<LifecycleAnchorOutput>,
+              Output<TargetOutput>,
+              Period<Milliseconds(5)>>(config) {}
 
     [[nodiscard]] uint32_t process_count() const {
         return process_count_.load(std::memory_order_acquire);
@@ -35,8 +53,8 @@ public:
     }
 
 protected:
-    void process() override {
-        process_count_.fetch_add(1, std::memory_order_release);
+    void process(LifecycleAnchorOutput&, TargetOutput& output) override {
+        output.count = process_count_.fetch_add(1, std::memory_order_release) + 1;
     }
 
     LifecycleResult on_enable() override {
@@ -61,10 +79,22 @@ private:
 
 class LifecycleController : public LifecycleApp::Module2<
     Output<ControllerOutput>,
+    Remote<TargetOutput>,
+    Remote<ControllerOutput>,
+    Remote<MissingOutput>,
     Period<Milliseconds(20)>> {
 public:
     explicit LifecycleController(const ModuleConfig& config)
-        : LifecycleApp::Module2<Output<ControllerOutput>, Period<Milliseconds(20)>>(config) {}
+        : LifecycleApp::Module2<
+              Output<ControllerOutput>,
+              Remote<TargetOutput>,
+              Remote<ControllerOutput>,
+              Remote<MissingOutput>,
+              Period<Milliseconds(20)>>(config) {}
+
+    auto& target() { return this->template remote<TargetOutput>(); }
+    auto& self() { return this->template remote<ControllerOutput>(); }
+    auto& missing() { return this->template remote<MissingOutput>(); }
 
 protected:
     void process(ControllerOutput& output) override {
@@ -75,8 +105,12 @@ protected:
 int main() {
     ModuleConfig target_config{
         .name = "LifecycleTarget",
-        .outputs = NoOutputConfig{.system_id = 10, .instance_id = 1},
+        .outputs = MultiOutputConfig{.addresses = {
+            {.system_id = 10, .instance_id = 1},
+            {.system_id = 10, .instance_id = 1},
+        }},
         .inputs = NoInputConfig{},
+        .remotes = {},
         .period = std::chrono::milliseconds(5),
         .params = std::nullopt
     };
@@ -84,6 +118,16 @@ int main() {
         .name = "LifecycleController",
         .outputs = SimpleOutputConfig{.system_id = 20, .instance_id = 1},
         .inputs = NoInputConfig{},
+        .remotes = {
+            {
+                .system_id = 10,
+                .instance_id = 1,
+                .lifecycle_address = get_lifecycle_address<
+                    LifecycleAnchorOutput, LifecycleApp::Registry>(10, 1),
+            },
+            {.system_id = 20, .instance_id = 1},
+            {.system_id = 99, .instance_id = 99},
+        },
         .period = std::chrono::milliseconds(20),
         .params = std::nullopt
     };
@@ -97,12 +141,12 @@ int main() {
     assert(target.enable_count() == 1);
     assert(target.process_count() > 0);
 
-    auto initial_status = controller.get_lifecycle_status(10, 1, Milliseconds(500));
+    auto initial_status = controller.target().status(Milliseconds(500));
     assert(initial_status.has_value());
     assert(initial_status->payload.state == static_cast<uint8_t>(LifecycleState::Enabled));
     assert(initial_status->payload.target == static_cast<uint8_t>(LifecycleTarget::On));
 
-    auto off_reply = controller.lifecycle_off(10, 1, Milliseconds(500));
+    auto off_reply = controller.target().off(Milliseconds(500));
     assert(off_reply.has_value());
     assert(off_reply->payload.result == static_cast<uint8_t>(LifecycleResult::Success));
     assert(off_reply->payload.state == static_cast<uint8_t>(LifecycleState::Disabled));
@@ -112,16 +156,16 @@ int main() {
     Time::sleep(Milliseconds(30));
     assert(target.process_count() == stopped_count);
 
-    auto disabled_status = controller.get_lifecycle_status(10, 1, Milliseconds(500));
+    auto disabled_status = controller.target().status(Milliseconds(500));
     assert(disabled_status.has_value());
     assert(disabled_status->payload.state == static_cast<uint8_t>(LifecycleState::Disabled));
 
-    auto repeated_off = controller.lifecycle_off(10, 1, Milliseconds(500));
+    auto repeated_off = controller.target().off(Milliseconds(500));
     assert(repeated_off.has_value());
     assert(repeated_off->payload.result ==
            static_cast<uint8_t>(LifecycleResult::AlreadyInState));
 
-    auto on_reply = controller.lifecycle_on(10, 1, Milliseconds(500));
+    auto on_reply = controller.target().on(Milliseconds(500));
     assert(on_reply.has_value());
     assert(on_reply->payload.result == static_cast<uint8_t>(LifecycleResult::Success));
     assert(on_reply->payload.state == static_cast<uint8_t>(LifecycleState::Enabled));
@@ -130,25 +174,22 @@ int main() {
     Time::sleep(Milliseconds(30));
     assert(target.process_count() > stopped_count);
 
-    auto repeated_on = controller.lifecycle_on(10, 1, Milliseconds(500));
+    auto repeated_on = controller.target().on(Milliseconds(500));
     assert(repeated_on.has_value());
     assert(repeated_on->payload.result ==
            static_cast<uint8_t>(LifecycleResult::AlreadyInState));
 
-    auto controller_off = controller.lifecycle_off<ControllerOutput>(
-        20, 1, Milliseconds(500));
+    auto controller_off = controller.self().off(Milliseconds(500));
     assert(controller_off.has_value());
     assert(controller_off->payload.state ==
            static_cast<uint8_t>(LifecycleState::Disabled));
 
-    auto controller_on = controller.lifecycle_on<ControllerOutput>(
-        20, 1, Milliseconds(500));
+    auto controller_on = controller.self().on(Milliseconds(500));
     assert(controller_on.has_value());
     assert(controller_on->payload.state ==
            static_cast<uint8_t>(LifecycleState::Enabled));
 
-    auto missing_status = controller.get_lifecycle_status<void>(
-        99, 99, Milliseconds(20));
+    auto missing_status = controller.missing().status(Milliseconds(20));
     assert(!missing_status.has_value());
 
     controller.stop();

@@ -28,16 +28,17 @@ Implemented:
 - Deferred completion replies, idempotent on/off commands, and busy rejection.
 - Data-thread-owned transitions with `on_enable()` and `on_disable()` hooks.
 - Input unsubscribe/resubscribe and output-subscriber retention across off/on.
-- Module-to-module `lifecycle_on()`, `lifecycle_off()`, and
-  `get_lifecycle_status()` RPC helpers.
+- Typed `Remote<T>` and input-handle `on()`, `off()`, and `status()` RPCs;
+  raw system/instance helpers remain available for compatibility.
+- Generated lifecycle endpoint metadata and ProcessLauncher resolution of the
+  producer's primary-output lifecycle address.
 - State-gated processing and idempotent final `stop()`.
 
 Not yet implemented:
 
 - Reset command and framework-state reset policy.
-- Descriptor lifecycle-address metadata for GUI discovery.
 - Configurable startup-off and deterministic retry policy.
-- Descriptor capability metadata, launcher orchestration, and GUI controls.
+- Automatic launcher lifecycle orchestration and GUI controls.
 - Event-based wakeup; disabled modules currently check transitions every 10 ms.
 
 ## RACK Reference Behavior

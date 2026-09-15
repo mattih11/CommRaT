@@ -1,8 +1,8 @@
 # CommRaT Introspection Architecture
 
-**Status**: CommRaT side fully implemented — all three layers are in place. Remaining work is in RaTGUI (BridgeFactory) and the standalone editor tool.  
+**Status**: Core three-layer introspection is implemented. A complete external command endpoint contract remains planned.
 **Created**: 2026-08-20  
-**Updated**: 2026-08-20 — all CommRaT items complete and committed on `feature-meta-introspection`
+**Updated**: 2026-09-15 — documented command ID and address discovery gap
 
 ---
 
@@ -97,6 +97,19 @@ A self-describing system where:
 `cmd_messages` is absent when the output type has no associated commands. Each entry's `output_index` identifies the output CMD mailbox that accepts those request types; consumers must preserve this association when addressing or authorizing commands.
 `params_defaults` is absent when the module has no `Params<T>` I/O specification.
 Optional fields also allow EVL cross-build placeholders containing only `module_class` and `binary`. Run the `evl-descriptors` target to inspect EVL binaries inside QEMU and replace those placeholders with complete descriptors.
+
+### Command interoperability gap
+
+The current artifacts do not yet form a self-contained command endpoint
+contract. The registry schema can contain request/reply message IDs and layouts,
+the module descriptor associates command type names with output indices, and the
+application description supplies deployment system/instance IDs. External
+tools must still join those artifacts and reproduce CommRaT's mailbox-address
+conventions. Module descriptors do not directly emit command/reply IDs, mailbox
+indices, lifecycle anchor metadata, or concrete deployment addresses.
+
+The planned endpoint metadata and resolved deployment manifest are specified in
+[Typed Remote Module Handles](REMOTE_MODULE_HANDLES.md#introspection-contract).
 
 **Params convention**: module authors define an rfl-reflectable aggregate and add `Params<TheirType>` to the module's I/O specifications. `write_module_inspect` serializes `ModuleType::ParamsType{}` as the defaults.
 

@@ -45,6 +45,11 @@ struct InputDescription {
     rfl::DefaultVal<bool> synced = false;  // for backward compat with flat inputs[]; absent = false
 };
 
+struct RemoteDescription {
+    uint8_t source_system_id{0};
+    uint8_t source_instance_id{1};
+};
+
 /**
  * Describes one module instance.
  * module_class must be registered with Launcher::register_module<T>(name).
@@ -55,6 +60,7 @@ struct ModuleDescription {
     std::vector<OutputDescription> outputs;
     std::vector<InputDescription>  inputs;                              // continuous inputs; synced: bool kept for backward compat
     std::optional<std::vector<InputDescription>>  synced_inputs;        // absent = no synced inputs
+    std::optional<std::vector<RemoteDescription>> remotes;
     std::optional<uint32_t>        period_ms;      // timer-driven modules only
     std::optional<rfl::Generic>    params;         // module-specific params, forwarded to ModuleConfig
 };

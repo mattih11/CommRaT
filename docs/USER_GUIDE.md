@@ -811,12 +811,18 @@ Commands arrive on the output's CMD mailbox. The framework dispatches to the reg
 
 ### 9.4 Sending Commands and Receiving Replies
 
-Use the timeout-taking `send_command` overload when the target module is known by address:
+Declare a command-only dependency with `Remote<T>` when no data subscription is
+needed, then use its configured typed handle:
 
 ```cpp
-auto reply = this->template send_command<TemperatureData, CalibrateCmd>(
-    10,
-    1,
+class Controller : public App::Module2<
+    Output<ControllerData>,
+    Remote<TemperatureData>,
+    Period<Milliseconds(20)>> {
+    // ...
+};
+
+auto reply = remote<TemperatureData>().send_command<CalibrateCmd>(
     CalibrateCmd{.offset = 0.25f},
     Milliseconds(100)
 );
@@ -826,16 +832,24 @@ if (reply && reply->payload.success) {
 }
 ```
 
-Use `send_command_to_input` when the target is one of this module's configured inputs:
+Configured `Input<T>` and `SyncedInput<T>` dependencies expose the same command
+and lifecycle API:
 
 ```cpp
-auto reply = this->template send_command_to_input<0, CalibrateCmd>(
+auto reply = input<0>().send_command<CalibrateCmd>(
     CalibrateCmd{.offset = 0.25f},
     Milliseconds(100)
 );
+
+auto status = input<TemperatureData>().status(Milliseconds(100));
+auto off_reply = input<TemperatureData>().off(Milliseconds(100));
 ```
 
-Both APIs send through the module WORK mailbox, wait with a bounded timeout, filter replies by source address, and return `std::nullopt` on timeout or send failure. The existing bool-returning `send_command<TargetData>(sys, inst, cmd)` remains the fire-and-forget form.
+Type-based access requires that the dependency type be unique; use indexed
+access for repeated types. Calls use a serialized `RpcClient` over the module
+WORK mailbox, wait with a bounded timeout, filter replies by source and message
+ID, and return `std::nullopt` on timeout or send failure. The older
+`send_command` and `send_command_to_input` forms remain compatibility wrappers.
 
 ---
 

@@ -66,15 +66,26 @@ public:
      * @brief Initialize input with mailbox and producer address
      * 
      * Call this after default construction to set up the input.
+    *
+    * @param rpc_client Shared serialized WORK mailbox RPC client
+    * @param producer_system_id Producer's system ID
+    * @param producer_instance_id Producer's instance ID
+    * @param tolerance Maximum timestamp difference for synchronized data
+    * @param interpolation Requested interpolation mode
+    * @param cmd_timeout Timeout for data and command RPCs
+    * @param lifecycle_address Resolved producer lifecycle endpoint, or 0 to derive it
      */
-    void initialize(typename Registry::System::WorkMailbox& work_mbx,
+    void initialize(RpcClient<Registry>& rpc_client,
                     uint8_t producer_system_id,
                     uint8_t producer_instance_id,
                     Duration tolerance = Milliseconds(50),
                     InterpolationMode interpolation = InterpolationMode::NEAREST,
-                    Duration cmd_timeout = Milliseconds(100)) {
+                    Duration cmd_timeout = Milliseconds(100),
+                    uint32_t lifecycle_address = 0) {
         // Initialize base class
-        CmdInput<Registry, OutputType>::initialize(work_mbx, producer_system_id, producer_instance_id, cmd_timeout);
+        CmdInput<Registry, OutputType>::initialize(
+            rpc_client, producer_system_id, producer_instance_id,
+            cmd_timeout, lifecycle_address);
         
         // Initialize our members
         tolerance_ = tolerance;

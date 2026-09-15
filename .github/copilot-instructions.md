@@ -931,6 +931,7 @@ void process(const T& input) {
 - **Dev Container** (`.devcontainer/devcontainer.json` — zero-setup IDE using ratos-dev-image with all deps)
 - **`.commrat.env` config** (single source of truth for non-secret values; `.commrat.env.local` for machine overrides)
 - **Process launcher system**: `commrat_module()` CMake macro wraps `add_executable` and atomically emits complete `<ClassName>.module.json` descriptors through native post-build inspection, failing the module build on inspection errors. EVL cross-builds use explicit placeholders until QEMU inspection. `ProcessLauncher` discovers descriptors from `dirname(argv[0])`, fork/execs each module binary with a temp `ModuleConfig` JSON, SIGTERM on stop with SIGKILL fallback. `MyApp::Launcher` (in-process variant) forward-declared in `commrat.hpp`; requires `#include <commrat/launcher/launcher.hpp>`. Both read `AppDescription` JSON with `modules[].module_class`, `outputs`, `inputs`, `period_ms`. `--duration-ms N` for timed exit (CTest). See `include/commrat/launcher/` and `docs/work/LAUNCHER_DESIGN.md`.
+- **Typed remote module handles**: `Remote<T>` command/control-only dependencies, `input<N/T>()` and `remote<N/T>()` accessors, type-checked command and lifecycle RPCs, serialized shared WORK transactions through `RpcClient`, generated numeric endpoint metadata, and ProcessLauncher-resolved lifecycle routing for secondary outputs.
 
 ### In Progress
 - **System lifecycle commands**: module-level on/off/status endpoint, deferred

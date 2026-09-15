@@ -1,6 +1,6 @@
 # Production-Ready Command Mechanism Design
 
-**Status**: Design document for Phase 7+ enhancements  
+**Status**: Implemented; original API analysis retained for design history
 **Date**: 2026-09-07  
 **Scope**: End-to-end command send/receive patterns, API improvements, real-time safety
 
@@ -15,6 +15,11 @@
 ---
 
 ## Current State
+
+The consumer-side API described in the original analysis below has been
+superseded by configured typed handles. Use `remote<T>().send_command<Cmd>()`
+for command-only dependencies and `input<T>().send_command<Cmd>()` for data
+dependencies. The raw system/instance helpers remain compatibility APIs.
 
 ### What Works Today
 
@@ -685,7 +690,9 @@ private:
 - DONE: Fire-and-forget `send_command<TargetData>(sys, inst, cmd)` works.
 - DONE: RPC pattern via `CmdInput` works and now has an optional-return payload overload.
 - DONE: Integrated RPC from Module2 works via timeout-taking `send_command<OutputDataType, CmdType>(...)` and `send_command_to_input<InputIndex, CmdType>(...)`.
-- TODO: Command metadata/reflection.
+- DONE: `Remote<T>` and configured input handles expose type-checked command RPC without IDs at call sites.
+- DONE: A shared `RpcClient` serializes WORK mailbox transactions so concurrent callers cannot steal replies.
+- DONE: Generated descriptors publish numeric command request/reply IDs and endpoint routing metadata.
 
 ### Phase 1: RPC from Process
 
@@ -724,8 +731,8 @@ private:
 
 All proposed enhancements are **additive**:
 - Old `send_command<TargetData>(sys, inst, cmd)` stays fire-and-forget
-- New timeout-taking `send_command<OutputDataType, CmdType>(...)` returns optional
-- New `send_command_to_input<InputIndex, CmdType>(...)` is additional overload
+- Timeout-taking raw-address and input-index helpers remain compatibility wrappers
+- `remote<T>()` and `input<T>()` are the preferred configured dependency APIs
 - Command handler registration replaces the documented-but-non-functional CRTP `on_command` path
 - Command definitions remain payload structs with nested `Reply` types
 

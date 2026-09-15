@@ -146,6 +146,7 @@ private:
         using IOService::outputs;
         using IOService::inputs;
         using IOService::get_input;
+        using IOService::get_remote;
         using IOService::get_output;
         using IOService::get_input_data;
         using IOService::get_output_data;
@@ -203,6 +204,7 @@ private:
     
     // Mailbox infrastructure (CMD mailboxes owned by ModuleOutput, DATA by ModuleInput)
     std::optional<WorkMailbox> work_mailbox_ = std::nullopt;  // No dedicated thread - sends from main/data thread (default empty)
+    std::optional<RpcClient<Registry>> rpc_client_ = std::nullopt;
     std::optional<LifecycleMailbox> lifecycle_mailbox_ = std::nullopt;
 
     static constexpr size_t max_registered_command_handlers = 32;
@@ -253,8 +255,9 @@ public:
                           registry::get_commands_for_t<OutputDataType, Registry>>,
                       "Command type is not associated with the target output type");
 
-        CmdInput<Registry, OutputDataType> target(
-            *work_mailbox_, target_system_id, target_instance_id, timeout);
+        RemoteHandle<Registry, OutputDataType> target;
+        target.initialize(
+            *rpc_client_, target_system_id, target_instance_id, timeout);
         return target.template send_command<CmdType>(command, timeout);
     }
 
@@ -401,10 +404,11 @@ public:
 
         // Create WORK mailbox for subscription protocol
         create_work_mailbox();
+        rpc_client_.emplace(*work_mailbox_);
         create_lifecycle_mailbox();
         
         // Initialize I/O instances (delegates to IOService)
-        this->initialize_io(config_, *work_mailbox_);
+        this->initialize_io(config_, *rpc_client_);
     }
     
     virtual ~Module2() {
@@ -424,6 +428,38 @@ protected:
     // Logging — TerminalSink declared before RtLogger so it outlives the drain thread.
     corerat::TerminalSink terminal_sink_;
     corerat::RtLogger<>   logger_;
+
+    template<size_t InputIndex>
+        requires (InputIndex < IO::Meta::num_inputs)
+    auto& input() {
+        return this->template get_input<InputIndex>();
+    }
+
+    template<typename InputType>
+    auto& input() {
+        static_assert(
+            tuple_type_count_v<InputType, typename IO::Meta::InputTypes> == 1,
+            "input<T>() requires T to occur exactly once; use input<Index>()");
+        constexpr size_t index = tuple_type_index_v<
+            InputType, typename IO::Meta::InputTypes>;
+        return this->template get_input<index>();
+    }
+
+    template<size_t RemoteIndex>
+        requires (RemoteIndex < IO::Meta::num_remotes)
+    auto& remote() {
+        return this->template get_remote<RemoteIndex>();
+    }
+
+    template<typename RemoteType>
+    auto& remote() {
+        static_assert(
+            tuple_type_count_v<RemoteType, typename IO::Meta::RemoteTypes> == 1,
+            "remote<T>() requires T to occur exactly once; use remote<Index>()");
+        constexpr size_t index = tuple_type_index_v<
+            RemoteType, typename IO::Meta::RemoteTypes>;
+        return this->template get_remote<index>();
+    }
 
     /**
      * @brief Get input timestamp by index (convenience method)
@@ -1102,21 +1138,9 @@ private:
             .payload = payload
         };
 
-        if (!work_mailbox_->send(request, target_address)) {
-            return std::nullopt;
-        }
-
-        const Timestamp deadline = Time::now() + Time::to_nanoseconds(timeout);
-        while (Time::now() < deadline) {
-            TimsMessage<ReplyPayload> reply;
-            const auto remaining_ns = static_cast<int64_t>(deadline - Time::now());
-            if (!work_mailbox_->receive(
-                    reply, Duration::nanoseconds(remaining_ns > 0 ? remaining_ns : 0))) {
-                continue;
-            }
-            if (reply.header.src == target_address) {
-                return reply;
-            }
+        TimsMessage<ReplyPayload> reply;
+        if (rpc_client_->transact(request, reply, target_address, timeout)) {
+            return reply;
         }
         return std::nullopt;
     }

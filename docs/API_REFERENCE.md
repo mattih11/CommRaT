@@ -195,6 +195,38 @@ All require `InputIndex < IO::Meta::num_inputs`.
 Commands are associated with an output payload using `DataWithCommands<Payload, Cmds...>`.
 Each command payload must define a nested `Reply` payload type.
 
+Configured dependencies expose typed handles:
+
+```cpp
+input<0>();
+input<InputType>();       // Requires a unique input type
+remote<0>();
+remote<OutputType>();     // Requires a unique remote type
+```
+
+`Input<T>` and `SyncedInput<T>` handles provide data access plus `on()`, `off()`,
+`status()`, and `send_command<Cmd>()`. A `Remote<T>` I/O specification provides
+the same control API without subscribing to data or changing `process()`.
+
+```cpp
+auto status = remote<SensorData>().status();
+auto reply = remote<SensorData>().send_command<CalibrateCmd>(
+    CalibrateCmd{.offset = 0.25F}, Milliseconds(100));
+```
+
+Command association is checked at compile time. Addresses and message IDs are
+derived from the configured dependency and registry. Process-launched modules
+also receive the producer's resolved primary-output lifecycle endpoint, which
+is required when `T` is a secondary output.
+
+For directly constructed `ModuleConfig`, a zero lifecycle address falls back to
+deriving the endpoint from `T`. That is correct when `T` is the producer's
+primary output. A dependency on a secondary output must set its resolved
+lifecycle address explicitly; command routing still uses the secondary output's
+own CMD endpoint.
+
+The following compatibility APIs remain available:
+
 ```cpp
 template<size_t OutputIndex, typename CmdT, auto Handler, typename ModuleT>
 bool register_command_handler(ModuleT& module);
@@ -216,9 +248,9 @@ std::optional<TimsMessage<typename CmdT::Reply>> send_command_to_input(
 ```
 
 `register_command_handler` stores a fixed-capacity typed thunk and performs no heap allocation.
-The timeout-taking send APIs use the module WORK mailbox for bounded request/reply RPC and
-return `std::nullopt` on send failure or timeout. The bool-returning overload remains the
-fire-and-forget form.
+Synchronous handle and compatibility calls share a serialized `RpcClient` over
+the module WORK mailbox. They return `std::nullopt` on send failure or timeout.
+The bool-returning overload remains the fire-and-forget form.
 
 ### Protected Member
 

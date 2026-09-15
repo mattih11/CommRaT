@@ -102,6 +102,18 @@ struct SyncedInput {
 };
 
 /**
+ * @brief Command/control-only dependency on a remote module output.
+ *
+ * Remote<T> has no data mailbox, does not affect execution mode, and is not
+ * passed to process(). It exposes lifecycle and output-associated commands.
+ */
+template<typename T>
+struct Remote {
+    using Type = T;
+    static constexpr bool is_remote = true;
+};
+
+/**
  * @brief Module parameter set specification tag
  *
  * Specifies that a module has a typed parameter struct. Module2 automatically:
@@ -152,6 +164,15 @@ template<typename T>
 inline constexpr bool is_synced_input_v = is_synced_input<T>::value;
 
 template<typename T>
+struct is_remote : std::false_type {};
+
+template<typename T>
+struct is_remote<Remote<T>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_remote_v = is_remote<T>::value;
+
+template<typename T>
 struct is_period : std::false_type {};
 
 template<auto DefaultPeriod>
@@ -196,6 +217,15 @@ struct is_synced_input_instance<SyncedInputImpl<CommratApp, T>> : std::true_type
 
 template<typename T>
 inline constexpr bool is_synced_input_instance_v = is_synced_input_instance<T>::value;
+
+template<typename T>
+struct is_remote_handle : std::false_type {};
+
+template<typename Registry, typename T>
+struct is_remote_handle<RemoteHandle<Registry, T>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_remote_handle_v = is_remote_handle<T>::value;
 
 /**
  * @brief Check if type is ModuleOutput instance
@@ -323,6 +353,12 @@ struct CreateIOInstance<Registry, SyncedInput<T>> {
     using spec_type = SyncedInput<T>;
 };
 
+template<typename Registry, typename T>
+struct CreateIOInstance<Registry, Remote<T>> {
+    using type = RemoteHandle<Registry, T>;
+    using spec_type = Remote<T>;
+};
+
 // Period (no instance - just config)
 template<typename Registry, auto DefaultPeriod>
 struct CreateIOInstance<Registry, Period<DefaultPeriod>> {
@@ -396,6 +432,7 @@ public:
     static constexpr size_t num_outputs = (is_output_v<IOSpecs> + ...);
     static constexpr size_t num_continuous_inputs = (is_input_v<IOSpecs> + ...);
     static constexpr size_t num_synced_inputs = (is_synced_input_v<IOSpecs> + ...);
+    static constexpr size_t num_remotes = (is_remote_v<IOSpecs> + ...);
     static constexpr bool has_period = (is_period_v<IOSpecs> || ...);
     static constexpr bool has_continuous_input = num_continuous_inputs > 0;
     
@@ -422,6 +459,7 @@ public:
         static constexpr size_t num_outputs = BuildIOTuple::num_outputs;
         static constexpr size_t num_continuous_inputs = BuildIOTuple::num_continuous_inputs;
         static constexpr size_t num_synced_inputs = BuildIOTuple::num_synced_inputs;
+        static constexpr size_t num_remotes = BuildIOTuple::num_remotes;
         static constexpr size_t num_inputs = num_continuous_inputs + num_synced_inputs;
         static constexpr size_t total_io = BuildIOTuple::total_io;
         static constexpr bool has_inputs = (num_inputs > 0);
@@ -492,6 +530,7 @@ public:
         using OutputTypes = ExtractOutputTypes_t<BuildIOTuple, type>;
         using InputTypes = ExtractInputTypes_t<BuildIOTuple, type>;
         using InputWrappers = ExtractInputWrappers_t<BuildIOTuple, type>;  // Wrapper types for ProcessorBase
+        using RemoteTypes = ExtractRemoteTypes_t<BuildIOTuple, type>;
         using SingleOutputType = SingleOutputType_t<BuildIOTuple, type>;
         using SingleInputType = SingleInputType_t<BuildIOTuple, type>;
     };
@@ -560,6 +599,23 @@ public:
     static constexpr auto input_indices() {
         return build_input_indices(std::make_index_sequence<std::tuple_size_v<type>>{});
     }
+
+    template<size_t... Is>
+    static constexpr auto build_remote_indices(std::index_sequence<Is...>) {
+        std::array<size_t, num_remotes> result{};
+        size_t remote_idx = 0;
+        ((void)[&]() {
+            using IOType = std::tuple_element_t<Is, type>;
+            if constexpr (is_remote_handle_v<IOType>) {
+                result[remote_idx++] = Is;
+            }
+        }(), ...);
+        return result;
+    }
+
+    static constexpr auto remote_indices() {
+        return build_remote_indices(std::make_index_sequence<std::tuple_size_v<type>>{});
+    }
     
     // ========================================================================
     // Generic Index-Based Accessors
@@ -596,6 +652,14 @@ public:
     static constexpr auto& get_input(IOTupleType&& tuple) {
         constexpr auto indices = input_indices();
         constexpr size_t tuple_index = indices[InputIndex];
+        return std::get<tuple_index>(std::forward<IOTupleType>(tuple));
+    }
+
+    template<size_t RemoteIndex, typename IOTupleType>
+        requires (RemoteIndex < num_remotes)
+    static constexpr auto& get_remote(IOTupleType&& tuple) {
+        constexpr auto indices = remote_indices();
+        constexpr size_t tuple_index = indices[RemoteIndex];
         return std::get<tuple_index>(std::forward<IOTupleType>(tuple));
     }
 };

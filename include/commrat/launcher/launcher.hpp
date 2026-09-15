@@ -257,6 +257,15 @@ private:
             cfg.inputs = multi;
         }
 
+        if (desc.remotes.has_value()) {
+            for (const auto& remote : *desc.remotes) {
+                cfg.remotes.push_back({
+                    .system_id = remote.source_system_id,
+                    .instance_id = remote.source_instance_id,
+                });
+            }
+        }
+
         return cfg;
     }
 

@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     assert(descriptor.outputs->front() == "descriptor_test::OutputData");
     assert(descriptor.inputs.has_value() && descriptor.inputs->empty());
     assert(descriptor.synced_inputs.has_value() && descriptor.synced_inputs->empty());
+    assert(descriptor.remotes.has_value() && descriptor.remotes->empty());
     assert(descriptor.execution_mode == "timer");
     assert(descriptor.default_period_ms == 25);
 
@@ -33,6 +34,26 @@ int main(int argc, char** argv) {
     assert(commands.output_index == 0);
     assert(commands.types.size() == 1);
     assert(commands.types.front() == "descriptor_test::ResetCommand");
+
+    assert(descriptor.command_endpoints.has_value());
+    assert(descriptor.command_endpoints->size() == 1);
+    const auto& endpoint = descriptor.command_endpoints->front();
+    assert(endpoint.output_index == 0);
+    assert(endpoint.output_type == "descriptor_test::OutputData");
+    assert(endpoint.output_message_id != 0);
+    assert(endpoint.address_type_id == (endpoint.output_message_id & 0xFF));
+    assert(endpoint.mailbox_index == 0);
+    assert(endpoint.commands.size() == 1);
+    assert(endpoint.commands.front().request_type == "descriptor_test::ResetCommand");
+    assert(endpoint.commands.front().request_id != 0);
+    assert(endpoint.commands.front().reply_type == "descriptor_test::ResetCommand::Reply");
+    assert(endpoint.commands.front().reply_id != 0);
+
+    assert(descriptor.lifecycle_endpoint.has_value());
+    assert(descriptor.lifecycle_endpoint->anchor_output_index == 0);
+    assert(descriptor.lifecycle_endpoint->anchor_message_id == endpoint.output_message_id);
+    assert(descriptor.lifecycle_endpoint->address_type_id == endpoint.address_type_id);
+    assert(descriptor.lifecycle_endpoint->mailbox_index == 0xFF);
 
     assert(descriptor.params_defaults.has_value());
     auto params = rfl::json::read<ExpectedParams>(
