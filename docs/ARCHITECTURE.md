@@ -481,7 +481,7 @@ Compile-time validation via `static_assert` and concepts preferred over runtime 
 
 ### commrat_module() CMake macro
 
-Each module binary is declared with `commrat_module()` instead of `add_executable()`. At build time it generates a cmake-managed `<ModuleClass>.module.json` descriptor file alongside the binary:
+Each module binary is declared with `commrat_module()` instead of `add_executable()`. After linking a native module, CMake runs `--commrat-inspect` and atomically publishes a complete `<ModuleClass>.module.json` beside the binary. A failed inspector, missing output, or invalid descriptor fails the module build and removes stale output.
 
 ```cmake
 # CMakeLists.txt
@@ -492,8 +492,18 @@ commrat_module(my_sensor
 
 Generated file (`MySensorModule.module.json`):
 ```json
-{ "module_class": "MySensorModule", "binary": "/path/to/build/my_sensor" }
+{
+    "module_class": "MySensorModule",
+    "binary": "/path/to/build/my_sensor",
+    "outputs": ["SensorData"],
+    "inputs": [],
+    "synced_inputs": [],
+    "execution_mode": "timer",
+    "default_period_ms": 100
+}
 ```
+
+EVL cross-builds initially emit a minimal descriptor because their binaries cannot run on the host. The `evl-descriptors` target replaces it with a complete descriptor by inspecting inside QEMU.
 
 ### ProcessLauncher
 

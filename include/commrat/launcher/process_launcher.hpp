@@ -129,8 +129,11 @@ public:
      * Falls back to SIGKILL after 3 seconds. Cleans up temp config files.
      */
     void stop() {
-        for (auto& child : children_) {
-            if (child.pid > 0) ::kill(child.pid, SIGTERM);
+        for (auto child = children_.rbegin(); child != children_.rend(); ++child) {
+            if (child->pid > 0) {
+                ::kill(child->pid, SIGTERM);
+                ::usleep(200'000);
+            }
         }
 
         // Wait up to 3 s
@@ -518,6 +521,10 @@ private:
         auto result = rfl::json::load<ModuleDescriptor>(path);
         if (!result) return;  // Not a valid descriptor — skip silently
         ModuleDescriptor d = std::move(result.value());
+        const auto sibling_binary = std::filesystem::path(path).parent_path()
+                                  / std::filesystem::path(d.binary).filename();
+        if (std::filesystem::is_regular_file(sibling_binary))
+            d.binary = sibling_binary.string();
         descriptors_[d.module_class] = std::move(d);
     }
 

@@ -9,10 +9,10 @@
 # Creates an executable for a CommRaT module binary and generates a
 # descriptor file: <ModuleClass>.module.json
 #
-# Two-stage generation:
-#   1. cmake generate time: placeholder with {module_class, binary} only.
-#   2. POST_BUILD: binary is run with --commrat-inspect to overwrite the
-#      placeholder with the full schema (outputs, inputs, execution_mode, etc.)
+# Native builds run the binary with --commrat-inspect after linking. The build
+# fails if inspection does not produce a complete, parseable descriptor.
+# EVL cross-builds retain an explicit placeholder until the evl-descriptors
+# target runs inspection inside QEMU.
 #
 # ProcessLauncher auto-discovers *.module.json files in dirname(argv[0]) at
 # runtime to map module_class names to binary paths in AppDescription configs.
@@ -40,41 +40,28 @@ function(commrat_module TARGET)
         set_property(GLOBAL APPEND PROPERTY _COMMRAT_EVL_TARGETS ${TARGET})
     endif()
 
-    # Placeholder at cmake generate time so the file exists before any build.
-    file(GENERATE
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${ARG_MODULE_CLASS}.module.json"
-        CONTENT "{\n  \"module_class\": \"${ARG_MODULE_CLASS}\",\n  \"binary\": \"$<TARGET_FILE:${TARGET}>\"\n}\n"
-    )
-
-    # Overwrite with full schema after each build.
     # EVL toolchain doesn't set CMAKE_CROSSCOMPILING (same arch, amd64→amd64),
     # so use _EVL_SDK as the discriminator: defined only when the ISAR SDK
     # toolchain is active and the binary links against libevl from the sysroot.
-    #
-    # The inspect step is wrapped in a cmake -P script so that any failure is
-    # silently ignored — a failed inspect must not delete the built binary.
-    # Overwrite with full schema after each build.
     # EVL binaries cannot run on the host: libevl constructors require an EVL
     # kernel and crash immediately, even for --commrat-inspect. The cmake-
     # generate-time placeholder (module_class + binary) is sufficient for EVL
     # deployments; the STD build produces full descriptors for tooling/GUI use.
-    if(NOT DEFINED _EVL_SDK)
+    set(_descriptor "${CMAKE_CURRENT_BINARY_DIR}/${ARG_MODULE_CLASS}.module.json")
+    if(DEFINED _EVL_SDK)
         file(GENERATE
-            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/inspect_${ARG_MODULE_CLASS}_$<CONFIG>.cmake"
-            CONTENT
-"execute_process(
-    COMMAND \"$<TARGET_FILE:${TARGET}>\"
-        --commrat-inspect
-        \"${CMAKE_CURRENT_BINARY_DIR}/${ARG_MODULE_CLASS}.module.json\"
-        \"${ARG_MODULE_CLASS}\"
-        \"$<TARGET_FILE:${TARGET}>\"
-    RESULT_VARIABLE _r
-)
-")
+            OUTPUT "${_descriptor}"
+            CONTENT "{\n  \"module_class\": \"${ARG_MODULE_CLASS}\",\n  \"binary\": \"$<TARGET_FILE:${TARGET}>\"\n}\n")
+    else()
         add_custom_command(TARGET ${TARGET} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -P
-                    "${CMAKE_CURRENT_BINARY_DIR}/inspect_${ARG_MODULE_CLASS}_$<CONFIG>.cmake"
+            COMMAND ${CMAKE_COMMAND}
+                "-DCOMMRAT_INSPECT_EXECUTABLE=$<TARGET_FILE:${TARGET}>"
+                "-DCOMMRAT_DESCRIPTOR=${_descriptor}"
+                "-DCOMMRAT_MODULE_CLASS=${ARG_MODULE_CLASS}"
+                "-DCOMMRAT_MODULE_BINARY=$<TARGET_FILE:${TARGET}>"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/RunModuleInspection.cmake"
             COMMENT "Generating descriptor for ${ARG_MODULE_CLASS}"
+            VERBATIM
         )
     endif()
 endfunction()

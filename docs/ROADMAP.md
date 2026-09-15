@@ -184,25 +184,17 @@ Future: Async callback mechanism.
 - Status: Planned (web viewer in `tools/commrat-inspect/viewer.html` covers most use cases)
 - Priority: Low
 
-**Introspection output in `commrat_module()` descriptor (single source of truth)**
-- Currently `*.module.json` only contains `module_class` + `binary` (CMake-static)
-- Goal: `commrat_module()` CMake macro emits full schema into the descriptor via a
-  post-build step — making `*.module.json` the single source of truth for types + IDs
-- Design:
-  1. Each module binary supports a `--commrat-inspect <outfile>` flag that calls
-     `IntrospectionHelper::write_to_file()` and exits cleanly
-  2. `commrat_module()` macro adds a CMake `add_custom_command(POST_BUILD ...)` that
-     runs the binary with that flag, capturing `CommRaTSchemaOutput` into the descriptor:
-     ```cmake
-     add_custom_command(TARGET ${target} POST_BUILD
-         COMMAND $<TARGET_FILE:${target}> --commrat-inspect
-                 ${CMAKE_CURRENT_BINARY_DIR}/${class_name}.schema.json
-         COMMENT "Generating CommRaT schema for ${class_name}")
-     ```
-  3. `CommRaTModuleDescriptor` (the `*.module.json` struct) gains a
-     `std::optional<CommRaTSchemaOutput> schema` field — still readable by old loaders
-  4. ProcessLauncher reads the embedded schema to verify message ID consistency
-     before spawning (catches registry mismatch at launch time, not at runtime)
+**Embedded message schema in `commrat_module()` descriptor**
+- Current `*.module.json` files contain the complete module interface: class, binary,
+  outputs, inputs, synchronized inputs, execution mode, period, output-associated
+  commands, and parameter defaults
+- Native generation is atomic and fails the module build on inspection errors;
+  EVL cross-build placeholders are completed by inspection inside QEMU
+- Goal: additionally embed the full message layout and ID schema, making
+  `*.module.json` the single source of truth for module interfaces, types, and IDs
+- Design: extend `ModuleDescriptor` with an optional full message schema, populate it
+  through the existing `--commrat-inspect` path, and let `ProcessLauncher` verify
+  message ID consistency before spawning
 - Status: Design phase
 - Priority: Low
 

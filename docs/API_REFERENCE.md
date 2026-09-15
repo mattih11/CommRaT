@@ -1248,7 +1248,11 @@ commrat_module(<target>
     [LINKS    lib1 lib2 ...])
 ```
 
-Wraps `add_executable()` and generates `<ClassName>.module.json` via `file(GENERATE)` containing the binary path. `ProcessLauncher` discovers these files at runtime.
+Wraps `add_executable()` and generates a complete `<ClassName>.module.json` after linking by running the module with `--commrat-inspect`. Native module builds fail if inspection exits nonzero, does not create the descriptor, or creates invalid or incomplete JSON. Descriptor publication is atomic, and failed inspection removes stale output.
+
+`cmd_messages` entries retain their `output_index`; each command type is valid only for the associated output mailbox. Fields without applicable metadata, such as `cmd_messages`, `params_defaults`, and a non-timer `default_period_ms`, may be absent.
+
+EVL cross-compiled binaries cannot run on the build host. Their configure-time descriptor contains only `module_class` and `binary` until the `evl-descriptors` target runs inspection inside QEMU.
 
 ### ProcessLauncher
 

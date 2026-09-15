@@ -48,7 +48,6 @@
 #include <corerat/logging/logging.hpp>
 #include <tuple>
 #include <type_traits>
-#include <optional>
 #include <iostream>
 
 namespace commrat {
@@ -103,9 +102,6 @@ class Module2
     , private IOHandler<Registry, IOSpecs...>
     , private CommandHandler<Registry, BuildIOTuple<Registry, IOSpecs...>, typename BuildIOTuple<Registry, IOSpecs...>::type> {
 
-    template<typename, typename, typename>
-    friend class CommandHandler;
-
     // Extract Params<T> type from IOSpecs (void if not specified).
     // Uses a helper struct to avoid instantiating Head::Type when Head is not Params<T>.
     template<typename Head, bool IsParams>
@@ -126,6 +122,9 @@ public:
     /// Compile-time I/O topology — used by write_module_inspect() for --commrat-inspect.
     using IOBuilder = BuildIOTuple<Registry, IOSpecs...>;
 
+    /// Message registry used to resolve output-specific command associations.
+    using RegistryType = Registry;
+
     /// Params type extracted from Params<T> IOSpec; void when no Params<T> given.
     /// Introspection hook: meta/inspect.hpp should check ModuleType::ParamsType.
     using ParamsType = typename ExtractParams<IOSpecs...>::type;
@@ -139,18 +138,6 @@ private:
     using IOService = IOHandler<Registry, IOSpecs...>;
     using IOTuple = typename IOService::IOTuple;
     using CmdService = CommandHandler<Registry, IOBuilder, IOTuple>;
-
-    template<size_t OutputIndex>
-    static constexpr size_t output_tuple_index() {
-        constexpr auto indices = IOBuilder::output_indices();
-        return indices[OutputIndex];
-    }
-
-    template<size_t OutputIndex>
-    using OutputCommandList = registry::get_commands_for_t<
-        typename std::tuple_element_t<output_tuple_index<OutputIndex>(), IOTuple>::Type,
-        Registry
-    >;
     
     // Expose structured I/O access and operations from IOService
     struct IO : public IOService {
@@ -167,7 +154,6 @@ private:
         using IOService::initialize_inputs;
        using IOService::subscribe_inputs;
         using IOService::unsubscribe_inputs;
-        using IOService::ensure_subscribed;
         // Alias to IOBuilder::Meta for convenience
         using Meta = typename IOBuilder::Meta;
     };
@@ -186,15 +172,14 @@ private:
     static constexpr size_t max_registered_command_handlers = 32;
 
     struct RegisteredCommandHandler {
-        uint32_t msg_type{0};
-        size_t output_index{0};
-        void* object{nullptr};
-        void (*invoke)(void* object, const void* command, void* reply){nullptr};
+        size_t output_index;
+        uint32_t msg_type;
+        void* object;
+        void (*invoke)(void*, const void*, void*);
     };
 
     std::array<RegisteredCommandHandler, max_registered_command_handlers> command_handlers_{};
     size_t command_handler_count_{0};
-    
 
 public:
     // ========================================================================
@@ -220,6 +205,87 @@ public:
      * Example: Module2<..., Input<FilteredData>> -> InputData = FilteredData
      */
     using InputData = typename IO::Meta::SingleInputType;
+
+    template<typename OutputDataType, typename CmdType>
+    std::optional<TimsMessage<typename CmdType::Reply>> send_command(
+        uint8_t target_system_id,
+        uint8_t target_instance_id,
+        const CmdType& command,
+        Duration timeout = Milliseconds(100)) {
+        static_assert(is_in_tuple_v<
+                          CmdType,
+                          registry::get_commands_for_t<OutputDataType, Registry>>,
+                      "Command type is not associated with the target output type");
+
+        CmdInput<Registry, OutputDataType> target(
+            *work_mailbox_, target_system_id, target_instance_id, timeout);
+        return target.template send_command<CmdType>(command, timeout);
+    }
+
+    template<size_t InputIndex, typename CmdType>
+        requires (InputIndex < IO::Meta::num_inputs)
+    std::optional<TimsMessage<typename CmdType::Reply>> send_command_to_input(
+        const CmdType& command,
+        Duration timeout = Milliseconds(100)) {
+        return this->template get_input<InputIndex>()
+            .template send_command<CmdType>(command, timeout);
+    }
+
+    template<size_t OutputIndex>
+        requires (OutputIndex < IO::Meta::num_outputs)
+    [[nodiscard]] uint32_t output_command_address() const {
+        return this->template get_output<OutputIndex>().get_cmd_address();
+    }
+
+    template<size_t OutputIndex, typename CmdType, auto Handler, typename ModuleType>
+        requires (OutputIndex < IO::Meta::num_outputs)
+    bool register_command_handler(ModuleType& module) {
+        using OutputType = std::tuple_element_t<OutputIndex, typename IO::Meta::OutputTypes>;
+        using Commands = registry::get_commands_for_t<OutputType, Registry>;
+        static_assert(is_in_tuple_v<CmdType, Commands>,
+                      "Command type is not associated with this output");
+        static_assert(std::is_invocable_r_v<
+                          void, decltype(Handler), ModuleType*,
+                          const CmdType&, typename CmdType::Reply&>,
+                      "Command handler must accept (const CmdType&, CmdType::Reply&)");
+
+        if (command_handler_count_ >= command_handlers_.size()) {
+            return false;
+        }
+
+        command_handlers_[command_handler_count_++] = RegisteredCommandHandler{
+            .output_index = OutputIndex,
+            .msg_type = Registry::template get_message_id<CmdType>(),
+            .object = &module,
+            .invoke = [](void* object, const void* command, void* reply) {
+                (static_cast<ModuleType*>(object)->*Handler)(
+                    *static_cast<const CmdType*>(command),
+                    *static_cast<typename CmdType::Reply*>(reply));
+            }
+        };
+        return true;
+    }
+
+    template<size_t OutputIndex, typename ReceivedMsg, typename CmdMailboxType>
+    bool dispatch_registered_command(
+        const ReceivedMsg& received_msg,
+        CmdMailboxType& cmd_mailbox) {
+        const uint32_t msg_type = received_msg.header.msg_type;
+
+        for (size_t index = 0; index < command_handler_count_; ++index) {
+            const auto& handler = command_handlers_[index];
+            if (handler.output_index != OutputIndex || handler.msg_type != msg_type) {
+                continue;
+            }
+
+            typename ReceivedMsg::payload_type::Reply reply{};
+            handler.invoke(handler.object, &received_msg.payload, &reply);
+            cmd_mailbox.send_reply(received_msg, reply);
+            return true;
+        }
+
+        return false;
+    }
 
     // ========================================================================
     // Construction
@@ -339,129 +405,6 @@ protected:
 protected:
     virtual void on_start() {}  // Optional override for startup logic
     virtual void on_stop() {}   // Optional override for shutdown logic
-
-    // ========================================================================
-    // Outbound commands
-    // ========================================================================
-
-    /**
-     * @brief Send a command to another module's CMD mailbox.
-     *
-     * Sends via the module's WORK mailbox (no dedicated thread, no reply wait).
-     * Call from process(), on_start() or on_stop().
-     *
-     * @tparam TargetData  Output payload type of the target module — selects its
-     *                     type_id so the CMD mailbox address can be derived.
-     * @tparam CmdT        Command payload type (must be registered).
-     */
-    template<typename TargetData, typename CmdT>
-    bool send_command(uint8_t target_system_id, uint8_t target_instance_id, CmdT cmd) {
-        if (!work_mailbox_) return false;
-        const uint32_t cmd_addr =
-            calculate_base_address<TargetData, std::tuple<TargetData>, Registry>(
-                target_system_id, target_instance_id);
-        return static_cast<bool>(work_mailbox_->send(cmd, cmd_addr));
-    }
-
-    /// Overload for a pre-computed CMD mailbox address.
-    template<typename CmdT>
-    bool send_command(uint32_t target_cmd_address, CmdT cmd) {
-        if (!work_mailbox_) return false;
-        return static_cast<bool>(work_mailbox_->send(cmd, target_cmd_address));
-    }
-
-    /**
-     * @brief Send a command to another module and wait for its typed reply.
-     *
-     * Uses this module's WORK mailbox for the request/reply exchange. The wait
-     * is bounded by timeout and returns std::nullopt on send failure or timeout.
-     */
-    template<typename TargetData, typename CmdT>
-    std::optional<TimsMessage<typename CmdT::Reply>> send_command(
-        uint8_t target_system_id,
-        uint8_t target_instance_id,
-        const CmdT& cmd,
-        Duration timeout) {
-        if (!work_mailbox_) return std::nullopt;
-
-        CmdInput<Registry, TargetData> target(*work_mailbox_, target_system_id, target_instance_id, timeout);
-        return target.send_command(cmd, timeout);
-    }
-
-    /**
-     * @brief Send a command to the producer configured for input InputIndex.
-     */
-    template<size_t InputIndex, typename CmdT>
-        requires (InputIndex < IO::Meta::num_inputs)
-    std::optional<TimsMessage<typename CmdT::Reply>> send_command_to_input(
-        const CmdT& cmd,
-        Duration timeout = Milliseconds(100)) {
-        auto& input = this->template get_input<InputIndex>();
-        return input.send_command(cmd, timeout);
-    }
-
-    /**
-     * @brief Register a typed command handler for one output.
-     *
-     * Register from the derived module constructor or on_start(). Registration
-     * uses a fixed-capacity table and does not allocate.
-     */
-    template<size_t OutputIndex, typename CmdT, auto Handler, typename ModuleT>
-        requires (OutputIndex < IO::Meta::num_outputs)
-    bool register_command_handler(ModuleT& module) {
-        static_assert(is_in_tuple_v<CmdT, OutputCommandList<OutputIndex>>,
-                      "Command type is not associated with this output type");
-        static_assert(Registry::template is_registered<CmdT>,
-                      "Command type is not registered in the message registry");
-        static_assert(Registry::template is_registered<typename CmdT::Reply>,
-                      "Command reply type is not registered in the message registry");
-        static_assert(std::is_same_v<decltype(Handler), void (ModuleT::*)(const CmdT&, typename CmdT::Reply&)>,
-                      "Command handler must have signature void (ModuleT::*)(const CmdT&, CmdT::Reply&)");
-
-        if (command_handler_count_ >= command_handlers_.size()) {
-            return false;
-        }
-
-        command_handlers_[command_handler_count_++] = RegisteredCommandHandler{
-            .msg_type = Registry::template get_message_id<CmdT>(),
-            .output_index = OutputIndex,
-            .object = &module,
-            .invoke = [](void* object, const void* command, void* reply) {
-                auto* typed_object = static_cast<ModuleT*>(object);
-                const auto& typed_command = *static_cast<const CmdT*>(command);
-                auto& typed_reply = *static_cast<typename CmdT::Reply*>(reply);
-                (typed_object->*Handler)(typed_command, typed_reply);
-            }
-        };
-
-        return true;
-    }
-
-    /// This module's WORK mailbox address — use as a caller identity token.
-    [[nodiscard]] uint32_t work_address() const { return compute_work_addr(config_); }
-
-private:
-    template<size_t OutputIndex, typename ReceivedMsg, typename CmdMailboxT>
-    bool dispatch_registered_command(const ReceivedMsg& received_msg, CmdMailboxT& cmd_mailbox) {
-        using CmdT = typename std::decay_t<ReceivedMsg>::payload_type;
-        static_assert(is_in_tuple_v<CmdT, OutputCommandList<OutputIndex>>,
-                      "Received command type is not associated with this output type");
-
-        const uint32_t msg_type = Registry::template get_message_id<CmdT>();
-        for (size_t index = 0; index < command_handler_count_; ++index) {
-            const auto& handler = command_handlers_[index];
-            if (handler.output_index != OutputIndex || handler.msg_type != msg_type || handler.invoke == nullptr) {
-                continue;
-            }
-
-            typename CmdT::Reply reply{};
-            handler.invoke(handler.object, &received_msg.payload, &reply);
-            cmd_mailbox.send_reply(received_msg, reply);
-            return true;
-        }
-
-        return false;
-    }
 
     // ---- Parameter interface — auto-implemented when Params<T> is in IOSpecs ----
     virtual void on_params_changed() {}
@@ -927,12 +870,6 @@ private:
             // Step 1: Fetch input data (if input-driven, delegates to IOService)
             // Skip process() if primary input had no new data (poll timeout)
             if constexpr (IO::Meta::is_input_driven) {
-                // Retry subscription each iteration until the producer is ready
-                // (mirrors RACK moduleOn() loop-until-first-data pattern)
-                if (!this->ensure_subscribed(std::make_index_sequence<IO::Meta::num_inputs>{})) {
-                    Time::sleep(Milliseconds(100));
-                    continue;
-                }
                 bool got_data = this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
                 if (!got_data) {
                     RTLOG_DEBUG(logger_) << "[data_loop] input poll timeout, skipping";

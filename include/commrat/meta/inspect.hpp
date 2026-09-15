@@ -2,12 +2,14 @@
 
 #include <commrat/meta/descriptor.hpp>
 #include <commrat/messaging/data_with_commands.hpp>
-#include <commrat/module/helpers/command_extraction.hpp>
+#include <commrat/messaging/registry_utils.hpp>
 #include <commrat/module/io/io_spec.hpp>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 
+#include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,12 +74,13 @@ std::vector<std::string> cmd_type_names_impl(std::index_sequence<Js...>) {
 }
 
 // Build per-output cmd_messages list from OutputTypes tuple.
-template<typename OutputTypes, std::size_t... Is>
+template<typename Registry, typename OutputTypes, std::size_t... Is>
 std::vector<CmdMessagesForOutput> cmd_messages_impl(std::index_sequence<Is...>) {
     std::vector<CmdMessagesForOutput> result;
     ([&]() {
         using T = std::tuple_element_t<Is, OutputTypes>;
-        using Cmds = ExtractUserCommands_t<T>;
+        using Cmds = registry::get_commands_for_message_defs_t<
+            T, typename Registry::InspectionMessageDefs>;
         if constexpr (std::tuple_size_v<Cmds> > 0) {
             result.push_back({
                 .output_index = Is,
@@ -89,9 +92,9 @@ std::vector<CmdMessagesForOutput> cmd_messages_impl(std::index_sequence<Is...>) 
     return result;
 }
 
-template<typename OutputTypes>
+template<typename Registry, typename OutputTypes>
 std::vector<CmdMessagesForOutput> cmd_messages() {
-    return cmd_messages_impl<OutputTypes>(
+    return cmd_messages_impl<Registry, OutputTypes>(
         std::make_index_sequence<std::tuple_size_v<OutputTypes>>{});
 }
 
@@ -122,7 +125,8 @@ void write_module_inspect(
         period_ms = Meta::period.count_ms();
     }
 
-    auto cmds = detail::cmd_messages<typename Meta::OutputTypes>();
+    auto cmds = detail::cmd_messages<
+        typename ModuleType::RegistryType, typename Meta::OutputTypes>();
 
     std::optional<rfl::Generic> params_defaults;
     if constexpr (ModuleType::has_params) {
@@ -144,8 +148,30 @@ void write_module_inspect(
         .params_defaults   = std::move(params_defaults),
     };
 
-    std::ofstream f(outfile);
-    f << rfl::json::write(desc) << '\n';
+    const std::filesystem::path output_path(outfile);
+    std::filesystem::path temporary_path = output_path;
+    temporary_path += ".tmp";
+
+    try {
+        std::ofstream file(temporary_path, std::ios::trunc);
+        if (!file) {
+            throw std::runtime_error(
+                "cannot open temporary descriptor '" + temporary_path.string() + "'");
+        }
+
+        file << rfl::json::write(desc) << '\n';
+        file.close();
+        if (!file) {
+            throw std::runtime_error(
+                "cannot write temporary descriptor '" + temporary_path.string() + "'");
+        }
+
+        std::filesystem::rename(temporary_path, output_path);
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary_path, ignored);
+        throw;
+    }
 }
 
 } // namespace commrat

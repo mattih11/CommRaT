@@ -94,6 +94,22 @@ add_executable(test_command_rpc test_command_rpc.cpp)
 target_link_libraries(test_command_rpc PRIVATE commrat)
 add_test(NAME test_command_rpc COMMAND test_command_rpc)
 
+commrat_module(descriptor_test_module
+    SOURCES descriptor_test_module.cpp
+    MODULE_CLASS descriptor_test::DescriptorModule)
+
+add_executable(test_module_descriptor test_module_descriptor.cpp)
+target_link_libraries(test_module_descriptor PRIVATE commrat)
+add_test(NAME test_module_descriptor
+    COMMAND test_module_descriptor
+        "${CMAKE_CURRENT_BINARY_DIR}/descriptor_test::DescriptorModule.module.json")
+
+add_test(NAME test_descriptor_inspection_failure
+    COMMAND ${CMAKE_COMMAND}
+        "-DRUNNER=${CMAKE_SOURCE_DIR}/cmake/RunModuleInspection.cmake"
+        "-DTEST_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/failing.module.json"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_descriptor_inspection_failure.cmake")
+
 # Example run tests (only if examples were built)
 if(COMMRAT_BUILD_EXAMPLES)
     add_test(NAME example_continuous_input

@@ -163,5 +163,9 @@ struct GetCommandsFor {
 template<typename DataType, typename Registry>
 using get_commands_for_t = typename GetCommandsFor<DataType, Registry>::type;
 
+template<typename DataType, typename MessageDefsTuple>
+using get_commands_for_message_defs_t =
+    typename detail::CommandsForPayloadInTuple<DataType, MessageDefsTuple>::type;
+
 } // namespace registry
 } // namespace commrat

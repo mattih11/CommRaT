@@ -116,8 +116,13 @@ template<typename ModuleType>
 int module_main(int argc, char** argv) {
     // --commrat-inspect <outfile> <module_class> <binary> — write descriptor and exit.
     if (argc == 5 && std::string_view(argv[1]) == "--commrat-inspect") {
-        commrat::write_module_inspect<ModuleType>(argv[3], argv[4], argv[2]);
-        return 0;
+        try {
+            commrat::write_module_inspect<ModuleType>(argv[3], argv[4], argv[2]);
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << "ERROR: Module inspection failed: " << error.what() << '\n';
+            return 1;
+        }
     }
 
     try {
