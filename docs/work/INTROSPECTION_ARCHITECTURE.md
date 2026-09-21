@@ -152,7 +152,12 @@ The planned endpoint metadata and resolved deployment manifest are specified in
 }
 ```
 
-`synced_inputs` is optional (absent = no synced inputs). `params` is optional (absent = module uses its `Params` defaults). The `synced: bool` flag in the flat `inputs[]` array is still supported for backward compatibility but the separate `synced_inputs[]` array is preferred.
+`module_address` is required for outputless modules and supplies their `system_id` and
+`instance_id`; modules with outputs derive their address from `outputs`. `synced_inputs`
+is optional (absent = no synced inputs). `params` is optional (absent = module uses its
+`Params` defaults). The `synced: bool` flag in the flat `inputs[]` array is still
+supported for backward compatibility but the separate `synced_inputs[]` array is
+preferred.
 
 The launcher (`ProcessLauncher::to_config`) handles both formats. `params` is forwarded as an opaque `rfl::Generic` blob into `ModuleConfig`, where the module binary deserializes it as `ModuleType::Params` during startup.
 
