@@ -219,7 +219,15 @@ private:
 
         // Outputs
         if (desc.outputs.empty()) {
-            cfg.outputs = NoOutputConfig{};
+            if (!desc.module_address.has_value()) {
+                throw std::runtime_error(
+                    "Launcher: outputless module '" + desc.name
+                    + "' requires module_address");
+            }
+            cfg.outputs = NoOutputConfig{
+                .system_id = desc.module_address->system_id,
+                .instance_id = desc.module_address->instance_id,
+            };
         } else if (desc.outputs.size() == 1) {
             const auto& o = desc.outputs[0];
             cfg.outputs = SimpleOutputConfig{

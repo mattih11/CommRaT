@@ -34,6 +34,11 @@ struct OutputDescription {
     uint8_t instance_id{1};
 };
 
+struct ModuleAddressDescription {
+    uint8_t system_id{0};
+    uint8_t instance_id{1};
+};
+
 /**
  * Describes one input of a module.
  * synced = true → SyncedInput (pull-based, secondary).
@@ -57,6 +62,7 @@ struct RemoteDescription {
 struct ModuleDescription {
     std::string                    name;
     std::string                    module_class;
+    std::optional<ModuleAddressDescription> module_address;
     std::vector<OutputDescription> outputs;
     std::vector<InputDescription>  inputs;                              // continuous inputs; synced: bool kept for backward compat
     std::optional<std::vector<InputDescription>>  synced_inputs;        // absent = no synced inputs

@@ -351,13 +351,13 @@ protected:
         uint8_t src_sys_id, src_inst_id;
         uint32_t lifecycle_address;
         
-        if constexpr (num_inputs == 1) {
-            // Single input - use source_system_id/source_instance_id
+        if constexpr (num_inputs == 1 && is_continuous_input_v<InputType>) {
+            // A lone continuous input uses the compact single-input config.
             src_sys_id = config.source_system_id();
             src_inst_id = config.source_instance_id();
             lifecycle_address = config.source_lifecycle_address();
         } else {
-            // Multi-input - use input_sources array
+            // Synced inputs need the multi-input history and tolerance config.
             const auto& sources = config.input_sources();
             src_sys_id = sources[InputIndex].system_id;
             src_inst_id = sources[InputIndex].instance_id;

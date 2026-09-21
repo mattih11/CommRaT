@@ -9,6 +9,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <atomic>
 #include <string>
 #include <string_view>
@@ -67,14 +68,29 @@ int module_main(const ModuleConfig& config) {
         std::signal(SIGTERM, signal_handler);
         
         // Create module instance
-        std::cout << "Starting " << config.name << " (system_id=" 
-                  << static_cast<int>(config.system_id()) << ", instance_id=" 
-                  << static_cast<int>(config.instance_id()) << ")\n";
+        std::cout << "Starting " << config.name;
+        if (const auto* outputs = rfl::get_if<MultiOutputConfig>(
+                &config.outputs.variant())) {
+            std::cout << " (outputs=";
+            for (size_t index = 0; index < outputs->addresses.size(); ++index) {
+                if (index > 0) {
+                    std::cout << ',';
+                }
+                std::cout << static_cast<int>(outputs->addresses[index].system_id)
+                          << ':'
+                          << static_cast<int>(outputs->addresses[index].instance_id);
+            }
+            std::cout << ")\n";
+        } else {
+            std::cout << " (system_id=" << static_cast<int>(config.system_id())
+                      << ", instance_id=" << static_cast<int>(config.instance_id())
+                      << ")\n";
+        }
         
-        ModuleType module(config);
+        auto module = std::make_unique<ModuleType>(config);
         
         // Start module (begins subscription protocol, starts threads)
-        module.start();
+        module->start();
         std::cout << config.name << " running (press Ctrl+C to stop)...\n";
         
         // Wait for shutdown signal (0% CPU - blocking sleep)
@@ -84,7 +100,7 @@ int module_main(const ModuleConfig& config) {
         
         // Stop module (graceful shutdown of threads, unsubscribe)
         std::cout << "Stopping " << config.name << "...\n";
-        module.stop();
+        module->stop();
         
         std::cout << config.name << " stopped successfully\n";
         return g_shutdown_requested.load() ? 130 : 0;  // 130 = SIGINT convention
