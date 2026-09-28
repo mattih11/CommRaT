@@ -10,6 +10,11 @@ struct ExpectedParams {
     int sample_count;
 };
 
+struct ExpectedMetadata {
+    std::string domain;
+    uint32_t schema_version;
+};
+
 int main(int argc, char** argv) {
     assert(argc == 2);
 
@@ -61,6 +66,13 @@ int main(int argc, char** argv) {
     assert(params.has_value());
     assert(params->gain == 1.5F);
     assert(params->sample_count == 8);
+
+    assert(descriptor.descriptor_metadata.has_value());
+    auto metadata = rfl::json::read<ExpectedMetadata>(
+        rfl::json::write(*descriptor.descriptor_metadata));
+    assert(metadata.has_value());
+    assert(metadata->domain == "descriptor-test");
+    assert(metadata->schema_version == 1);
 
     std::cout << "PASS: complete module descriptor\n";
     return 0;

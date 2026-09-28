@@ -108,6 +108,10 @@ add_test(NAME test_module_descriptor
     COMMAND test_module_descriptor
         "${CMAKE_CURRENT_BINARY_DIR}/descriptor_test::DescriptorModule.module.json")
 
+    add_executable(test_process_launcher_validation test_process_launcher_validation.cpp)
+    target_link_libraries(test_process_launcher_validation PRIVATE commrat)
+    add_test(NAME test_process_launcher_validation COMMAND test_process_launcher_validation)
+
 add_test(NAME test_descriptor_inspection_failure
     COMMAND ${CMAKE_COMMAND}
         "-DRUNNER=${CMAKE_SOURCE_DIR}/cmake/RunModuleInspection.cmake"

@@ -246,9 +246,12 @@ private:
         }
 
         // Inputs
-        if (desc.inputs.empty()) {
+        const bool has_synced_inputs = desc.synced_inputs.has_value()
+            && !desc.synced_inputs->empty();
+        if (desc.inputs.empty() && !has_synced_inputs) {
             cfg.inputs = NoInputConfig{};
-        } else if (desc.inputs.size() == 1 && !desc.inputs[0].synced) {
+        } else if (desc.inputs.size() == 1 && !desc.inputs[0].synced
+            && !has_synced_inputs) {
             const auto& i = desc.inputs[0];
             cfg.inputs = SingleInputConfig{
                 .source_system_id   = i.source_system_id,
@@ -260,7 +263,17 @@ private:
                 multi.sources.push_back({
                     .system_id   = i.source_system_id,
                     .instance_id = i.source_instance_id,
+                    .is_primary = !i.synced.value(),
                 });
+            }
+            if (has_synced_inputs) {
+                for (const auto& i : *desc.synced_inputs) {
+                    multi.sources.push_back({
+                        .system_id = i.source_system_id,
+                        .instance_id = i.source_instance_id,
+                        .is_primary = false,
+                    });
+                }
             }
             cfg.inputs = multi;
         }

@@ -90,6 +90,10 @@ public:
         , producer_lifecycle_address_(0)
         , cmd_timeout_(Milliseconds(100))
     {}
+
+    [[nodiscard]] bool is_initialized() const noexcept {
+        return rpc_client_ != nullptr || work_mbx_ != nullptr;
+    }
     
     /**
      * @brief Initialize input with mailbox and producer address

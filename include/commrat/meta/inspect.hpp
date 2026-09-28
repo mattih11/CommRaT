@@ -211,6 +211,13 @@ void write_module_inspect(
         if (parsed) params_defaults = parsed.value();
     }
 
+    std::optional<rfl::Generic> descriptor_metadata;
+    if constexpr (requires { ModuleType::descriptor_metadata(); }) {
+        auto json = rfl::json::write(ModuleType::descriptor_metadata());
+        auto parsed = rfl::json::read<rfl::Generic>(json);
+        if (parsed) descriptor_metadata = parsed.value();
+    }
+
     ModuleDescriptor desc{
         .module_class      = module_class,
         .binary            = binary,
@@ -228,6 +235,7 @@ void write_module_inspect(
         .lifecycle_endpoint = detail::lifecycle_endpoint<
             typename ModuleType::RegistryType, typename Meta::OutputTypes>(),
         .params_defaults   = std::move(params_defaults),
+        .descriptor_metadata = std::move(descriptor_metadata),
     };
 
     const std::filesystem::path output_path(outfile);

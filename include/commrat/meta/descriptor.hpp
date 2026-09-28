@@ -54,6 +54,7 @@ struct ModuleDescriptor {
     std::optional<std::vector<CommandEndpointDescriptor>> command_endpoints;
     std::optional<LifecycleEndpointDescriptor> lifecycle_endpoint;
     std::optional<rfl::Generic> params_defaults;                      // nested JSON object of default param values
+    std::optional<rfl::Generic> descriptor_metadata;                  // application-defined metadata, opaque to CommRaT
 };
 
 } // namespace commrat

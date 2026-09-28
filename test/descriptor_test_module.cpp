@@ -18,6 +18,11 @@ struct ModuleParams {
     int sample_count{8};
 };
 
+struct DescriptorMetadata {
+    std::string domain;
+    uint32_t schema_version;
+};
+
 using DescriptorApp = commrat::CommRaT<
     commrat::DataWithCommands<OutputData, ResetCommand>>;
 
@@ -30,6 +35,10 @@ public:
         commrat::Output<OutputData>,
         commrat::Period<commrat::Milliseconds(25)>,
         commrat::Params<ModuleParams>>::Module2;
+
+    static DescriptorMetadata descriptor_metadata() {
+        return {.domain = "descriptor-test", .schema_version = 1};
+    }
 
 protected:
     void process(OutputData& output) override {

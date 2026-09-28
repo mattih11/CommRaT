@@ -198,6 +198,16 @@ protected:
     }
 
     /**
+     * @brief Fetch every synchronized input against a timer-loop timestamp
+     */
+    template<size_t... InputIndices>
+    void fetch_synced_inputs(
+        Timestamp timestamp,
+        std::index_sequence<InputIndices...>) {
+        (fetch_synced_input<InputIndices>(timestamp), ...);
+    }
+
+    /**
      * @brief Call get_data on synced input; no-op for continuous / primary
      */
     template<size_t InputIndex>
@@ -205,10 +215,24 @@ protected:
         auto& input = get_input<InputIndex>();
         using InputWrapper = std::decay_t<decltype(input)>;
         if constexpr (!is_continuous_input_v<InputWrapper> && InputIndex != 0) {
+            if (!input.is_initialized()) return;
             using SyncedT = decltype(input.get_payload());  // Synced<T>
             using DataT   = typename SyncedT::value_type;
             const TimsMessage<DataT>* msg_ptr = nullptr;
             input.get_data(primary_ts, msg_ptr);
+        }
+    }
+
+    template<size_t InputIndex>
+    void fetch_synced_input(Timestamp timestamp) {
+        auto& input = get_input<InputIndex>();
+        using InputWrapper = std::decay_t<decltype(input)>;
+        if constexpr (!is_continuous_input_v<InputWrapper>) {
+            if (!input.is_initialized()) return;
+            using SyncedT = decltype(input.get_payload());
+            using DataT = typename SyncedT::value_type;
+            const TimsMessage<DataT>* msg_ptr = nullptr;
+            input.get_data(timestamp, msg_ptr);
         }
     }
     
@@ -359,6 +383,14 @@ protected:
         } else {
             // Synced inputs need the multi-input history and tolerance config.
             const auto& sources = config.input_sources();
+            if (InputIndex >= sources.size()) {
+                if constexpr (!is_continuous_input_v<InputType>) {
+                    return;
+                } else {
+                    throw std::invalid_argument(
+                        "Missing configuration for continuous input");
+                }
+            }
             src_sys_id = sources[InputIndex].system_id;
             src_inst_id = sources[InputIndex].instance_id;
             lifecycle_address = sources[InputIndex].lifecycle_address;

@@ -1078,6 +1078,12 @@ private:
                     RTLOG_DEBUG(logger_) << "[data_loop] input poll timeout, skipping";
                     continue;
                 }
+            } else if constexpr (
+                IO::Meta::is_timer_driven
+                && IO::Meta::num_synced_inputs > 0) {
+                this->fetch_synced_inputs(
+                    loop_start,
+                    std::make_index_sequence<IO::Meta::num_inputs>{});
             }
             
             // Step 2: Call user's process() with unpacked inputs and outputs

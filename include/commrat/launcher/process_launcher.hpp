@@ -36,10 +36,12 @@
 #include <csignal>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // POSIX process management
@@ -62,6 +64,9 @@ namespace detail {
 
 class ProcessLauncher {
 public:
+    using DescriptorMap = std::unordered_map<std::string, ModuleDescriptor>;
+    using Validator = std::function<void(const AppDescription&, const DescriptorMap&)>;
+
     // ------------------------------------------------------------------
     // Load
     // ------------------------------------------------------------------
@@ -88,6 +93,16 @@ public:
         }
     }
 
+    /** Validate descriptors and routes without spawning child processes. */
+    void validate() const {
+        validate_routing();
+        if (validator_) validator_(description_, descriptors_);
+    }
+
+    void set_validator(Validator validator) {
+        validator_ = std::move(validator);
+    }
+
     // ------------------------------------------------------------------
     // Start / stop
     // ------------------------------------------------------------------
@@ -103,13 +118,18 @@ public:
     void start() {
         launcher_pid_ = ::getpid();
 
-        validate_routing();
+        validate();
 
         // Producers first, consumers second
         std::vector<const ModuleDescription*> ordered;
         for (const auto& m : description_.modules) {
-            if (m.inputs.empty()) ordered.insert(ordered.begin(), &m);
-            else ordered.push_back(&m);
+            const bool has_synced_inputs = m.synced_inputs.has_value()
+                && !m.synced_inputs->empty();
+            if (m.inputs.empty() && !has_synced_inputs) {
+                ordered.insert(ordered.begin(), &m);
+            } else {
+                ordered.push_back(&m);
+            }
         }
 
         for (const auto* mod : ordered) {
@@ -179,7 +199,7 @@ public:
      *              Optional: --duration-ms N       (exit after N ms, for CTest)
      *              Optional: --descriptor-dir DIR  (repeat for multiple dirs)
      */
-    static int main(int argc, char** argv) {
+    static int main(int argc, char** argv, Validator validator = {}) {
         if (argc < 2) {
             std::cerr << "Usage: " << argv[0]
                       << " <app.json> [--duration-ms N] [--descriptor-dir DIR]...\n";
@@ -208,6 +228,7 @@ public:
 
         try {
             ProcessLauncher launcher;
+            launcher.set_validator(std::move(validator));
             launcher.load(argv[1], descriptor_dirs);
             launcher.start();
 
@@ -254,8 +275,8 @@ private:
 
     AppDescription                              description_;
     std::string                                 app_desc_path_; // absolute path passed to companions
-    std::unordered_map<std::string,
-                       ModuleDescriptor>        descriptors_;   // module_class → descriptor
+    DescriptorMap                               descriptors_;   // module_class → descriptor
+    Validator                                   validator_;
     std::vector<std::string>                    scanned_dirs_;  // for companion binary lookup
     std::vector<ChildInfo>                      children_;
     std::vector<std::string>                    temp_files_;
@@ -422,9 +443,10 @@ private:
             }
         }
 
-        if (all_sources.empty()) {
+        if (all_sources.empty() && consumer_descriptor.synced_inputs->empty()) {
             cfg.inputs = NoInputConfig{};
-        } else if (all_sources.size() == 1 && all_sources[0].is_primary) {
+        } else if (all_sources.size() == 1 && all_sources[0].is_primary
+            && consumer_descriptor.synced_inputs->empty()) {
             cfg.inputs = SingleInputConfig{.source_system_id   = all_sources[0].sys,
                                            .source_instance_id = all_sources[0].inst,
                                            .source_lifecycle_address = all_sources[0].lifecycle_address};
@@ -522,10 +544,11 @@ private:
                     if (out.system_id == src_sys && out.instance_id == src_inst)
                         { addr_exists = true; break; }
             if (!addr_exists) {
-                std::cerr << "[Launcher] WARNING: " << consumer_name << "." << role
-                          << "[" << idx << "] source address ("
-                          << static_cast<int>(src_sys) << ":" << static_cast<int>(src_inst)
-                          << ") not found in app.json\n";
+                throw std::runtime_error(
+                    "[Launcher] Missing route: " + consumer_name + "." + role +
+                    "[" + std::to_string(idx) + "] source address (" +
+                    std::to_string(src_sys) + ":" + std::to_string(src_inst) +
+                    ") not found in app.json");
             } else {
                 throw std::runtime_error(
                     "[Launcher] Routing mismatch: " + consumer_name + "." + role +
@@ -538,14 +561,42 @@ private:
     }
 
     void validate_routing() const {
+        std::unordered_set<std::string> output_addresses;
         for (const auto& mod : description_.modules) {
-            auto it = descriptors_.find(mod.module_class);
-            if (it == descriptors_.end()) continue;
-            const auto& desc = it->second;
+            const auto& desc = find_descriptor(mod.module_class);
+            if (!desc.outputs || !desc.inputs || !desc.synced_inputs || !desc.remotes) {
+                throw std::runtime_error(
+                    "[Launcher] Incomplete descriptor for module_class '" +
+                    mod.module_class + "'");
+            }
+            if (mod.outputs.size() != desc.outputs->size()) {
+                throw std::runtime_error(
+                    "[Launcher] Output count mismatch for module '" + mod.name +
+                    "': expected " + std::to_string(desc.outputs->size()) +
+                    ", configured " + std::to_string(mod.outputs.size()));
+            }
+            if (mod.outputs.empty() && !mod.module_address) {
+                throw std::runtime_error(
+                    "[Launcher] Outputless module '" + mod.name +
+                    "' requires module_address");
+            }
+            for (size_t index = 0; index < mod.outputs.size(); ++index) {
+                const auto& output = mod.outputs[index];
+                const std::string address = desc.outputs->at(index) + ":" +
+                    std::to_string(output.system_id) + ":" +
+                    std::to_string(output.instance_id);
+                if (!output_addresses.insert(address).second) {
+                    throw std::runtime_error(
+                        "[Launcher] Duplicate output address for type '" +
+                        desc.outputs->at(index) + "' at (" +
+                        std::to_string(output.system_id) + ":" +
+                        std::to_string(output.instance_id) + ")");
+                }
+            }
 
             // Validate continuous inputs against producer descriptors.
-            if (desc.inputs) {
-                const auto& flat = desc.inputs.value();
+            {
+                const auto& flat = *desc.inputs;
                 // Use synced_inputs array if present, otherwise split flat inputs by synced flag.
                 std::vector<InputDescription> continuous;
                 if (mod.synced_inputs.has_value() && !mod.synced_inputs->empty()) {
@@ -554,15 +605,21 @@ private:
                     for (const auto& i : mod.inputs)
                         if (!i.synced.value()) continuous.push_back(i);
                 }
-                for (size_t i = 0; i < continuous.size() && i < flat.size(); ++i)
+                if (continuous.size() != flat.size()) {
+                    throw std::runtime_error(
+                        "[Launcher] Input count mismatch for module '" + mod.name +
+                        "': expected " + std::to_string(flat.size()) +
+                        ", configured " + std::to_string(continuous.size()));
+                }
+                for (size_t i = 0; i < continuous.size(); ++i)
                     check_connection(mod.name, "inputs", i, flat[i],
                                      continuous[i].source_system_id,
                                      continuous[i].source_instance_id);
             }
 
             // Validate synced inputs.
-            if (desc.synced_inputs) {
-                const auto& flat = desc.synced_inputs.value();
+            {
+                const auto& flat = *desc.synced_inputs;
                 const auto synced = (mod.synced_inputs.has_value() && !mod.synced_inputs->empty())
                     ? *mod.synced_inputs
                     : [&]() {
@@ -570,13 +627,19 @@ private:
                         for (const auto& i : mod.inputs) if (i.synced.value()) s.push_back(i);
                         return s;
                     }();
-                for (size_t i = 0; i < synced.size() && i < flat.size(); ++i)
+                if (synced.size() > flat.size()) {
+                    throw std::runtime_error(
+                        "[Launcher] Synced input count mismatch for module '" + mod.name +
+                        "': at most " + std::to_string(flat.size()) +
+                        ", configured " + std::to_string(synced.size()));
+                }
+                for (size_t i = 0; i < synced.size(); ++i)
                     check_connection(mod.name, "synced_inputs", i, flat[i],
                                      synced[i].source_system_id,
                                      synced[i].source_instance_id);
             }
 
-            if (desc.remotes && mod.remotes) {
+            if (mod.remotes) {
                 const auto& expected = *desc.remotes;
                 const auto& configured = *mod.remotes;
                 if (expected.size() != configured.size()) {
@@ -588,7 +651,7 @@ private:
                                      configured[i].source_system_id,
                                      configured[i].source_instance_id);
                 }
-            } else if (desc.remotes && !desc.remotes->empty()) {
+            } else if (!desc.remotes->empty()) {
                 throw std::runtime_error(
                     "[Launcher] Missing remotes for module '" + mod.name + "'");
             }
