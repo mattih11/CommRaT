@@ -1,7 +1,41 @@
 #pragma once
 
-#include <commrat/commrat.hpp>
+#ifdef COMMRAT_DESCRIPTOR_INSPECTOR
+
 #include <commrat/meta/inspect.hpp>
+#include <exception>
+#include <iostream>
+#include <string_view>
+
+namespace commrat {
+
+template<typename ModuleType>
+int descriptor_inspector_main(int argc, char** argv) {
+    if (argc != 5 || std::string_view(argv[1]) != "--commrat-inspect") {
+        std::cerr << "Usage: " << argv[0]
+                  << " --commrat-inspect <outfile> <module_class> <binary>\n";
+        return 1;
+    }
+
+    try {
+        write_module_inspect<ModuleType>(argv[3], argv[4], argv[2]);
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "ERROR: Module inspection failed: " << error.what() << '\n';
+        return 1;
+    }
+}
+
+} // namespace commrat
+
+#define COMMRAT_MODULE_MAIN(ModuleType) \
+    int main(int argc, char** argv) { \
+        return commrat::descriptor_inspector_main<ModuleType>(argc, argv); \
+    }
+
+#else
+
+#include <commrat/commrat.hpp>
 #include <commrat/module/module_config.hpp>
 #include <corerat/platform/threading.hpp>
 #include <rfl.hpp>
@@ -130,17 +164,6 @@ int module_main(const ModuleConfig& config) {
  */
 template<typename ModuleType>
 int module_main(int argc, char** argv) {
-    // --commrat-inspect <outfile> <module_class> <binary> — write descriptor and exit.
-    if (argc == 5 && std::string_view(argv[1]) == "--commrat-inspect") {
-        try {
-            commrat::write_module_inspect<ModuleType>(argv[3], argv[4], argv[2]);
-            return 0;
-        } catch (const std::exception& error) {
-            std::cerr << "ERROR: Module inspection failed: " << error.what() << '\n';
-            return 1;
-        }
-    }
-
     try {
         ModuleConfig config;
         
@@ -195,3 +218,5 @@ int module_main(int argc, char** argv) {
     int main(int argc, char** argv) { \
         return commrat::module_main<ModuleType>(argc, argv); \
     }
+
+#endif

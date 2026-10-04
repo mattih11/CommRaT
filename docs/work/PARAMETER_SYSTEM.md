@@ -127,7 +127,7 @@ auto set_reply = send_command<SetParamsReply>(module_address, set_cmd);
 ```json
 {"params_defaults": {"gain": 1.0, "filter_window": 5, "device": "/dev/i2c-1"}}
 ```
-Generated automatically by `--commrat-inspect` POST_BUILD step.
+Generated automatically by the private build-only descriptor inspector.
 
 **4. Type safety**
 

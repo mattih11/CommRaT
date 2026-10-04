@@ -121,7 +121,7 @@ class Module2
             typename ExtractParams<Tail...>::type>;
     };
 public:
-    /// Compile-time I/O topology — used by write_module_inspect() for --commrat-inspect.
+    /// Compile-time I/O topology used by the build-only descriptor inspector.
     using IOBuilder = BuildIOTuple<Registry, IOSpecs...>;
 
     /// Message registry used to resolve output-specific command associations.

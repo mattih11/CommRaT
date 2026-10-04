@@ -11,7 +11,7 @@ endforeach()
 file(REMOVE "${COMMRAT_DESCRIPTOR}" "${COMMRAT_DESCRIPTOR}.tmp")
 
 execute_process(
-    COMMAND "${COMMRAT_INSPECT_EXECUTABLE}"
+    COMMAND ${COMMRAT_INSPECT_EMULATOR} "${COMMRAT_INSPECT_EXECUTABLE}"
         --commrat-inspect
         "${COMMRAT_DESCRIPTOR}"
         "${COMMRAT_MODULE_CLASS}"

@@ -174,7 +174,7 @@ LifecycleEndpointDescriptor lifecycle_endpoint() {
 } // namespace detail
 
 /// Write the full ModuleDescriptor JSON for a module type.
-/// Invoked by --commrat-inspect in module_main; no ModuleType instance is constructed.
+/// Invoked by the build-only descriptor inspector; no ModuleType instance is constructed.
 template<typename ModuleType>
 void write_module_inspect(
     const std::string& module_class,

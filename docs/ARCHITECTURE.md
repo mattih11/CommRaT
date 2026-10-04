@@ -487,7 +487,7 @@ Compile-time validation via `static_assert` and concepts preferred over runtime 
 
 ### commrat_module() CMake macro
 
-Each module binary is declared with `commrat_module()` instead of `add_executable()`. After linking a native module, CMake runs `--commrat-inspect` and atomically publishes a complete `<ModuleClass>.module.json` beside the binary. A failed inspector, missing output, or invalid descriptor fails the module build and removes stale output.
+Each module binary is declared with `commrat_module()` instead of `add_executable()`. CMake compiles a private metadata inspector from the same module source and uses it to atomically publish a complete `<ModuleClass>.module.json` beside the runtime binary. The inspector is not installed, and descriptor serialization is not compiled into the runtime binary. A failed inspector, missing output, or invalid descriptor fails the module build and removes stale output.
 
 ```cmake
 # CMakeLists.txt
@@ -509,7 +509,7 @@ Generated file (`MySensorModule.module.json`):
 }
 ```
 
-EVL cross-builds initially emit a minimal descriptor because their binaries cannot run on the host. The `evl-descriptors` target replaces it with a complete descriptor by inspecting inside QEMU.
+Same-architecture EVL SDK builds run the metadata-only inspector on the host without loading `libevl`. Cross-architecture builds require `CMAKE_CROSSCOMPILING_EMULATOR`.
 
 ### ProcessLauncher
 

@@ -196,12 +196,12 @@ wrappers. See
 - Current `*.module.json` files contain the complete module interface: class, binary,
   outputs, inputs, synchronized inputs, execution mode, period, output-associated
   commands, and parameter defaults
-- Native generation is atomic and fails the module build on inspection errors;
-  EVL cross-build placeholders are completed by inspection inside QEMU
+- Generation uses a private metadata-only executable, is atomic, and fails the
+  module build on inspection errors without adding inspection code to runtime binaries
 - Goal: additionally embed the full message layout and ID schema, making
   `*.module.json` the single source of truth for module interfaces, types, and IDs
 - Design: extend `ModuleDescriptor` with an optional full message schema, populate it
-  through the existing `--commrat-inspect` path, and let `ProcessLauncher` verify
+  through the build-only inspector, and let `ProcessLauncher` verify
   message ID consistency before spawning
 - Status: Design phase
 - Priority: Low

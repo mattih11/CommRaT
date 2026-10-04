@@ -107,6 +107,12 @@ target_link_libraries(test_module_descriptor PRIVATE commrat)
 add_test(NAME test_module_descriptor
     COMMAND test_module_descriptor
         "${CMAKE_CURRENT_BINARY_DIR}/descriptor_test::DescriptorModule.module.json")
+add_test(NAME test_runtime_descriptor_separation
+    COMMAND ${CMAKE_COMMAND}
+        "-DRUNTIME=$<TARGET_FILE:descriptor_test_module>"
+        "-DNM=${CMAKE_NM}"
+        "-DTEST_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/runtime-inspection.module.json"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_descriptor_separation.cmake")
 
     add_executable(test_process_launcher_validation test_process_launcher_validation.cpp)
     target_link_libraries(test_process_launcher_validation PRIVATE commrat)
