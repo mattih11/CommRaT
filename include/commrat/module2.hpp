@@ -156,6 +156,7 @@ private:
         using IOService::initialize_outputs;
         using IOService::initialize_inputs;
        using IOService::subscribe_inputs;
+        using IOService::ensure_subscribed;
         using IOService::unsubscribe_inputs;
         // Alias to IOBuilder::Meta for convenience
         using Meta = typename IOBuilder::Meta;
@@ -1073,6 +1074,11 @@ private:
             // Step 1: Fetch input data (if input-driven, delegates to IOService)
             // Skip process() if primary input had no new data (poll timeout)
             if constexpr (IO::Meta::is_input_driven) {
+                if (!this->ensure_subscribed(
+                        std::make_index_sequence<IO::Meta::num_inputs>{})) {
+                    Time::sleep(Milliseconds(10));
+                    continue;
+                }
                 bool got_data = this->fetch_inputs(std::make_index_sequence<IO::Meta::num_inputs>{});
                 if (!got_data) {
                     RTLOG_DEBUG(logger_) << "[data_loop] input poll timeout, skipping";
