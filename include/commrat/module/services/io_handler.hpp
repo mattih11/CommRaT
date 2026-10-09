@@ -418,7 +418,8 @@ protected:
                 .message_slots = 10,  // Data stream buffer
                 .max_message_size = get_data_mailbox_size<DataType>(),
                 .send_priority = 50,
-                .realtime = true
+                .realtime = true,
+                .cross_process = true
             };
             
             // Initialize ContinuousInput with DATA mailbox

@@ -158,7 +158,8 @@ public:
             .message_slots = 10,  // Commands are infrequent
             .max_message_size = CmdMailbox::max_message_size,
             .send_priority = 50,
-            .realtime = true
+            .realtime = true,
+            .cross_process = true
         };
         
         cmd_mailbox_.emplace(cmd_config);
@@ -175,7 +176,8 @@ public:
             .message_slots = 50,  // May send to multiple subscribers
             .max_message_size = PublishMailbox::max_message_size,
             .send_priority = 50,
-            .realtime = true
+            .realtime = true,
+            .cross_process = true
         };
         
         publish_mailbox_.emplace(publish_config);

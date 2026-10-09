@@ -740,7 +740,8 @@ private:
             .message_slots = config_.cmd_message_slots.value(),  // Extract from rfl::DefaultVal
             .max_message_size = Registry::max_reply_message_size,
             .send_priority = static_cast<uint8_t>(config_.priority),
-            .realtime = config_.realtime
+            .realtime = config_.realtime,
+            .cross_process = true
         };
         
         work_mailbox_.emplace(work_config);
@@ -769,7 +770,8 @@ private:
             .message_slots = config_.cmd_message_slots.value(),
             .max_message_size = LifecycleMailbox::max_message_size,
             .send_priority = static_cast<uint8_t>(config_.priority),
-            .realtime = config_.realtime
+            .realtime = config_.realtime,
+            .cross_process = true
         };
         lifecycle_mailbox_.emplace(lifecycle_config);
     }
