@@ -1,6 +1,10 @@
 # Tests use assert() for checks - ensure it is never compiled out regardless of build type.
 add_compile_options(-UNDEBUG)
 
+add_executable(test_periodic_deadline test_periodic_deadline.cpp)
+target_link_libraries(test_periodic_deadline PRIVATE commrat)
+add_test(NAME test_periodic_deadline COMMAND test_periodic_deadline)
+
 add_executable(test_params test_params.cpp)
 target_link_libraries(test_params PRIVATE commrat)
 add_test(NAME test_params COMMAND test_params)

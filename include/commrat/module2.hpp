@@ -29,6 +29,7 @@
 #include "commrat/module/io/output_infrastructure.hpp"
 #include "commrat/module/module_config.hpp"
 #include "commrat/module/helpers/address_helpers.hpp"
+#include "commrat/module/helpers/periodic_deadline.hpp"
 #include "commrat/module/params.hpp"
 #include <sertial/containers/reflectors.hpp>
 #include <rfl/json.hpp>
@@ -1056,21 +1057,24 @@ private:
      * 
      * Three execution modes:
      * - Input-driven: Block on primary input's poll_data()
-     * - Timer-driven: Sleep for period between iterations
+     * - Timer-driven: Sleep until the next absolute period deadline
      * - Loop-driven: Continuous loop (max throughput)
      */
     void data_loop() {
         Timestamp loop_start = 0;
+        detail::PeriodicDeadline periodic_deadline;
         
         while (!should_stop_.load(std::memory_order_acquire)) {
             service_lifecycle_transition();
             if (lifecycle_state_.load(std::memory_order_acquire) != LifecycleState::Enabled) {
+                periodic_deadline.reset();
                 Time::sleep(Milliseconds(10));
                 continue;
             }
 
             if constexpr (IO::Meta::is_timer_driven) {
                 loop_start = Time::now();
+                periodic_deadline.start(loop_start);
             }
             
             // Step 1: Fetch input data (if input-driven, delegates to IOService)
@@ -1106,18 +1110,20 @@ private:
             // Step 3: Publish outputs (delegates to IOService)
             publish_outputs(std::make_index_sequence<IO::Meta::num_outputs>{});
             
-            // Step 4: Sleep if timer-driven (period - processing_time);
+            // Step 4: Sleep to an absolute deadline if timer-driven;
             // yield if loop-driven so other threads (including stop() caller) get CPU.
             if constexpr (IO::Meta::is_timer_driven) {
                 Timestamp now = Time::now();
                 Duration elapsed = Duration::nanoseconds(static_cast<int64_t>(now - loop_start));
                 auto period = IO::Meta::period;
-                if (elapsed < period) {
-                    Time::sleep(period - elapsed);
-                } else {
+                const Timestamp deadline = periodic_deadline.advance(now, period);
+                if (elapsed >= period) {
                     RTLOG_WARN(logger_) << "[data_loop] period overrun: elapsed="
                                        << elapsed.count_ns() / 1'000'000
                                        << "ms period=" << period.count_ns() / 1'000'000 << "ms";
+                }
+                if (deadline > now) {
+                    Time::sleep_until(deadline);
                 }
             } else if constexpr (IO::Meta::is_loop_driven) {
                 // Loop-driven: no sleep, but yield so other threads can run.

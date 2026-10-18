@@ -171,6 +171,12 @@ I/O specs defined in `include/commrat/module/io/io_spec.hpp`:
 - `Input<T>` -- primary continuous input (at most one, drives execution)
 - `SyncedInput<T>` -- secondary pull-based input (timestamp-synchronized)
 - `Period<Duration>` -- timer-driven execution (mutually exclusive with `Input<T>`)
+  uses absolute CoreRaT `Time::sleep_until()` deadlines. Ordinary wake-up
+  lateness is compensated on the next period instead of accumulating clock
+  drift. Catch-up is bounded to one period after a long stall, processing
+  overruns are still logged, and the deadline is re-armed after an operational
+  pause. This uses the selected STD or EVL clock; it does not synchronize a
+  periodic source with an external hardware clock.
 
 ### Execution Modes (Auto-Inferred)
 

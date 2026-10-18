@@ -4,8 +4,8 @@
 
 **CommRaT** (Communication Runtime) is a C++20 real-time messaging framework built on TiMS (TIMS Interprocess Message System). Provides type-safe, compile-time message passing with zero runtime overhead.
 
-**Current Status**: Build modernized, warning-free, CI pipeline in place. CMakePresets and Dev Container configured. EVL platform backend headers exist; implementation pending.  
-**Next**: EVL backend implementation (`evl/threading_impl.hpp`, `evl/timestamp_impl.hpp`), input buffering, command ergonomics
+**Current Status**: Header-only module and launcher layer over CoreRaT, with working STD/TCP and EVL IPC backends. Platform threads, clocks, synchronization, and IPC implementations belong to CoreRaT.
+**Next**: Reproducible SDK/runtime validation, bounded input buffering, lifecycle recovery policy, and command ergonomics.
 
 ### Core Philosophy
 - **Compile-time everything**: Message IDs, type safety computed at compile time
@@ -113,8 +113,9 @@ constexpr / static_assert     // Compile-time
 std::thread, std::mutex, std::chrono::steady_clock::now()
 
 // ALWAYS:
-#include <commrat/threading.hpp>
-#include <commrat/timestamp.hpp>
+#include <corerat/platform/threading.hpp>
+#include <corerat/platform/timestamp.hpp>
+// Use corerat:: names directly, or CommRaT aliases exposed by module2.hpp.
 Thread, Mutex, SharedMutex, Lock, SharedLock
 Timestamp ts = Time::now();
 Duration timeout = Milliseconds(100);
@@ -123,20 +124,21 @@ Time::sleep(Milliseconds(10));
 
 ### Platform Abstraction Layer (libevl / Xenomai 4)
 
-CommRaT supports two platform backends selected at compile time via the `COMMRAT_PLATFORM` CMake cache variable:
+CommRaT inherits the platform and IPC backend from the selected CoreRaT package:
 
 ```bash
 cmake --preset default    # STD platform — builds and runs natively on any Linux host
-cmake --preset evl        # EVL compile-check — requires libevl (in ratos-dev-image)
-cmake --preset evl-cross  # EVL cross-compile for QEMU — requires RaTOS SDK sourced
+cmake --preset evl        # Native EVL build in a RaTOS guest
+cmake --preset evl-cross  # Cross-build against EVL_SDK_DIR
 ```
 
-- `COMMRAT_PLATFORM=STD` (default): Standard Linux (`std::thread`, `std::mutex`, `std::chrono`)
-- `COMMRAT_PLATFORM=EVL`: Hard real-time via libevl/Xenomai 4 (out-of-band scheduling)
+- STD CoreRaT: standard Linux threads and clocks, with the TCP IPC backend.
+- EVL CoreRaT: platform-managed EVL-attached threads, clocks, synchronization, and EVL IPC.
 
-The CMake option propagates `COMMRAT_PLATFORM_STD` or `COMMRAT_PLATFORM_EVL` as compile definitions and auto-discovers `libevl` + `evl/thread.h` when EVL is selected.
-
-> **EVL backend status**: Headers exist in `include/commrat/platform/evl/` but contain `#error` stubs. `-DCOMMRAT_PLATFORM=EVL` does not yet compile. Tracked via `build-evl-compile` CI job (`continue-on-error: true`).
+CoreRaT propagates `CORERAT_PLATFORM_STD` or `CORERAT_PLATFORM_EVL` and the
+matching IPC definitions through its imported CMake targets. Do not revive
+CommRaT-local backend implementations or select a platform with obsolete
+`COMMRAT_PLATFORM` flags.
 
 ### EVL Cross-Compilation with the RaTOS SDK
 
@@ -146,30 +148,25 @@ The recommended iterative development loop for EVL work is:
 cmake --preset evl-cross → cmake --build → evl-dev.sh --cross --run <binary>
 ```
 
-**RaTOS SDK** is a Yocto-generated cross-compilation toolchain targeting the same
+**RaTOS SDK** is an ISAR cross-compilation toolchain targeting the same
 Debian Trixie amd64 sysroot that runs inside QEMU. It includes:
 
 | Package | Provides |
 |---|---|
 | `linux-headers-xenomai-4` | EVL kernel headers (`<evl/thread.h>` etc.) |
 | `libevl` | `libevl.so` / `libevl.a` + headers |
-| `rack-dev`, `libreflect-cpp-dev`, SeRTial | All CommRaT dependencies |
+| CoreRaT, `libreflect-cpp-dev`, SeRTial | CommRaT dependencies |
 
 **SDK setup (one-time):**
 ```bash
-# Download ratos-dev-sdk-container-amd64.sh from a CommRaT or RaTOS GitHub release
-chmod +x ratos-dev-sdk-container-amd64.sh
-./ratos-dev-sdk-container-amd64.sh          # installs to /opt/ratos-sdk by default
-source /opt/ratos-sdk/environment-setup-*   # sets CC, CXX, OECORE_NATIVE_SYSROOT, etc.
-# Or set EVL_SDK_DIR in .commrat.env.local to change the prefix
+# Extract a RaTOS ISAR SDK archive, or let scripts/evl-dev.sh acquire it.
+export EVL_SDK_DIR=/absolute/path/to/extracted/sdk
+# Machine-specific script defaults belong in .commrat.env.local.
 ```
 
 **Cross-compile CommRaT:**
 ```bash
-# Source the SDK first (sets OECORE_NATIVE_SYSROOT used by the preset)
-source /opt/ratos-sdk/environment-setup-*
-
-# Configure and build (evl-cross preset uses OEToolchainConfig.cmake automatically)
+# Export EVL_SDK_DIR first; evl-cross uses cmake/isar-sdk-toolchain.cmake.
 cmake --preset evl-cross
 cmake --build --preset evl-cross --parallel $(nproc)
 # Output: build/evl-cross/
@@ -177,8 +174,9 @@ cmake --build --preset evl-cross --parallel $(nproc)
 
 **The `evl-cross` CMake preset** (`CMakePresets.json`) sets:
 ```cmake
-COMMRAT_PLATFORM = EVL
-CMAKE_TOOLCHAIN_FILE = $OECORE_NATIVE_SYSROOT/usr/share/cmake/OEToolchainConfig.cmake
+CMAKE_TOOLCHAIN_FILE = ${sourceDir}/cmake/isar-sdk-toolchain.cmake
+COMMRAT_BUILD_TESTS = ON
+COMMRAT_BUILD_EXAMPLES = ON
 ```
 
 **Deploy and run in QEMU with evl-dev.sh:**
@@ -199,8 +197,10 @@ scripts/evl-dev.sh --run /root/commrat/examples/example_commands
 scripts/evl-dev.sh --build --test
 ```
 
-**CI cross-compilation** (when EVL backends are implemented):
-The `test-evl-runtime` CI job currently builds inside the QEMU guest (STD platform, no SDK required). Once the EVL backends are done, change it to cross-compile inside the `ratos-dev-image` container (which has the SDK pre-installed) and deploy only binaries to the guest.
+**Validation:** cross-build against the pinned SDK and run the resulting tests
+under an EVL kernel. A host build or compile-only check does not validate OOB
+execution. Consult the current workflow rather than assuming historic CI job
+names or failures still apply.
 
 **EVL Execution Model:**
 - EVL threads are regular POSIX threads that attach to the EVL core via `evl_attach_self()`
@@ -224,9 +224,9 @@ The `test-evl-runtime` CI job currently builds inside the QEMU guest (STD platfo
 **When implementing platform code:**
 - Detailed EVL API reference: `docs/work/EVL_API_REFERENCE.md`
 - Platform design doc: `docs/work/PLATFORM_ABSTRACTION_LAYER.md`
-- Header structure: `include/commrat/platform/{std,evl}/` backends selected via `platform.hpp`
+- Header structure: CoreRaT's `include/corerat/platform/{std,evl}/`, selected by its imported target
 - EVL health monitoring: Enable `EVL_T_WOSS` to detect accidental in-band switches in RT loops
-- Periodic loops: Use `evl_sleep_until()` with absolute time for jitter-free timing
+- Periodic loops: Use platform `Time::sleep_until()` with absolute deadlines; compensate ordinary wake-up lateness and bound catch-up after stalls. Do not claim zero jitter or device-clock synchronization.
 
 ### Message Definitions
 
@@ -651,7 +651,7 @@ Result: Each subscriber receives ONLY their subscribed message type!
 CommRaT/
 ├── .commrat.env                           # Non-secret config defaults (RATOS_RELEASE_TAG pin, QEMU settings, EVL_SDK_DIR)
 ├── CMakePresets.json                      # Build presets: default, debug, evl, evl-cross
-├── CMakeLists.txt                         # Root build (COMMRAT_PLATFORM option, find_package, container targets)
+├── CMakeLists.txt                         # Root build (find_package(CoreRaT), examples, tests, install)
 ├── .devcontainer/
 │   └── devcontainer.json                  # VS Code Dev Container (ratos-dev-image, cmake-tools)
 ├── include/commrat/
@@ -671,12 +671,7 @@ CommRaT/
 │   │   └── system/
 │   │       ├── subscription_messages.hpp  # Subscribe/Unsubscribe protocol
 │   │       └── data_request_messages.hpp  # GetData/GetNextData protocol
-│   └── platform/
-│       ├── platform.hpp                   # Backend selection macros
-│       ├── threading.hpp                  # Thread, Mutex abstractions
-│       ├── timestamp.hpp                  # Time, Duration, Timestamp
-│       ├── std/                           # std:: backend (fully operational)
-│       └── evl/                           # EVL backend (headers present, #error stubs)
+│   └── launcher/                          # Application descriptions, descriptors, process launcher
 ├── examples/
 │   ├── CMakeLists.txt                     # Example targets
 │   └── *.cpp                              # Working examples
@@ -699,15 +694,14 @@ CommRaT/
 │   ├── work/                              # Active design docs
 │   └── archive/                           # Archived docs
 └── src/
-    └── tims_wrapper.cpp                   # TiMS IPC wrapper
+    └── commrat_main.cpp                   # CLI; IPC implementation belongs to CoreRaT
 ```
 
 **External dependencies** (installed system-wide, not submodules):
-- **RACK** — TiMS IPC library (`find_package(RACK REQUIRED)` → `RACK::rack`) — will be replaced by CoreRaT
+- **CoreRaT** — platform abstraction, IPC backends, and foundational messaging; selected with `find_package(CoreRaT REQUIRED)`
 - **SeRTial** — zero-allocation serialization (`find_package(SeRTial REQUIRED)` → `SeRTial::sertial`)
 - **reflectcpp** — reflection, found transitively via SeRTial
-- **libevl** — Xenomai 4 RT primitives (only needed when `COMMRAT_PLATFORM=EVL`) — will move to CoreRaT
-- **CoreRaT** *(planned)* — shared foundation library: platform abstraction, IPC (TiMS + EVL-native), messaging system. Will replace `platform/`, `messaging/`, `mailbox/`, and `tims_wrapper.cpp` in CommRaT. See `docs/work/CORERAT_DESIGN.md`.
+- **libevl** — Xenomai 4 RT primitives, linked through CoreRaT's EVL target
 
 ## Documentation Strategy
 
@@ -924,39 +918,40 @@ void process(const T& input) {
 - **Subscription protocol integration** (Subscribe/Unsubscribe/GetData dispatch wired in command_loop_impl, end-to-end proven)
 - **User command reply mechanism** (on_command reply sent via CMD mailbox, matching system command pattern)
 - **Dead code removal** (legacy subscription.hpp removed, RT violations eliminated)
-- **Modern CMake build system** (find_package for RACK/SeRTial/Threads, examples/test subdirectories, COMMRAT_BUILD_EXAMPLES/TESTS options, warning-free)
-- **COMMRAT_PLATFORM CMake option** (`STD`/`EVL`, auto-discovers libevl, propagates compile definitions, CMake-validated)
-- **CI pipeline** (3-job GitHub Actions: `build-std` in container, `build-evl-compile` with continue-on-error, `test-evl-runtime` via `dawidd6/action-download-artifact` + QEMU; public image, only `RATOS_RELEASE_TOKEN` secret needed)
+- **Modern CMake build system** (CoreRaT imported targets, examples/test subdirectories, COMMRAT_BUILD_EXAMPLES/TESTS options)
+- **CoreRaT platform integration** (STD and EVL selected by the installed dependency package)
+- **CI pipeline** (see the current workflows for authoritative jobs and required runtime gates)
 - **CMakePresets** (`default`/`debug`/`evl` presets; used by CI, local builds, VS Code cmake-tools, CLion)
 - **Dev Container** (`.devcontainer/devcontainer.json` — zero-setup IDE using ratos-dev-image with all deps)
 - **`.commrat.env` config** (single source of truth for non-secret values; `.commrat.env.local` for machine overrides)
-- **Process launcher system**: `commrat_module()` CMake macro wraps `add_executable` and atomically emits complete `<ClassName>.module.json` descriptors through native post-build inspection, failing the module build on inspection errors. EVL cross-builds use explicit placeholders until QEMU inspection. `ProcessLauncher` discovers descriptors from `dirname(argv[0])`, fork/execs each module binary with a temp `ModuleConfig` JSON, SIGTERM on stop with SIGKILL fallback. `MyApp::Launcher` (in-process variant) forward-declared in `commrat.hpp`; requires `#include <commrat/launcher/launcher.hpp>`. Both read `AppDescription` JSON with `modules[].module_class`, `outputs`, `inputs`, `period_ms`. `--duration-ms N` for timed exit (CTest). See `include/commrat/launcher/` and `docs/work/LAUNCHER_DESIGN.md`.
+- **Process launcher system**: `commrat_module()` generates complete `<ClassName>.module.json` descriptors with separate build-only inspectors for native and cross builds; never execute target runtime binaries on the host or add inspection logic to them. Inspection failures fail the build. `ProcessLauncher` discovers sibling descriptors using the executable's resolved location, fork/execs modules with temporary `ModuleConfig` JSON, and stops them with SIGTERM then SIGKILL fallback. Use `--duration-ms N` for bounded graph tests. See `include/commrat/launcher/`.
 - **Typed remote module handles**: `Remote<T>` command/control-only dependencies, `input<N/T>()` and `remote<N/T>()` accessors, type-checked command and lifecycle RPCs, serialized shared WORK transactions through `RpcClient`, generated numeric endpoint metadata, and ProcessLauncher-resolved lifecycle routing for secondary outputs.
 
 ### In Progress
 - **System lifecycle commands**: module-level on/off/status endpoint, deferred
     replies, state-gated processing, and lifecycle hooks are implemented. Reset,
     retry policy, descriptor metadata, and GUI controls remain pending.
-- EVL runtime tests passing (3 failing: test_3input_fusion, test_address_collisions, test_timestamp_logic — root cause is tims_recvmsg_timed() demoting EVL threads in-band; fixed by CoreRaT EVL IPC backend)
+- EVL runtime validation against the current pinned SDK; do not treat historic test failures as current results
 - Input buffering strategies
 - Command ergonomics improvements
 
 ### Planned
-- **CoreRaT migration** (phased; see `docs/work/CORERAT_DESIGN.md`):
-  - Phase 1: extract platform + messaging to CoreRaT; delete `include/commrat/platform/`, `include/commrat/messaging/`, `include/commrat/messages.hpp`
-  - Phase 2: move IPC (TiMS backend) to CoreRaT; delete `tims_wrapper.cpp`, `mailbox/mailbox.hpp`, `mailbox/typed_mailbox.hpp`
-  - Phase 3: EVL IPC backend in CoreRaT (OOB-safe ring buffer); removes in-band demotion on EVL guest
-  - After Phase 3: CommRaT CMakeLists replaces ~60 lines of platform/RACK/EVL detection with `find_package(CoreRaT REQUIRED)`
-- Parameter system (typed params with get/set/list/save)
+- Lifecycle recovery and bounded input-buffering policy
 - ROS 2 adapter (separate repository)
 - Performance profiling tools
 
 ### CoreRaT Agent Boundary
-CoreRaT is a **separate project with its own agent**. Do not re-implement anything that has moved to CoreRaT. When CommRaT's cleanup phases are executed:
-- Delete the files listed in `docs/work/CORERAT_DESIGN.md` Section 10
-- Replace removed CMake logic with `find_package(CoreRaT REQUIRED)` + `target_link_libraries(commrat PUBLIC CoreRaT::corerat)`
-- Update includes from `commrat/platform/` → `corerat/platform/` etc.
-- Do not modify CoreRaT source — file issues or PRs against the CoreRaT repo instead
+CoreRaT is a separate project. Do not re-implement platform or IPC code in
+CommRaT, or delete current CommRaT messaging/mailbox wrappers based on historic
+migration plans. Coordinate changes to CoreRaT explicitly and validate both
+projects against matching installed packages.
+
+## Learnings
+
+- Run `corerat-router-tcp` for STD integration tests and `corerat-router-evl` for EVL routing; the legacy `tims_router_tcp` can accept a connection but reject the current mailbox protocol. Verify existing services and avoid starting a competing router on port 2000.
+- SDK headers, libraries, CMake exports, and descriptor-inspection macros must match. Use a private matching installation for development rather than overwriting shared packages; local header overlays do not qualify a release SDK.
+- Use platform-managed threads and `Time` for timing probes. EVL absolute waits require thread attachment, and successful standard-thread playback on an EVL kernel is not an OOB producer test.
+- Keep assert-based tests enabled in Release builds. Check module processes and health counters after launch; launcher exit status alone does not establish that all children ran successfully.
 
 ## Questions to Ask Yourself
 
